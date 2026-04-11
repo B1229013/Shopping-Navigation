@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node .agents/skills/impeccable/scripts/cleanup-deprecated.mjs)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(python3 skills/ui-ux-pro-max/scripts/search.py \"shopping assistant tool minimalist cinematic interactive\" --design-system -p \"Shopping Assistant\")",
+      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"shopping assistant tool minimalist cinematic interactive\" --design-system -p \"Shopping Assistant\")",
+      "Bash(where python3:*)",
+      "Bash(where python:*)",
+      "Bash(where py:*)",
+      "Bash(./gradlew assembleDebug)",
+      "Read(//c/Program Files/Android/Android Studio/jbr/**)",
+      "Read(//c/Program Files/**)",
+      "Bash(JAVA_HOME=\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\" ./gradlew assembleDebug)"
+    ]
+  }
+}

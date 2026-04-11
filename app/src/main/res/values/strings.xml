@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">shopping</string>
+    <string name="gemini_api_key">AIzaSyBloHwr6DRSbZOUba2YI8w9LqOME89wBEA</string>
+    <string name="groq_api_key">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</string>
+</resources>

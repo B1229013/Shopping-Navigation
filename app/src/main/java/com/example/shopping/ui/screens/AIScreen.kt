@@ -41,11 +41,10 @@ fun AIScreen() {
         scrollState.animateScrollTo(scrollState.maxValue)
     }
 
-    // Send button press animation
     var isSendPressed by remember { mutableStateOf(false) }
     val sendScale by animateFloatAsState(
-        targetValue = if (isSendPressed) 0.9f else 1f,
-        animationSpec = tween(100),
+        targetValue = if (isSendPressed) 0.88f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "send_scale"
     )
 
@@ -88,7 +87,7 @@ fun AIScreen() {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(18.dp))
                                 .background(SurfaceBase)
                                 .padding(18.dp)
                         ) {
@@ -196,9 +195,9 @@ fun ChatBubble(text: String, isUser: Boolean) {
     val textColor = if (isUser) Noir else TextPrimary
     val alignment = if (isUser) Alignment.End else Alignment.Start
     val shape = if (isUser) {
-        RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)
+        RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
     } else {
-        RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp)
+        RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
     }
 
     Column(
@@ -229,7 +228,7 @@ fun TypingIndicator() {
 
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(18.dp))
             .background(SurfaceBase)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -237,10 +236,10 @@ fun TypingIndicator() {
     ) {
         repeat(3) { i ->
             val alpha by infiniteTransition.animateFloat(
-                initialValue = 0.3f,
+                initialValue = 0.25f,
                 targetValue = 1f,
                 animationSpec = infiniteRepeatable(
-                    animation = tween(500),
+                    animation = tween(600),
                     repeatMode = RepeatMode.Reverse,
                     initialStartOffset = StartOffset(i * 150)
                 ),
@@ -250,7 +249,7 @@ fun TypingIndicator() {
                 modifier = Modifier
                     .size(7.dp)
                     .graphicsLayer { this.alpha = alpha }
-                    .background(TextTertiary, CircleShape)
+                    .background(Gold.copy(alpha = 0.7f), CircleShape)
             )
         }
     }

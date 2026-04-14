@@ -14,7 +14,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -26,8 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.shopping.ui.theme.*
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
+import com.google.firebase.auth.ktx.auth
 import kotlinx.coroutines.delay
 
 @Composable
@@ -51,7 +53,6 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         }
     }
 
-    // Animate each element
     val alphas = visibilities.map { vis ->
         animateFloatAsState(
             targetValue = if (vis.value) 1f else 0f,
@@ -67,7 +68,6 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         )
     }
 
-    // Button press feedback
     var isPressed by remember { mutableStateOf(false) }
     val buttonScale by animateFloatAsState(
         targetValue = if (isPressed) 0.97f else 1f,
@@ -80,19 +80,23 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             .fillMaxSize()
             .background(Noir)
     ) {
-        // Subtle ambient glow at top
+        // Ambient glow — green tinted for cinematic feel
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(320.dp)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Gold.copy(alpha = 0.03f),
-                            Color.Transparent
+                .height(350.dp)
+                .drawBehind {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Gold.copy(alpha = 0.04f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width / 2, 0f),
+                            radius = size.height
                         )
                     )
-                )
+                }
         )
 
         Column(
@@ -137,7 +141,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                         Icon(Icons.Default.Email, contentDescription = null, tint = TextTertiary)
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Gold,
                         unfocusedBorderColor = Border,
@@ -178,7 +182,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     },
                     visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Gold,
                         unfocusedBorderColor = Border,
@@ -249,9 +253,9 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(54.dp)
+                        .height(56.dp)
                         .scale(buttonScale),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Gold,
                         contentColor = Noir

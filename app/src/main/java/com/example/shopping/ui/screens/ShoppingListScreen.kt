@@ -76,7 +76,7 @@ fun ShoppingListScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(18.dp))
                             .background(SurfaceBase)
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -90,7 +90,7 @@ fun ShoppingListScreen(
                                 onValueChange = { newItemName = it },
                                 placeholder = { Text("商品名稱", color = TextTertiary) },
                                 modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 colors = cinemaTextFieldColors(),
                                 singleLine = true
                             )
@@ -99,7 +99,7 @@ fun ShoppingListScreen(
                                 onValueChange = { newItemPrice = it.filter { c -> c.isDigit() } },
                                 placeholder = { Text("$ 價格", color = TextTertiary) },
                                 modifier = Modifier.width(90.dp),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 colors = cinemaTextFieldColors(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true
@@ -110,7 +110,6 @@ fun ShoppingListScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            // Quantity controls
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("數量", style = MaterialTheme.typography.bodySmall, color = TextTertiary)
                                 Spacer(Modifier.width(8.dp))
@@ -138,7 +137,6 @@ fun ShoppingListScreen(
                                     Icon(Icons.Default.Add, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
                                 }
                             }
-                            // Add button
                             Button(
                                 onClick = {
                                     if (newItemName.isNotBlank()) {
@@ -159,8 +157,8 @@ fun ShoppingListScreen(
                                     containerColor = Gold,
                                     contentColor = Noir
                                 ),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp)
                             ) {
                                 Text("加入", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                             }
@@ -176,7 +174,7 @@ fun ShoppingListScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(18.dp))
                             .background(SurfaceBase)
                             .padding(14.dp)
                     ) {
@@ -192,9 +190,10 @@ fun ShoppingListScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Gold,
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Gold.copy(alpha = 0.08f))
                                         .clickable { selectedDateText = "" }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
                                 )
                             }
                         }
@@ -216,7 +215,7 @@ fun ShoppingListScreen(
                             trailingIcon = {
                                 Icon(Icons.Default.CalendarToday, null, modifier = Modifier.size(18.dp), tint = Gold)
                             },
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             colors = cinemaTextFieldColors(),
                             textStyle = MaterialTheme.typography.bodyMedium
                         )
@@ -280,11 +279,10 @@ fun ShoppingListScreen(
                 StaggeredItem(index = index + 3, delayPerItem = 35L) {
                     Box(modifier = Modifier.padding(horizontal = 20.dp)) {
                         if (editingItemId == item.id) {
-                            // Edit mode
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
+                                    .clip(RoundedCornerShape(18.dp))
                                     .background(SurfaceBright)
                                     .padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -295,7 +293,7 @@ fun ShoppingListScreen(
                                     label = { Text("商品名稱", color = TextTertiary) },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = cinemaTextFieldColors(),
-                                    shape = RoundedCornerShape(10.dp)
+                                    shape = RoundedCornerShape(12.dp)
                                 )
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedTextField(
@@ -305,7 +303,7 @@ fun ShoppingListScreen(
                                         modifier = Modifier.weight(1f),
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                         colors = cinemaTextFieldColors(),
-                                        shape = RoundedCornerShape(10.dp)
+                                        shape = RoundedCornerShape(12.dp)
                                     )
                                     OutlinedTextField(
                                         value = editPrice,
@@ -314,7 +312,7 @@ fun ShoppingListScreen(
                                         modifier = Modifier.weight(1f),
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                         colors = cinemaTextFieldColors(),
-                                        shape = RoundedCornerShape(10.dp)
+                                        shape = RoundedCornerShape(12.dp)
                                     )
                                 }
                                 Row(
@@ -338,7 +336,7 @@ fun ShoppingListScreen(
                                             editingItemId = null
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Noir),
-                                        shape = RoundedCornerShape(10.dp)
+                                        shape = RoundedCornerShape(12.dp)
                                     ) { Text("儲存", fontWeight = FontWeight.SemiBold) }
                                 }
                             }
@@ -374,20 +372,20 @@ fun ShoppingListScreen(
 @Composable
 fun DateChip(date: String, count: String, selected: Boolean, onClick: () -> Unit) {
     val bgColor by animateColorAsState(
-        targetValue = if (selected) Gold.copy(alpha = 0.15f) else SurfaceBright,
-        animationSpec = tween(200),
+        targetValue = if (selected) Gold.copy(alpha = 0.12f) else SurfaceBright,
+        animationSpec = tween(250),
         label = "chip_bg"
     )
     val textColor by animateColorAsState(
         targetValue = if (selected) Gold else TextSecondary,
-        animationSpec = tween(200),
+        animationSpec = tween(250),
         label = "chip_text"
     )
 
     Column(
         modifier = Modifier
             .width(64.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(bgColor)
             .clickable { onClick() }
             .padding(vertical = 8.dp, horizontal = 4.dp),
@@ -416,21 +414,21 @@ fun ShoppingItemCard(
     onDelete: () -> Unit,
     onEdit: () -> Unit
 ) {
-    // Check animation
     val checkScale by animateFloatAsState(
         targetValue = if (item.isChecked) 1f else 0f,
-        animationSpec = tween(200, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "check_scale"
     )
     val itemAlpha by animateFloatAsState(
-        targetValue = if (item.isChecked) 0.5f else 1f,
-        animationSpec = tween(200),
+        targetValue = if (item.isChecked) 0.45f else 1f,
+        animationSpec = tween(250),
         label = "item_alpha"
     )
 
     PressableSurface(
         onClick = onEdit,
-        backgroundColor = if (item.isChecked) SurfaceDim else SurfaceBase
+        backgroundColor = if (item.isChecked) SurfaceDim else SurfaceBase,
+        glowColor = if (item.isChecked) Color.Transparent else Gold.copy(alpha = 0.04f)
     ) {
         Row(
             modifier = Modifier
@@ -439,15 +437,14 @@ fun ShoppingItemCard(
                 .graphicsLayer { alpha = itemAlpha },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Custom checkbox
             Box(
                 modifier = Modifier
-                    .size(22.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(7.dp))
                     .background(if (item.isChecked) Gold else Border)
                     .then(
                         if (!item.isChecked) Modifier.padding(1.5.dp)
-                            .clip(RoundedCornerShape(5.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(SurfaceBase)
                         else Modifier
                     )

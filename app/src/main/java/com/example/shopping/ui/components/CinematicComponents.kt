@@ -10,7 +10,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -34,15 +37,15 @@ fun StaggeredItem(
     val alpha by animateFloatAsState(
         targetValue = if (visible) 1f else 0f,
         animationSpec = tween(
-            durationMillis = 400,
+            durationMillis = 450,
             easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
         ),
         label = "stagger_alpha"
     )
     val offsetY by animateFloatAsState(
-        targetValue = if (visible) 0f else 18f,
+        targetValue = if (visible) 0f else 20f,
         animationSpec = tween(
-            durationMillis = 400,
+            durationMillis = 450,
             easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
         ),
         label = "stagger_offset"
@@ -63,8 +66,8 @@ fun StaggeredItem(
     }
 }
 
-// ── Press-Feedback Surface ──────────────────────────────────
-// Scales down subtly on press like a real button — tactile and alive.
+// ── Press-Feedback Surface with Glow ───────────────────────
+// Scales down on press, lifts on hover — tactile and alive.
 
 @Composable
 fun PressableSurface(
@@ -72,23 +75,44 @@ fun PressableSurface(
     modifier: Modifier = Modifier,
     shape: RoundedCornerShape = RoundedCornerShape(16.dp),
     backgroundColor: Color = SurfaceBase,
+    glowColor: Color = Gold.copy(alpha = 0.06f),
     content: @Composable BoxScope.() -> Unit
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.97f else 1f,
         animationSpec = tween(
-            durationMillis = if (isPressed) 100 else 200,
+            durationMillis = if (isPressed) 80 else 250,
             easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
         ),
         label = "press_scale"
     )
+    val elevation by animateFloatAsState(
+        targetValue = if (isPressed) 0f else 2f,
+        animationSpec = tween(150),
+        label = "press_elevation"
+    )
 
     Box(
         modifier = modifier
-            .scale(scale)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                shadowElevation = elevation
+            }
             .clip(shape)
             .background(backgroundColor, shape)
+            .drawBehind {
+                // Subtle top-edge glow
+                drawRoundRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(glowColor, Color.Transparent),
+                        startY = 0f,
+                        endY = size.height * 0.3f
+                    ),
+                    cornerRadius = CornerRadius(16.dp.toPx())
+                )
+            }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -107,7 +131,7 @@ fun PressableSurface(
 }
 
 // ── Cinema Card ─────────────────────────────────────────────
-// A card with subtle border and no shadow — depth comes from color.
+// A card with subtle border glow — depth comes from color and light.
 
 @Composable
 fun CinemaCard(
@@ -119,17 +143,17 @@ fun CinemaCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(backgroundColor)
             .background(
                 brush = Brush.verticalGradient(
-                    colors = listOf(borderColor, Color.Transparent),
+                    colors = listOf(borderColor.copy(alpha = 0.5f), Color.Transparent),
                     startY = 0f,
-                    endY = 2f
+                    endY = 3f
                 )
             )
             .padding(1.dp)
-            .clip(RoundedCornerShape(15.dp))
+            .clip(RoundedCornerShape(19.dp))
             .background(backgroundColor)
             .padding(20.dp),
         content = content
@@ -146,7 +170,7 @@ fun FadeInScreen(
     var visible by remember { mutableStateOf(false) }
     val alpha by animateFloatAsState(
         targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(350, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
+        animationSpec = tween(400, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
         label = "screen_fade"
     )
 
@@ -166,7 +190,7 @@ fun animateIntAsState(targetValue: Int): State<Int> {
     LaunchedEffect(targetValue) {
         animatable.animateTo(
             targetValue.toFloat(),
-            animationSpec = tween(600, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f))
+            animationSpec = tween(700, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f))
         )
     }
     return derivedStateOf { animatable.value.toInt() }
@@ -186,7 +210,7 @@ fun CinemaDivider(modifier: Modifier = Modifier) {
 }
 
 // ── Shimmer Loading ─────────────────────────────────────────
-// Elegant loading indicator that pulses with gold.
+// Elegant loading indicator that pulses with green.
 
 @Composable
 fun CinemaShimmer(
@@ -195,10 +219,10 @@ fun CinemaShimmer(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
     val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.15f,
-        targetValue = 0.35f,
+        initialValue = 0.10f,
+        targetValue = 0.30f,
         animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = FastOutSlowInEasing),
+            animation = tween(900, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "shimmer_alpha"
@@ -213,8 +237,8 @@ fun CinemaShimmer(
     )
 }
 
-// ── Gold Gradient Button ────────────────────────────────────
-// A warm gradient CTA that feels premium.
+// ── Green Gradient CTA ─────────────────────────────────────
+// A fresh gradient that feels premium and alive.
 
 val GoldGradient = Brush.horizontalGradient(
     colors = listOf(GoldDim, Gold, GoldBright)

@@ -32,7 +32,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -170,7 +174,7 @@ fun MainContainer(rootNavController: NavController) {
     LaunchedEffect(Unit) { screenVisible = true }
     val screenAlpha by animateFloatAsState(
         targetValue = if (screenVisible) 1f else 0f,
-        animationSpec = tween(400, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
+        animationSpec = tween(450, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
         label = "screen_alpha"
     )
 
@@ -183,7 +187,6 @@ fun MainContainer(rootNavController: NavController) {
         Scaffold(
             containerColor = Noir,
             topBar = {
-                // Minimal top bar — just utility icons
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -205,7 +208,6 @@ fun MainContainer(rootNavController: NavController) {
                 }
             },
             bottomBar = {
-                // ── Cinematic Bottom Bar ──
                 CinemaBottomBar(
                     selectedTab = selectedTab,
                     onTabSelected = { selectedTab = it }
@@ -213,10 +215,9 @@ fun MainContainer(rootNavController: NavController) {
             }
         ) { innerPadding ->
             Box(modifier = Modifier.padding(innerPadding)) {
-                // Crossfade between tabs for smooth transitions
                 Crossfade(
                     targetState = selectedTab,
-                    animationSpec = tween(250, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
+                    animationSpec = tween(300, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
                     label = "tab_crossfade"
                 ) { tab ->
                     when (tab) {
@@ -245,20 +246,23 @@ private fun CinemaBottomBar(
     onTabSelected: (Int) -> Unit
 ) {
     Column {
-        // Top edge — subtle gold line on active region
         Spacer(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(1.dp)
-                .background(Border)
+                .height(0.5.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(Color.Transparent, Border, Color.Transparent)
+                    )
+                )
         )
 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(SurfaceDim)
+                .background(SurfaceDim.copy(alpha = 0.95f))
                 .navigationBarsPadding()
-                .padding(vertical = 8.dp),
+                .padding(vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -283,13 +287,21 @@ private fun CinemaNavItem(
 ) {
     val tint by animateColorAsState(
         targetValue = if (selected) Gold else TextTertiary,
-        animationSpec = tween(200),
+        animationSpec = tween(250),
         label = "nav_tint"
     )
     val scale by animateFloatAsState(
-        targetValue = if (selected) 1.1f else 1f,
-        animationSpec = tween(200, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
+        targetValue = if (selected) 1.12f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
         label = "nav_scale"
+    )
+    val bgAlpha by animateFloatAsState(
+        targetValue = if (selected) 0.1f else 0f,
+        animationSpec = tween(250),
+        label = "nav_bg"
     )
 
     Column(
@@ -299,7 +311,9 @@ private fun CinemaNavItem(
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() }
             ) { onClick() }
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Gold.copy(alpha = bgAlpha), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 6.dp)
     ) {
         Icon(
             icon,
@@ -309,7 +323,7 @@ private fun CinemaNavItem(
                 .size(22.dp)
                 .scale(scale)
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(3.dp))
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
@@ -319,12 +333,12 @@ private fun CinemaNavItem(
         // Active indicator dot
         AnimatedVisibility(
             visible = selected,
-            enter = scaleIn(animationSpec = tween(200)) + fadeIn(),
+            enter = scaleIn(animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeIn(),
             exit = scaleOut(animationSpec = tween(150)) + fadeOut()
         ) {
             Box(
                 modifier = Modifier
-                    .padding(top = 4.dp)
+                    .padding(top = 3.dp)
                     .size(4.dp)
                     .background(Gold, CircleShape)
             )
@@ -479,7 +493,6 @@ fun BudgetScreen(
 
     val currentMonth = remember { SimpleDateFormat("MMMM", Locale.ENGLISH).format(Date()) }
 
-    // Animated total
     val animatedTotal by animateIntAsState(totalSpent)
 
     FadeInScreen {
@@ -503,9 +516,10 @@ fun BudgetScreen(
                         style = MaterialTheme.typography.titleMedium,
                         color = Gold,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Gold.copy(alpha = 0.1f))
                             .clickable { showAddDialog = true }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
                     )
                 }
             }
@@ -573,7 +587,7 @@ fun BudgetScreen(
                             label = { Text("預算: $$budgetTotal") },
                             shape = RoundedCornerShape(20.dp),
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Gold.copy(alpha = 0.15f),
+                                selectedContainerColor = Gold.copy(alpha = 0.12f),
                                 selectedLabelColor = Gold
                             )
                         )
@@ -588,7 +602,7 @@ fun BudgetScreen(
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(bottom = 20.dp)
             ) {
                 items(dashboardCategories.size) { index ->
@@ -603,7 +617,6 @@ fun BudgetScreen(
                 }
             }
 
-            // Processing indicator
             if (isProcessing) {
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth(),
@@ -630,9 +643,9 @@ fun BudgetScreen(
                             else Toast.makeText(context, "需要相機權限", Toast.LENGTH_SHORT).show()
                             showAddDialog = false
                         },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Noir),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(14.dp)
                     ) {
                         Icon(Icons.Default.PhotoCamera, null)
                         Spacer(Modifier.width(8.dp))
@@ -643,8 +656,8 @@ fun BudgetScreen(
                             galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             showAddDialog = false
                         },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Border)
                     ) {
@@ -679,7 +692,7 @@ fun BudgetScreen(
                         onValueChange = { tempBudget = it },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Gold,
                             unfocusedBorderColor = Border,
@@ -698,7 +711,8 @@ fun BudgetScreen(
                         onBudgetUpdate(tempBudget)
                         showSettingsDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Noir)
+                    colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Noir),
+                    shape = RoundedCornerShape(12.dp)
                 ) { Text("儲存", fontWeight = FontWeight.SemiBold) }
             },
             dismissButton = {
@@ -716,7 +730,8 @@ fun BudgetScreen(
 fun CategoryItem(category: CategoryInfo, spent: Int, left: Int) {
     PressableSurface(
         onClick = {},
-        backgroundColor = SurfaceBase
+        backgroundColor = SurfaceBase,
+        glowColor = category.color.copy(alpha = 0.05f)
     ) {
         Row(
             modifier = Modifier
@@ -724,11 +739,10 @@ fun CategoryItem(category: CategoryInfo, spent: Int, left: Int) {
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Icon with tinted background
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .background(category.color.copy(alpha = 0.12f), RoundedCornerShape(12.dp)),
+                    .size(46.dp)
+                    .background(category.color.copy(alpha = 0.10f), RoundedCornerShape(14.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -776,18 +790,17 @@ fun CategoryItem(category: CategoryInfo, spent: Int, left: Int) {
 fun DonutChart(items: List<ShoppingItem>) {
     val total = items.filter { it.isChecked }.sumOf { it.price * it.qty }.toDouble()
 
-    // Animate the sweep
     var animationPlayed by remember { mutableStateOf(false) }
     val animationProgress by animateFloatAsState(
         targetValue = if (animationPlayed) 1f else 0f,
-        animationSpec = tween(800, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
+        animationSpec = tween(900, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
         label = "donut_progress"
     )
     LaunchedEffect(Unit) { animationPlayed = true }
 
     Canvas(modifier = Modifier.fillMaxSize().padding(10.dp)) {
         if (total == 0.0) {
-            drawCircle(color = SurfaceBright, style = Stroke(width = 16.dp.toPx()))
+            drawCircle(color = SurfaceBright, style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round))
         } else {
             var startAngle = -90f
             dashboardCategories.forEach { cat ->
@@ -799,7 +812,7 @@ fun DonutChart(items: List<ShoppingItem>) {
                         startAngle = startAngle,
                         sweepAngle = sweepAngle,
                         useCenter = false,
-                        style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round)
+                        style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round)
                     )
                     startAngle += (catSpent / total * 360f).toFloat() * animationProgress
                 }

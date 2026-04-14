@@ -11,7 +11,16 @@
       "Bash(./gradlew assembleDebug)",
       "Read(//c/Program Files/Android/Android Studio/jbr/**)",
       "Read(//c/Program Files/**)",
-      "Bash(JAVA_HOME=\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\" ./gradlew assembleDebug)"
+      "Bash(JAVA_HOME=\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\" ./gradlew assembleDebug)",
+      "Bash(export JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\")",
+      "Bash(export PATH=\"$JAVA_HOME/bin:$PATH\")",
+      "Bash(git checkout:*)",
+      "Bash(magick \"C:/Users/user/Downloads/ref_image.jpg\" -resize 50% -quality 60 \"C:/Users/user/Downloads/ref_small.jpg\")",
+      "Bash(python3 -c ':*)",
+      "Bash(python -c ':*)",
+      "Bash(powershell:*)",
+      "Bash(./gradlew compileDebugKotlin)",
+      "Bash(JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\" ./gradlew compileDebugKotlin)"
     ]
   }
 }

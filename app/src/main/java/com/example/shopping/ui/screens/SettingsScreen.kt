@@ -74,7 +74,7 @@ fun SettingsScreen(navController: NavController) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(20.dp))
                         .background(SurfaceBase)
                         .padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -82,8 +82,8 @@ fun SettingsScreen(navController: NavController) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .background(Gold.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
+                                .size(38.dp)
+                                .background(Gold.copy(alpha = 0.10f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(Icons.Default.Person, null, tint = Gold, modifier = Modifier.size(20.dp))
@@ -183,7 +183,7 @@ fun SettingsScreen(navController: NavController) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(20.dp))
                         .background(SurfaceBase)
                         .padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -191,8 +191,8 @@ fun SettingsScreen(navController: NavController) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .background(Info.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
+                                .size(38.dp)
+                                .background(Info.copy(alpha = 0.10f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(Icons.Default.Storage, null, tint = Info, modifier = Modifier.size(20.dp))

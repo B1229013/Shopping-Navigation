@@ -71,8 +71,8 @@ fun HistoryScreen(shoppingItems: List<ShoppingItem>) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
+                            .height(50.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Border)
                     ) {
@@ -86,7 +86,6 @@ fun HistoryScreen(shoppingItems: List<ShoppingItem>) {
                 }
             }
 
-            // ── Clear filter ──
             if (selectedFilterDate.isNotEmpty()) {
                 item {
                     Row(
@@ -104,7 +103,6 @@ fun HistoryScreen(shoppingItems: List<ShoppingItem>) {
                 }
             }
 
-            // ── Section Title ──
             item {
                 StaggeredItem(index = 2) {
                     Text(
@@ -116,7 +114,6 @@ fun HistoryScreen(shoppingItems: List<ShoppingItem>) {
                 }
             }
 
-            // ── Items or Empty State ──
             if (filteredHistory.isEmpty()) {
                 item {
                     Box(
@@ -156,12 +153,11 @@ fun HistoryItemCard(item: ShoppingItem) {
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Time indicator
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .width(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .background(SurfaceBright)
                     .padding(vertical = 8.dp, horizontal = 4.dp)
             ) {

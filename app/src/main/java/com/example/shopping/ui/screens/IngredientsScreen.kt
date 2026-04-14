@@ -100,7 +100,6 @@ fun IngredientsScreen(
         if (isGranted) cameraLauncher.launch(imageUri)
     }
 
-    // Animated calorie display
     val animatedCal by animateIntAsState(currentTotalCal)
 
     FadeInScreen {
@@ -116,12 +115,11 @@ fun IngredientsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(20.dp))
                             .background(SurfaceBase)
                             .padding(18.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        // Header with OCR button
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -151,30 +149,27 @@ fun IngredientsScreen(
                             }
                         }
 
-                        // Food name
                         OutlinedTextField(
                             value = foodName,
                             onValueChange = { foodName = it },
                             label = { Text("商品名稱 *", color = TextTertiary) },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             colors = cinemaTextFieldColors(),
                             singleLine = true
                         )
 
-                        // Ingredients
                         OutlinedTextField(
                             value = ingredientText,
                             onValueChange = { ingredientText = it },
                             label = { Text("成分表", color = TextTertiary) },
                             modifier = Modifier.fillMaxWidth(),
                             minLines = 2,
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             colors = cinemaTextFieldColors(),
                             placeholder = { Text("可點擊上方相機圖標辨識包裝成分", color = TextDisabled) }
                         )
 
-                        // Allergen warning
                         AnimatedVisibility(
                             visible = detectedAllergens.isNotEmpty(),
                             enter = fadeIn() + slideInVertically(),
@@ -184,7 +179,7 @@ fun IngredientsScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(DangerDim)
                                     .padding(12.dp)
                             ) {
@@ -199,14 +194,13 @@ fun IngredientsScreen(
                             }
                         }
 
-                        // Expiry date
                         OutlinedTextField(
                             value = expiryDate,
                             onValueChange = { },
                             label = { Text("有效期限", color = TextTertiary) },
                             modifier = Modifier.fillMaxWidth(),
                             readOnly = true,
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             colors = cinemaTextFieldColors(),
                             trailingIcon = {
                                 IconButton(onClick = {
@@ -218,7 +212,6 @@ fun IngredientsScreen(
                             }
                         )
 
-                        // Calorie & portion
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedTextField(
                                 value = unitCalorie,
@@ -226,7 +219,7 @@ fun IngredientsScreen(
                                 label = { Text("單份熱量", color = TextTertiary) },
                                 modifier = Modifier.weight(1f),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 colors = cinemaTextFieldColors(),
                                 singleLine = true
                             )
@@ -236,7 +229,7 @@ fun IngredientsScreen(
                                 label = { Text("份量", color = TextTertiary) },
                                 modifier = Modifier.weight(1f),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 colors = cinemaTextFieldColors(),
                                 singleLine = true
                             )
@@ -252,7 +245,7 @@ fun IngredientsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(20.dp))
                             .background(GoldSurface)
                             .padding(20.dp)
                     ) {
@@ -289,7 +282,7 @@ fun IngredientsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(20.dp))
                             .background(SuccessDim)
                             .padding(18.dp)
                     ) {
@@ -308,7 +301,7 @@ fun IngredientsScreen(
                                     label = { Text(ex, style = MaterialTheme.typography.labelMedium) },
                                     shape = RoundedCornerShape(20.dp),
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = Success.copy(alpha = 0.2f),
+                                        selectedContainerColor = Success.copy(alpha = 0.15f),
                                         selectedLabelColor = Success,
                                         containerColor = SurfaceBase,
                                         labelColor = TextSecondary
@@ -352,9 +345,9 @@ fun IngredientsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .height(52.dp),
+                            .height(54.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Noir),
-                        shape = RoundedCornerShape(14.dp)
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         Text("儲存紀錄", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     }

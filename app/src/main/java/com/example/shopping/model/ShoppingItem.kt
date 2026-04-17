@@ -14,7 +14,8 @@ data class ShoppingItem(
     var purchasedAt: Long? = null,
     val dueDate: Long? = null,
     var storeName: String? = null,
-    var location: String? = null
+    var location: String? = null,
+    val receiptId: String? = null
 )
 
 @Serializable

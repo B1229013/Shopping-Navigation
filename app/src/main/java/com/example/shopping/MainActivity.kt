@@ -16,6 +16,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.shopping.ui.screens.*
 import com.example.shopping.ui.theme.*
+import com.google.android.libraries.places.api.Places
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
@@ -29,12 +30,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         auth = Firebase.auth
 
+        if (!Places.isInitialized() && BuildConfig.MAPS_API_KEY.isNotBlank()) {
+            Places.initializeWithNewPlacesApiEnabled(applicationContext, BuildConfig.MAPS_API_KEY)
+        }
+
         enableEdgeToEdge()
         setContent {
             ShoppingTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = Noir
+                    color = androidx.compose.ui.graphics.Color(0xFFECFDF5)
                 ) {
                     val navController = rememberNavController()
                     val startDestination = "login"

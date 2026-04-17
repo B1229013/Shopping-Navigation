@@ -3,34 +3,34 @@ package com.example.shopping.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// ── Cinematic Color Scheme ──────────────────────────────────
-// Always dark. The interface is a theater — content is the performance.
+// ── Fresh Grocery Light Scheme ─────────────────────────────
+// Light, warm, organic. Matches the grocery homepage aesthetic.
 
-private val CinemaColorScheme = darkColorScheme(
+private val GroceryColorScheme = lightColorScheme(
     primary = Gold,
-    onPrimary = Noir,
-    primaryContainer = GoldDim,
-    onPrimaryContainer = GoldBright,
+    onPrimary = SurfaceBase,
+    primaryContainer = GoldSurface,
+    onPrimaryContainer = GoldDim,
 
     secondary = TextSecondary,
-    onSecondary = Noir,
+    onSecondary = SurfaceBase,
     secondaryContainer = SurfaceBright,
     onSecondaryContainer = TextPrimary,
 
     tertiary = Info,
-    onTertiary = Noir,
+    onTertiary = SurfaceBase,
     tertiaryContainer = InfoDim,
     onTertiaryContainer = Info,
 
     error = Danger,
-    onError = TextPrimary,
+    onError = SurfaceBase,
     errorContainer = DangerDim,
     onErrorContainer = Danger,
 
@@ -47,7 +47,7 @@ private val CinemaColorScheme = darkColorScheme(
 
     inverseSurface = TextPrimary,
     inverseOnSurface = Noir,
-    inversePrimary = GoldDim
+    inversePrimary = GoldBright
 )
 
 @Composable
@@ -61,16 +61,16 @@ fun ShoppingTheme(
             @Suppress("DEPRECATION")
             window.statusBarColor = Noir.toArgb()
             @Suppress("DEPRECATION")
-            window.navigationBarColor = Noir.toArgb()
+            window.navigationBarColor = SurfaceBase.toArgb()
             WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = false
-                isAppearanceLightNavigationBars = false
+                isAppearanceLightStatusBars = true
+                isAppearanceLightNavigationBars = true
             }
         }
     }
 
     MaterialTheme(
-        colorScheme = CinemaColorScheme,
+        colorScheme = GroceryColorScheme,
         typography = CinemaTypography,
         content = content
     )

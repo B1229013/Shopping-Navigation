@@ -20,7 +20,21 @@
       "Bash(python -c ':*)",
       "Bash(powershell:*)",
       "Bash(./gradlew compileDebugKotlin)",
-      "Bash(JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\" ./gradlew compileDebugKotlin)"
+      "Bash(JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\" ./gradlew compileDebugKotlin)",
+      "Bash(xargs grep:*)",
+      "Bash(python \"C:/Users/user/.claude/plugins/cache/ui-ux-pro-max-skill/ui-ux-pro-max/2.5.0/.claude/skills/ui-ux-pro-max/scripts/search.py\" \"grocery shopping assistant fresh produce organic\" --design-system -p \"Smart Shopping Assistant\")",
+      "Bash(python \"C:/Users/user/.claude/plugins/cache/ui-ux-pro-max-skill/ui-ux-pro-max/2.5.0/src/ui-ux-pro-max/scripts/search.py\" \"grocery shopping assistant fresh produce organic\" --design-system -p \"Smart Shopping Assistant\")",
+      "Bash(python \"C:/Users/user/.claude/plugins/cache/ui-ux-pro-max-skill/ui-ux-pro-max/2.5.0/src/ui-ux-pro-max/scripts/search.py\" \"touch target animation card grid\" --domain ux -n 8)",
+      "Bash(python \"C:/Users/user/.claude/plugins/cache/ui-ux-pro-max-skill/ui-ux-pro-max/2.5.0/src/ui-ux-pro-max/scripts/search.py\" \"bottom navigation accessibility content description\" --domain ux -n 6)",
+      "Bash(grep:*)",
+      "Bash(awk '/Icon\\\\\\(/,/\\\\\\)/ {print NR\": \"$0}' /c/Users/user/Desktop/school/shopping_04-main/app/src/main/java/com/example/shopping/ui/screens/HomeScreen.kt)",
+      "Bash(find C:\\\\Users\\\\user\\\\Desktop\\\\school\\\\shopping_04-main:*)",
+      "Bash(./gradlew --version)",
+      "Bash(export JAVA_HOME=\"/c/Program Files/Android/Android Studio/jbr\")",
+      "Bash('/c/Program Files/Android/Android Studio/jbr/bin/java' -version)",
+      "Bash(./gradlew.bat :app:assembleDebug --no-daemon)",
+      "Bash(./gradlew.bat :app:compileDebugKotlin --rerun-tasks --no-daemon)",
+      "Bash('/c/Program Files/Android/Android Studio/jbr/bin/keytool' -list -v -keystore __TRACKED_VAR__/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android)"
     ]
   }
 }

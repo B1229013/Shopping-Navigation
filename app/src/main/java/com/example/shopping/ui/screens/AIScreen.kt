@@ -21,13 +21,21 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.shopping.R
+import com.example.shopping.model.DietRecord
+import com.example.shopping.model.ShoppingContext
+import com.example.shopping.model.ShoppingItem
+import com.example.shopping.model.buildShoppingContext
+import com.example.shopping.model.toJsonString
 import com.example.shopping.ui.components.*
 import com.example.shopping.ui.theme.*
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-fun AIScreen() {
+fun AIScreen(
+    shoppingItems: List<ShoppingItem> = emptyList(),
+    dietRecords: List<DietRecord> = emptyList(),
+    budgetTotal: Int = 0
+) {
     val context = LocalContext.current
     val groqApiKey = stringResource(id = R.string.groq_api_key)
 
@@ -47,6 +55,16 @@ fun AIScreen() {
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "send_scale"
     )
+
+    // ── Build context snapshot on each recomposition ──
+    val shoppingContext = remember(shoppingItems, dietRecords, budgetTotal) {
+        buildShoppingContext(shoppingItems, dietRecords, budgetTotal)
+    }
+
+    // ── Context-aware system prompt ──
+    val systemPrompt = remember(shoppingContext) {
+        buildSystemPrompt(shoppingContext)
+    }
 
     FadeInScreen {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -92,7 +110,12 @@ fun AIScreen() {
                                 .padding(18.dp)
                         ) {
                             Text(
-                                "您好！我是您的 AI 助理，由 Groq 提供支援。\n我可以幫您分析購物清單或回答相關問題。",
+                                "您好！我是您的 AI 購物助理。\n\n" +
+                                "我可以存取您的購物清單、預算和飲食紀錄，幫您：\n" +
+                                "• 分析消費習慣（「這個月零食花了多少？」）\n" +
+                                "• 規劃健康飲食（「幫我規劃不超標的菜單」）\n" +
+                                "• 預算建議（「我還剩多少預算？」）\n" +
+                                "• 交叉分析（「清單裡的東西會超過預算嗎？」）",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextSecondary,
                                 lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
@@ -153,14 +176,20 @@ fun AIScreen() {
                             isLoading = true
                             scope.launch {
                                 try {
+                                    // Build message list with conversation history for continuity
+                                    val messages = mutableListOf(
+                                        GroqMessage(role = "system", content = systemPrompt)
+                                    )
+                                    // Include recent history for multi-turn context
+                                    chatHistory.takeLast(5).forEach { (prevUser, prevAi) ->
+                                        messages.add(GroqMessage(role = "user", content = prevUser))
+                                        messages.add(GroqMessage(role = "assistant", content = prevAi))
+                                    }
+                                    messages.add(GroqMessage(role = "user", content = userMsg))
+
                                     val response = groqApi.getCompletion(
                                         apiKey = "Bearer $groqApiKey",
-                                        request = GroqRequest(
-                                            messages = listOf(
-                                                GroqMessage(role = "system", content = "You are a helpful shopping assistant. Respond in Traditional Chinese."),
-                                                GroqMessage(role = "user", content = userMsg)
-                                            )
-                                        )
+                                        request = GroqRequest(messages = messages)
                                     )
                                     val aiMsg = response.choices[0].message.content
                                     chatHistory = chatHistory + (userMsg to aiMsg)
@@ -177,7 +206,7 @@ fun AIScreen() {
                         .size(48.dp)
                         .scale(sendScale),
                     containerColor = Gold,
-                    contentColor = Noir,
+                    contentColor = SurfaceBase,
                     shape = CircleShape
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "發送", modifier = Modifier.size(20.dp))
@@ -187,12 +216,69 @@ fun AIScreen() {
     }
 }
 
+// ── Context-Aware System Prompt Builder ─────────────────────
+// Injects the full ShoppingContext JSON so the AI can cross-reference
+// inventory, budget, and health data in a single query.
+
+private fun buildSystemPrompt(ctx: ShoppingContext): String {
+    val contextJson = ctx.toJsonString()
+    return """
+You are an intelligent shopping assistant for a Traditional Chinese (繁體中文) grocery app.
+Always respond in Traditional Chinese. Be concise and helpful.
+
+You have FULL ACCESS to the user's real-time data across three modules:
+
+## Your Data Access (JSON)
+```json
+$contextJson
+```
+
+## How to Use This Data
+
+### Module 1: Inventory (inventory)
+- `pending_items`: Items the user still needs to buy (name, qty, price, category)
+- `purchased_items`: Items already bought
+- Use this to answer: "What's on my list?", "What did I buy?", "Do I have eggs?"
+
+### Module 2: Budget (budget)
+- `monthly_budget`: User's spending limit
+- `total_spent` / `remaining`: Current spending status
+- `spending_by_category`: Breakdown by Food/Beverages/Groceries/Other
+- Use this to answer: "How much did I spend on snacks?", "Am I over budget?", "What's my top spending category?"
+
+### Module 3: Health (health)
+- `diet_records_today`: What the user ate today (calories, macros)
+- `total_calories_today`: Total calorie intake
+- `recent_ingredients`: Recent ingredient lists for allergen awareness
+- Use this to answer: "How many calories today?", "Does my list exceed sodium goals?"
+
+### Cross-Module Queries
+When the user asks complex questions, CROSS-REFERENCE modules:
+- "Plan a meal within budget" → check inventory + budget.remaining + health targets
+- "Is my list healthy?" → check pending_items against health.diet_records_today
+- "What should I buy?" → combine budget.remaining + health gaps + inventory.pending_items
+
+## Summary
+- Date: ${ctx.summary.date}
+- Budget used: ${ctx.summary.budget_utilization_percent}%
+- Top spending: ${ctx.summary.top_spending_category ?: "N/A"}
+- Pending items: ${ctx.summary.pending_item_names.joinToString(", ").ifEmpty { "無" }}
+
+## Rules
+1. Always base answers on ACTUAL data, never fabricate numbers.
+2. When data is empty (e.g., no items), say so honestly.
+3. For health advice, give practical suggestions, not medical diagnoses.
+4. Reference specific item names and prices from the data.
+5. Format currency as NT$ or $ consistently.
+""".trimIndent()
+}
+
 // ── Chat Bubble ─────────────────────────────────────────────
 
 @Composable
 fun ChatBubble(text: String, isUser: Boolean) {
     val backgroundColor = if (isUser) Gold else SurfaceBase
-    val textColor = if (isUser) Noir else TextPrimary
+    val textColor = if (isUser) SurfaceBase else TextPrimary
     val alignment = if (isUser) Alignment.End else Alignment.Start
     val shape = if (isUser) {
         RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)

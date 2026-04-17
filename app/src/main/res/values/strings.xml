@@ -2,4 +2,6 @@
     <string name="app_name">shopping</string>
     <string name="gemini_api_key">AIzaSyBloHwr6DRSbZOUba2YI8w9LqOME89wBEA</string>
     <string name="groq_api_key">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</string>
+    <string name="paddleocr_api_url">https://z0pey9paq3vfo6g3.aistudio-app.com/ocr</string>
+    <string name="paddleocr_access_token">0faddfe1b91d9e785c4ba08b631b168390b29634</string>
 </resources>

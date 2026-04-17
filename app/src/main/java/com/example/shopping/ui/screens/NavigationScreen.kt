@@ -1,9 +1,12 @@
 package com.example.shopping.ui.screens
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
 import android.net.Uri
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,6 +16,7 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,6 +35,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
@@ -40,12 +45,15 @@ import coil.compose.AsyncImage
 import com.example.shopping.model.ShoppingItem
 import com.example.shopping.ui.components.*
 import com.example.shopping.ui.theme.*
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import kotlinx.serialization.json.Json
 import java.util.concurrent.Executors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeammateHomeScreen(navController: NavController) {
+    val context = LocalContext.current
     val shoppingListJson = navController.previousBackStackEntry?.savedStateHandle?.get<String>("shopping_list_json")
     val initialItems = remember(shoppingListJson) {
         try {
@@ -53,6 +61,51 @@ fun TeammateHomeScreen(navController: NavController) {
                 Json.decodeFromString<List<ShoppingItem>>(shoppingListJson)
             } else emptyList()
         } catch (e: Exception) { emptyList() }
+    }
+
+    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    var nearbyLocation by remember { mutableStateOf<Location?>(null) }
+    var showNearbySheet by remember { mutableStateOf(false) }
+    var fetchingLocation by remember { mutableStateOf(false) }
+
+    fun fetchLocationThenShow() {
+        fetchingLocation = true
+        try {
+            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                .addOnSuccessListener { loc ->
+                    fetchingLocation = false
+                    if (loc != null) {
+                        nearbyLocation = loc
+                        showNearbySheet = true
+                    } else {
+                        Toast.makeText(context, "無法取得位置，請確認 GPS 已開啟", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .addOnFailureListener {
+                    fetchingLocation = false
+                    Toast.makeText(context, "位置取得失敗", Toast.LENGTH_SHORT).show()
+                }
+        } catch (e: SecurityException) {
+            fetchingLocation = false
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            fetchLocationThenShow()
+        } else {
+            Toast.makeText(context, "需要定位權限才能搜尋附近商店", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun openNearbyStores() {
+        val hasPerm = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasPerm) fetchLocationThenShow()
+        else locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
     Scaffold(
@@ -144,6 +197,35 @@ fun TeammateHomeScreen(navController: NavController) {
             Spacer(Modifier.height(16.dp))
 
             StaggeredItem(index = 2) {
+                OutlinedButton(
+                    onClick = { openNearbyStores() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold),
+                    border = BorderStroke(1.dp, Gold),
+                    enabled = !fetchingLocation
+                ) {
+                    if (fetchingLocation) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Gold,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text("定位中...", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    } else {
+                        Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("附近商店 (1 公里內)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            StaggeredItem(index = 3) {
                 Button(
                     onClick = { navController.navigate("ar_navigation") },
                     modifier = Modifier
@@ -163,6 +245,12 @@ fun TeammateHomeScreen(navController: NavController) {
 
             Spacer(Modifier.height(20.dp))
         }
+
+        if (showNearbySheet) {
+            nearbyLocation?.let { loc ->
+                NearbyStoresSheet(location = loc, onDismiss = { showNearbySheet = false })
+            }
+        }
     }
 }
 
@@ -170,17 +258,50 @@ fun TeammateHomeScreen(navController: NavController) {
 fun NavigationScreen(navController: NavController) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    
+    var currentLocation by remember { mutableStateOf<Location?>(null) }
     var hasCameraPermission by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }
+    var hasLocationPermission by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED)
+    }
+    
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasCameraPermission = permissions[Manifest.permission.CAMERA] ?: hasCameraPermission
+        hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: hasLocationPermission
+    }
+
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { hasCameraPermission = it }
     val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { selectedImageUri = it }
 
     var lastCaptureTime by remember { mutableLongStateOf(0L) }
     val captureInterval = 3000L
 
-    LaunchedEffect(Unit) { if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA) }
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission || !hasLocationPermission) {
+            permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION))
+        }
+    }
+
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission) {
+            try {
+                fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                    .addOnSuccessListener { location ->
+                        currentLocation = location
+                        if (location != null) {
+                            Log.d("GPS", "Current location: ${location.latitude}, ${location.longitude}")
+                        }
+                    }
+            } catch (e: SecurityException) {
+                Log.e("GPS", "Location permission error", e)
+            }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(Noir)) {
         if (selectedImageUri != null) {
@@ -202,7 +323,14 @@ fun NavigationScreen(navController: NavController) {
             })
         }
 
-        AROverlayUI(navController, selectedImageUri, { selectedImageUri = null }, photoPickerLauncher)
+        // AR store markers — only while live camera is active
+        if (hasCameraPermission && selectedImageUri == null) {
+            currentLocation?.let { loc ->
+                NearbyStoresAr(location = loc)
+            }
+        }
+
+        AROverlayUI(navController, selectedImageUri, { selectedImageUri = null }, photoPickerLauncher, currentLocation)
 
         if (hasCameraPermission && selectedImageUri == null) {
             Text(
@@ -255,9 +383,35 @@ fun AROverlayUI(
     navController: NavController,
     uri: Uri?,
     onClearUri: () -> Unit,
-    launcher: androidx.activity.result.ActivityResultLauncher<PickVisualMediaRequest>
+    launcher: androidx.activity.result.ActivityResultLauncher<PickVisualMediaRequest>,
+    location: Location?
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
+        if (location != null) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp)
+                    .padding(top = 40.dp),
+                color = Noir.copy(alpha = 0.7f),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Gold.copy(alpha = 0.5f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.LocationOn, null, tint = Gold, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "GPS 已就緒",
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)

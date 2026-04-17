@@ -4,8 +4,10 @@ import android.Manifest
 import android.app.DatePickerDialog
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -39,9 +41,11 @@ import com.example.shopping.model.DietRecord
 import com.example.shopping.model.UserProfile
 import com.example.shopping.ui.components.*
 import com.example.shopping.ui.theme.*
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import androidx.compose.ui.res.stringResource
+import com.example.shopping.R
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -83,15 +87,31 @@ fun IngredientsScreen(
     )
     val exerciseMinutes = if (currentTotalCal > 0) (currentTotalCal / (exercises[selectedExercise] ?: 1.0)).toInt() else 0
 
+    val scope = rememberCoroutineScope()
+    val paddleOcrApiUrl = stringResource(id = R.string.paddleocr_api_url)
+    val paddleOcrToken = stringResource(id = R.string.paddleocr_access_token)
+
     val tempFile = remember { File(context.cacheDir, "ocr_scan.jpg") }
     val imageUri = remember { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempFile) }
 
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success) {
             isProcessing = true
-            processImageForOCR(context, imageUri) { recognizedText ->
-                ingredientText = recognizedText
-                isProcessing = false
+            scope.launch {
+                try {
+                    val bitmap = withContext(Dispatchers.IO) { decodeUriToBitmap(context, imageUri) }
+                    if (bitmap != null) {
+                        val recognizedText = callPaddleOcr(bitmap, paddleOcrApiUrl, paddleOcrToken)
+                        ingredientText = recognizedText.replace("\n", " ")
+                    } else {
+                        Toast.makeText(context, "無法讀取圖片", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Log.e("OCR", "PaddleOCR 辨識失敗", e)
+                    Toast.makeText(context, "辨識失敗: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                } finally {
+                    isProcessing = false
+                }
             }
         }
     }
@@ -364,23 +384,6 @@ fun IngredientsScreen(
     }
 }
 
-private fun processImageForOCR(context: Context, uri: Uri, onResult: (String) -> Unit) {
-    try {
-        val image = InputImage.fromFilePath(context, uri)
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-        recognizer.process(image)
-            .addOnSuccessListener { visionText ->
-                onResult(visionText.text.replace("\n", " "))
-            }
-            .addOnFailureListener { e ->
-                Log.e("OCR", "辨識失敗", e)
-                onResult("")
-            }
-    } catch (e: Exception) {
-        Log.e("OCR", "開啟圖片失敗", e)
-        onResult("")
-    }
-}
 
 @Composable
 fun DietRecordCard(record: DietRecord, onEdit: () -> Unit, onDelete: () -> Unit) {

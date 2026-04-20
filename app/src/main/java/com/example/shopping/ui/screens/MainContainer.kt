@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.navigation.NavController
+import com.example.shopping.BuildConfig
 import com.example.shopping.R
 import com.example.shopping.model.DietRecord
 import com.example.shopping.model.ShoppingItem
@@ -478,9 +479,9 @@ fun BudgetScreen(
     var viewMode by remember { mutableStateOf(BudgetViewMode.CATEGORY) }
     var expandedCategoryId by remember { mutableStateOf<String?>(null) }
 
-    val groqApiKey = stringResource(id = R.string.groq_api_key)
+    val groqApiKey = BuildConfig.GROQ_API_KEY
     val paddleOcrApiUrl = stringResource(id = R.string.paddleocr_api_url)
-    val paddleOcrToken = stringResource(id = R.string.paddleocr_access_token)
+    val paddleOcrToken = BuildConfig.PADDLEOCR_ACCESS_TOKEN
     val tempPhotoFile = remember { File(context.cacheDir, "receipt_photo.jpg") }
     val photoUri = remember { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempPhotoFile) }
 

@@ -17,10 +17,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.shopping.R
+import com.example.shopping.BuildConfig
 import com.example.shopping.model.DietRecord
 import com.example.shopping.model.ShoppingContext
 import com.example.shopping.model.ShoppingItem
@@ -37,7 +36,7 @@ fun AIScreen(
     budgetTotal: Int = 0
 ) {
     val context = LocalContext.current
-    val groqApiKey = stringResource(id = R.string.groq_api_key)
+    val groqApiKey = BuildConfig.GROQ_API_KEY
 
     val scope = rememberCoroutineScope()
     var inputText by remember { mutableStateOf("") }

@@ -34,7 +34,9 @@
       "Bash('/c/Program Files/Android/Android Studio/jbr/bin/java' -version)",
       "Bash(./gradlew.bat :app:assembleDebug --no-daemon)",
       "Bash(./gradlew.bat :app:compileDebugKotlin --rerun-tasks --no-daemon)",
-      "Bash('/c/Program Files/Android/Android Studio/jbr/bin/keytool' -list -v -keystore __TRACKED_VAR__/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android)"
+      "Bash('/c/Program Files/Android/Android Studio/jbr/bin/keytool' -list -v -keystore __TRACKED_VAR__/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android)",
+      "Bash(python -c ' *)",
+      "Bash(python3 *)"
     ]
   }
 }

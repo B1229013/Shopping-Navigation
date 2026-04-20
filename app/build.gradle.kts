@@ -8,12 +8,18 @@ plugins {
     alias(libs.plugins.google.services)
 }
 
-val mapsApiKey: String = run {
-    val props = Properties()
-    val f = rootProject.file("local.properties")
-    if (f.exists()) FileInputStream(f).use { props.load(it) }
-    props.getProperty("MAPS_API_KEY", "")
+val dotenvProps: Properties = Properties().apply {
+    val f = rootProject.file(".env")
+    if (f.exists()) FileInputStream(f).use { load(it) }
 }
+
+fun secret(name: String): String =
+    dotenvProps.getProperty(name) ?: System.getenv(name) ?: ""
+
+val mapsApiKey: String = secret("MAPS_API_KEY")
+val geminiApiKey: String = secret("GEMINI_API_KEY")
+val groqApiKey: String = secret("GROQ_API_KEY")
+val paddleOcrAccessToken: String = secret("PADDLEOCR_ACCESS_TOKEN")
 
 android {
     namespace = "com.example.shopping"
@@ -29,6 +35,9 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        buildConfigField("String", "GROQ_API_KEY", "\"$groqApiKey\"")
+        buildConfigField("String", "PADDLEOCR_ACCESS_TOKEN", "\"$paddleOcrAccessToken\"")
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 

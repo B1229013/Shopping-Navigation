@@ -42,6 +42,7 @@ import com.example.shopping.model.UserProfile
 import com.example.shopping.ui.components.*
 import com.example.shopping.ui.theme.*
 import androidx.compose.ui.res.stringResource
+import com.example.shopping.BuildConfig
 import com.example.shopping.R
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -89,7 +90,7 @@ fun IngredientsScreen(
 
     val scope = rememberCoroutineScope()
     val paddleOcrApiUrl = stringResource(id = R.string.paddleocr_api_url)
-    val paddleOcrToken = stringResource(id = R.string.paddleocr_access_token)
+    val paddleOcrToken = BuildConfig.PADDLEOCR_ACCESS_TOKEN
 
     val tempFile = remember { File(context.cacheDir, "ocr_scan.jpg") }
     val imageUri = remember { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempFile) }

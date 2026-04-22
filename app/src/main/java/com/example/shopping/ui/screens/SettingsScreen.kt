@@ -3,6 +3,7 @@ package com.example.shopping.ui.screens
 import android.app.DatePickerDialog
 import android.content.Context
 import android.text.format.Formatter
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -21,8 +22,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.example.shopping.model.UserProfile
 import com.example.shopping.ui.components.*
 import com.example.shopping.ui.theme.*
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.*
 
@@ -33,11 +37,27 @@ fun SettingsScreen(navController: NavController) {
     var cacheSize by remember { mutableStateOf(getCacheSize(context)) }
     var appSize by remember { mutableStateOf(getAppSize(context)) }
 
-    var gender by remember { mutableStateOf("其他") }
-    var birthday by remember { mutableStateOf("2026-3-23") }
-    var height by remember { mutableStateOf("") }
-    var weight by remember { mutableStateOf("") }
-    var allergies by remember { mutableStateOf("") }
+    // Load initial profile
+    val profileFile = File(context.filesDir, "user_profile.json")
+    val initialProfile = remember {
+        if (profileFile.exists()) {
+            try {
+                Json.decodeFromString<UserProfile>(profileFile.readText())
+            } catch (e: Exception) {
+                UserProfile()
+            }
+        } else {
+            UserProfile()
+        }
+    }
+
+    var gender by remember { mutableStateOf(initialProfile.gender) }
+    var birthday by remember { mutableStateOf(initialProfile.birthday) }
+    var height by remember { mutableStateOf(initialProfile.height) }
+    var weight by remember { mutableStateOf(initialProfile.weight) }
+    var allergies by remember { mutableStateOf(initialProfile.allergies) }
+    var disease by remember { mutableStateOf(initialProfile.disease) }
+    var activityLevel by remember { mutableStateOf(initialProfile.activityLevel) }
 
     Scaffold(
         containerColor = Noir,
@@ -125,6 +145,16 @@ fun SettingsScreen(navController: NavController) {
                         trailingIcon = {
                             IconButton(onClick = {
                                 val cal = Calendar.getInstance()
+                                // Parse current birthday if possible
+                                try {
+                                    val parts = birthday.split("-")
+                                    if (parts.size == 3) {
+                                        cal.set(Calendar.YEAR, parts[0].toInt())
+                                        cal.set(Calendar.MONTH, parts[1].toInt() - 1)
+                                        cal.set(Calendar.DAY_OF_MONTH, parts[2].toInt())
+                                    }
+                                } catch (e: Exception) {}
+
                                 DatePickerDialog(context, { _, y, m, d ->
                                     birthday = "$y-${m + 1}-$d"
                                 }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
@@ -156,6 +186,54 @@ fun SettingsScreen(navController: NavController) {
                         )
                     }
 
+                    Text("生活活動強度", style = MaterialTheme.typography.bodySmall, color = TextTertiary)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf("低", "稍低", "適度", "高").forEach { level ->
+                            FilterChip(
+                                selected = activityLevel == level,
+                                onClick = { activityLevel = level },
+                                label = { Text(level) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Gold.copy(alpha = 0.2f),
+                                    selectedLabelColor = Gold
+                                )
+                            )
+                        }
+                    }
+
+                    var expandedDisease by remember { mutableStateOf(false) }
+                    val diseases = listOf("無", "三酸甘油脂", "肥胖", "脂肪肝", "高血壓", "痛風", "腎功能不齊全", "糖尿病", "心臟疾病", "膽固醇", "膽結石")
+                    
+                    ExposedDropdownMenuBox(
+                        expanded = expandedDisease,
+                        onExpandedChange = { expandedDisease = it }
+                    ) {
+                        OutlinedTextField(
+                            value = disease,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("疾病狀態", color = TextTertiary) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDisease) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = cinemaTextFieldColors()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expandedDisease,
+                            onDismissRequest = { expandedDisease = false }
+                        ) {
+                            diseases.forEach { d ->
+                                DropdownMenuItem(
+                                    text = { Text(d) },
+                                    onClick = {
+                                        disease = d
+                                        expandedDisease = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
                     OutlinedTextField(
                         value = allergies,
                         onValueChange = { allergies = it },
@@ -167,7 +245,24 @@ fun SettingsScreen(navController: NavController) {
                     )
 
                     Button(
-                        onClick = { /* Save logic */ },
+                        onClick = {
+                            val profile = UserProfile(
+                                gender = gender,
+                                birthday = birthday,
+                                height = height,
+                                weight = weight,
+                                allergies = allergies,
+                                disease = disease,
+                                activityLevel = activityLevel
+                            )
+                            try {
+                                profileFile.writeText(Json.encodeToString(profile))
+                                Toast.makeText(context, "資料已儲存", Toast.LENGTH_SHORT).show()
+                                appSize = getAppSize(context)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "儲存失敗: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Noir)

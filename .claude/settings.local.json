@@ -36,7 +36,10 @@
       "Bash(./gradlew.bat :app:compileDebugKotlin --rerun-tasks --no-daemon)",
       "Bash('/c/Program Files/Android/Android Studio/jbr/bin/keytool' -list -v -keystore __TRACKED_VAR__/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android)",
       "Bash(python -c ' *)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(mkdir -p \"/tmp/shopping_new\")",
+      "Bash(unzip -o \"C:/Users/user/Downloads/Shopping-Navigation-main.zip\" -d \"/tmp/shopping_new\")",
+      "Read(//tmp/**)"
     ]
   }
 }

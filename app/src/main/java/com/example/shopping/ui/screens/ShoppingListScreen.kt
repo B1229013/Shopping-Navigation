@@ -28,6 +28,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.example.shopping.model.ShoppingItem
+import com.example.shopping.ui.utils.guessCategory
 import com.example.shopping.ui.components.*
 import com.example.shopping.ui.theme.*
 import java.text.SimpleDateFormat
@@ -148,7 +149,8 @@ fun ShoppingListScreen(
                                             name = newItemName,
                                             qty = newItemQty.toIntOrNull() ?: 1,
                                             price = newItemPrice.toIntOrNull() ?: 0,
-                                            dueDate = dueDateLong
+                                            dueDate = dueDateLong,
+                                            location = guessCategory(newItemName)
                                         ))
                                         newItemName = ""; newItemPrice = ""; newItemQty = "1"
                                     }

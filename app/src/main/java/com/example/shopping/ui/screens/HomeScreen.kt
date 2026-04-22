@@ -41,6 +41,7 @@ import coil.request.ImageRequest
 import com.example.shopping.model.ShoppingItem
 import com.example.shopping.ui.components.FadeInScreen
 import com.example.shopping.ui.components.StaggeredItem
+import com.example.shopping.ui.utils.matchesHomeCategory
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.delay
@@ -142,7 +143,7 @@ fun HomeScreen(
 
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     val filteredItems = if (selectedCategory != null) {
-        pendingItems.filter { it.location == selectedCategory }
+        pendingItems.filter { matchesHomeCategory(it.name, selectedCategory!!) }
     } else pendingItems
 
     // Greeting based on time

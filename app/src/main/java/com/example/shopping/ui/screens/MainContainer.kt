@@ -56,6 +56,8 @@ import com.example.shopping.R
 import com.example.shopping.model.DietRecord
 import com.example.shopping.model.ShoppingItem
 import com.example.shopping.ui.components.*
+import com.example.shopping.ui.utils.normalizeCategory
+import com.example.shopping.ui.utils.reclassifyAll
 import com.example.shopping.ui.theme.*
 import android.util.Base64
 import com.google.mlkit.vision.common.InputImage
@@ -211,7 +213,7 @@ fun MainContainer(rootNavController: NavController) {
         val items = try {
             if (shoppingFile.exists()) jsonFormatter.decodeFromString<List<ShoppingItem>>(shoppingFile.readText()) else emptyList()
         } catch (e: Exception) { emptyList() }
-        mutableStateOf(items)
+        mutableStateOf(reclassifyAll(items))
     }
 
     var dietRecords by remember {
@@ -591,7 +593,7 @@ fun BudgetScreen(
                                 name = line.name,
                                 price = (line.total_price ?: 0.0).toInt() / line.qty.coerceAtLeast(1),
                                 qty = line.qty,
-                                location = line.cat,
+                                location = normalizeCategory(line.cat, line.name),
                                 storeName = storeName,
                                 isChecked = true,
                                 createdAt = receiptTimestamp,

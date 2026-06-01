@@ -1,27 +1,79 @@
-# 智慧購物導航 (Smart Shopping Navigation)
+<div align="center">
 
-以 Android 為基礎的綜合型智慧購物助理應用程式,整合相機 OCR、雲端大型語言模型 (Groq / LLaMA 3.3) 與地點服務,協助消費者管理購物清單、預算、飲食健康,並提供賣場內導航(視覺定位後端整合進行中)。
+# 🛒 智慧購物導航 (Smart Shopping Navigation)
+
+**以 Android 為基礎的綜合型智慧購物助理 — 整合相機 OCR、雲端大型語言模型與賣場視覺導航**
+
+![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
+![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
+![Firebase](https://img.shields.io/badge/Firebase-Auth-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)
+![Groq](https://img.shields.io/badge/Groq-LLaMA_3.3--70B-F55036?style=for-the-badge)
+![ML Kit](https://img.shields.io/badge/ML_Kit-Text_OCR-4285F4?style=for-the-badge&logo=google&logoColor=white)
+![PaddleOCR](https://img.shields.io/badge/PaddleOCR-REST-0062FF?style=for-the-badge)
+![CameraX](https://img.shields.io/badge/CameraX-1.5.3-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+![Places](https://img.shields.io/badge/Google_Places-New-34A853?style=for-the-badge&logo=googlemaps&logoColor=white)
+<br/>
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![GroundingDINO](https://img.shields.io/badge/GroundingDINO-Detection-555555?style=for-the-badge)
+![Ollama](https://img.shields.io/badge/Ollama-LLaMA_3.2_Vision-000000?style=for-the-badge&logo=ollama&logoColor=white)
+![NetworkX](https://img.shields.io/badge/NetworkX-Topomap-FF6F00?style=for-the-badge)
+
+</div>
+
+> 以手機相機擷取影像 + 雲端 LLM 進行收據/成分結構化與購物諮詢;賣場導航以拓樸地圖達成,**無需在賣場建置藍牙/Wi-Fi 定位硬體**。
 
 ---
 
-## 專題簡介 (Project Overview)
+## 📑 目錄 (Table of Contents)
 
-「智慧購物導航」以 **Kotlin + Jetpack Compose** 開發,採**單一 Activity** 架構,搭配規劃中的 **Python (FastAPI) 後端導航伺服器**([`backend/`](backend/README.md))處理賣場內視覺定位。
+- [專題簡介](#-專題簡介-overview)
+- [系統特色](#-系統特色-features)
+- [系統架構](#️-系統架構-architecture)
+- [AI 應用與模型流程](#-ai-應用與模型流程-ai--model-flow)
+- [核心功能](#-核心功能-core-features)
+- [技術堆疊](#-技術堆疊-tech-stack)
+- [設定金鑰](#-設定金鑰-api-keys)
+- [安裝與使用](#-安裝與使用-installation--usage)
+- [專案結構](#-專案結構-project-structure)
+- [已知限制與容錯](#️-已知限制與容錯-limitations--robustness)
+
+---
+
+## 📖 專題簡介 (Overview)
+
+「智慧購物導航」以 **Kotlin + Jetpack Compose** 開發,採**單一 Activity** 架構,搭配獨立的 **Python (FastAPI) 後端導航伺服器**([`backend/`](backend/README.md))處理賣場內視覺定位。
 
 - **核心目標**:解決消費者在大型賣場找不到商品、繞遠路的問題,並一併管理預算與飲食健康。
-- **技術特色**:以手機相機擷取影像 + 雲端 LLM 進行收據/成分結構化與購物諮詢;賣場導航規劃以拓樸地圖達成,**無需在賣場建置藍牙/Wi-Fi 定位硬體**。
+- **兩大模組**:① 賣場導航(影像語意 + 拓樸地圖)、② AI 小助理(預算 / 健康 / 諮詢 / 附近門市)。
 
 ### 專題資訊
 - **指導教授**:吳世琳 教授、陳嶽鵬 教授
-- **專題成員**:
-  - B1229013 陳宜伶
-  - B1229020 何思顗
-  - B1229023 林依賢
-  - B1222017 周庠
+- **專題成員**:B1229013 陳宜伶 · B1229020 何思顗 · B1229023 林依賢 · B1222017 周庠
 
 ---
 
-## 系統架構 (Architecture)
+## ✨ 系統特色 (Features)
+
+| | 特色 | 說明 |
+|---|------|------|
+| 🧭 | **賣場視覺導航** | 手機拍照即定位,以拓樸地圖逐步引導找商品,免裝藍牙/Wi-Fi 信標 |
+| 🤖 | **情境感知 AI 助理** | Groq LLaMA 3.3 取得即時購物 / 預算 / 健康快照,跨模組回答問題 |
+| 🧾 | **收據秒記帳** | 拍收據 → ML Kit OCR → LLM 結構化 → 自動入帳 + 預算圓環圖 |
+| 🥗 | **成分過敏偵測** | 拍成分表 → PaddleOCR → 比對個人過敏原 + 熱量/運動換算 |
+| 📍 | **附近門市搜尋** | Google Places + GPS,清單與相機 AR 兩種呈現 |
+| 🔒 | **資料本地化** | 購物/飲食/預算/個資僅存於裝置;導航模型可本地端 Ollama 推論 |
+
+---
+
+## 🏗️ 系統架構 (Architecture)
+
+<div align="center">
+
+<!-- 產生架構圖後置於 docs/architecture.png 並取消下一行註解 -->
+<!-- ![系統架構圖](docs/architecture.png) -->
+
+</div>
 
 ```
 ┌────────────────────────────────────────────────────────────┐
@@ -46,57 +98,59 @@
 
 ### 狀態管理與持久化
 - `MainContainer` 以 Material 3 **Scaffold** 統籌六個分頁,核心狀態:`shoppingItems`、`dietRecords`、`budgetTotalStr`。
-- 持久化以 **kotlinx.serialization** 寫入 `filesDir` 下的本地檔:
-  - `shopping_list.json`(購物清單)、`diet_records.json`(飲食紀錄)、`monthly_budget.txt`(月預算)、`user_profile.json`(個人資料 / 過敏原)。
-- 切換分頁採 `selectedTab` 索引 + `Crossfade`;子畫面以參數接收 State 與 Callback(單向資料流)。
+- 持久化以 **kotlinx.serialization** 寫入 `filesDir`:`shopping_list.json`、`diet_records.json`、`monthly_budget.txt`、`user_profile.json`。
+- 切換分頁採 `selectedTab` 索引 + `Crossfade`(單向資料流)。
 
 ---
 
-## 核心功能 (Core Features)
+## 🧠 AI 應用與模型流程 (AI & Model Flow)
+
+系統的 AI 分為**雲端服務(App 端直接呼叫)**與**本地視覺導航管線(後端)**兩條路徑。
+
+### A. App 端:OCR → LLM 結構化
+```
+拍照 ──▶ OCR (收據:ML Kit / 成分:PaddleOCR) ──▶ Groq LLaMA 3.3
+                                                   │
+            ┌──────────────────────────────────────┴───────────────┐
+            ▼                                                        ▼
+   收據 → TidiedReceiptResponse(品項/金額)              助理 → 注入 ShoppingContext
+   → 入帳 + DonutChart 預算圖                            (庫存+預算+健康 JSON) → 跨模組回答
+```
+
+### B. 後端:賣場視覺導航(設計準則「先偵測 → 再讀字 → 後推論 → 拓樸定位」)
+```
+顧客照片 ─▶ GroundingDINO 物件偵測 ─▶ EasyOCR 招牌/標籤辨識 ─▶ Ollama VLM (LLaMA 3.2 Vision)
+                                                                 │
+            ┌────────────────────────────────────────────────────┘
+            ▼
+   NetworkX 拓樸地圖(節點=位置, 邊=走過路徑) ─▶ 導航動作:MOVE / ASK / ARRIVED
+```
+> 詳細模組、API 與啟動方式見 **[`backend/README.md`](backend/README.md)**。
+
+---
+
+## 🧩 核心功能 (Core Features)
 
 底部導覽列共六個分頁:**首頁 / 清單 / 分析 / 預算 / 紀錄 / 助理**。
 
-### 1. 首頁 (`HomeScreen`)
-- 商品搜尋與快速加入購物清單,商品縮圖以 **Coil** 載入(Unsplash)。
-- 提供前往「清單」與「預算」分頁的捷徑。
+1. **首頁 (`HomeScreen`)** — 商品搜尋與快速加入清單,縮圖以 Coil 載入。
+2. **購物清單 (`ShoppingListScreen`)** — 項目新增/編輯/勾選(`ShoppingItem`)。
+3. **分析 / 飲食 (`IngredientsScreen`)** — 成分拍照 → **PaddleOCR REST**(`callPaddleOcr`) → 內建過敏原字典比對 + 內建 **MET 表**熱量/運動換算 → 存入 `diet_records.json`。
+4. **預算與收據 (`BudgetScreen`,於 `MainContainer.kt`)** — 收據 → **ML Kit `TextRecognition`** → **Groq**(`response_format=json_object`)→ `TidiedReceiptResponse` → 入帳 + **`DonutChart`**。
+5. **紀錄 (`HistoryScreen`)** — 依時間檢視消費 / 購物歷史。
+6. **AI 助理 (`AIScreen`)** — **Groq `llama-3.3-70b-versatile`**,將 `ShoppingContext`(見 `model/ShoppingContext.kt`)注入系統提示,支援多輪情境對話。
 
-### 2. 購物清單 (`ShoppingListScreen`)
-- 購物項目的新增/編輯/勾選(`ShoppingItem`:名稱、數量、價格、是否已購、效期、店家、分類等)。
+**賣場導航 (`NavigationScreen`,路由 `ar_navigation`)** — 已實作 CameraX 即時預覽 + 每 3 秒取樣、GPS、`NearbyStoresAr` AR 店家標記、「選取模擬圖片」。**尚未串接**:每幀分析 `processImageForModel()` 目前為佔位實作,將串接 [`backend/`](backend/README.md) 導航伺服器。
 
-### 3. 分析 / 飲食健康 (`IngredientsScreen`)
-- **成分 OCR**:相機拍照(`TakePicture` + `FileProvider`,暫存 `ocr_scan.jpg`)→ 呼叫 **PaddleOCR REST API**(`callPaddleOcr`,網址取自 `R.string.paddleocr_api_url`,權杖取自 `BuildConfig.PADDLEOCR_ACCESS_TOKEN`)取得成分文字。
-- **過敏原 / 疾病警示**:以**內建過敏原字典**(`allergenMap`,含別名)比對使用者 `UserProfile.allergies`,命中時即時顯示紅色警告。
-- **熱量與運動換算**:依個人資料計算建議熱量;以**內建 MET 表**(慢跑、走路、騎腳踏車等)將攝取熱量換算為所需運動分鐘。
-- 結果封裝為 `DietRecord`(含熱量與碳水/糖/蛋白質/脂肪/鈉等),序列化存入 `diet_records.json`。
+**附近門市 (`NearbyStoresSheet` / `NearbyStoresAr`)** — Google Places SDK + `FusedLocationProviderClient`,haversine 計算距離。
 
-### 4. 預算與收據掃描 (`BudgetScreen`,定義於 `MainContainer.kt`)
-- 拍照或選圖取得收據影像 → **ML Kit `TextRecognition`** 擷取原始文字。
-- 將 OCR 文字送至 **Groq API**(`response_format = json_object`)結構化 → 反序列化為 `TidiedReceiptResponse`(`budget_entry` / `line_items`)。
-- 解析後的品項可併入購物清單作為消費紀錄,並以 **圓環圖 `DonutChart`** 視覺化預算使用率。
-
-### 5. 紀錄 (`HistoryScreen`)
-- 依購買時間檢視消費 / 購物歷史。
-
-### 6. AI 購物助理 (`AIScreen`)
-- **Groq API**,模型 `llama-3.3-70b-versatile`,系統角色為繁體中文購物助理。
-- **情境感知**:每次提問都將 `ShoppingContext`(庫存 + 預算 + 健康的 JSON 快照,見 `model/ShoppingContext.kt`)注入系統提示,可跨模組回答(如「這個月零食花了多少?」「清單會超過預算嗎?」)。
-- 多輪對話:附帶最近 5 組歷史;以 `rememberCoroutineScope` 管理非同步呼叫。
-
-### 賣場導航 (`NavigationScreen`,路由 `ar_navigation`)
-- 由 `TeammateHomeScreen`(確認清單 + 「附近商店 1 公里內」)按「開始導航」進入。
-- 已實作:**CameraX** 即時預覽 + `ImageAnalysis` **每 3 秒**取樣一幀、GPS 定位、`NearbyStoresAr` **AR 店家標記**疊加、以及「選取模擬圖片」測試入口。
-- **尚未串接**:每幀影像分析 `processImageForModel()` 目前為佔位實作(僅記錄並關閉影像)。賣場視覺定位/逐步指引將串接 [`backend/`](backend/README.md) 之 Python 導航伺服器(GroundingDINO + EasyOCR + Ollama VLM + NetworkX)。
-
-### 附近門市 (`NearbyStoresSheet` / `NearbyStoresAr`)
-- **Google Places SDK (New)** + `FusedLocationProviderClient` 取得周邊門市,以 haversine 計算距離;提供清單式底部面板與相機 AR 標記兩種呈現。
-
-### 登入 (`LoginScreen`) 與設定 (`SettingsScreen`)
-- **Firebase Authentication**:登入/註冊雙模式,登入後檢查 `isEmailVerified`,未驗證則 `signOut()` 攔截;註冊後寄送驗證信。
-- 設定:個人資料(性別、生日、身高體重、過敏原、疾病、活動量)寫入 `user_profile.json`;顯示 `filesDir`/`cacheDir` 占用並可清除快取。
+**登入 / 設定** — Firebase Auth 雙模式 + Email 驗證攔截;設定管理個資(寫入 `user_profile.json`)與快取清除。
 
 ---
 
-## 技術堆疊 (Tech Stack) — 以 `app/build.gradle.kts` 為準
+## 🛠️ 技術堆疊 (Tech Stack)
+
+> 以 `app/build.gradle.kts` 與 `gradle/libs.versions.toml` 為準。
 
 | 類別 | 技術項目 |
 |------|----------|
@@ -104,25 +158,20 @@
 | 影像載入 | **Coil 2.7.0** |
 | 序列化 | **kotlinx.serialization** (本地 JSON 持久化) |
 | 網路 | **Retrofit 2.9.0** + Gson + OkHttp logging-interceptor |
-| 雲端 LLM | **Groq API** (`llama-3.3-70b-versatile`,`https://api.groq.com/openai/`) — AI 助理 + 收據結構化 |
+| 雲端 LLM | **Groq API** (`llama-3.3-70b-versatile`) — AI 助理 + 收據結構化 |
 | 收據 OCR | **ML Kit Text Recognition 16.0.1** |
-| 成分 OCR | **PaddleOCR**(自架 REST API,以 `PADDLEOCR_ACCESS_TOKEN` 存取) |
+| 成分 OCR | **PaddleOCR**(自架 REST,`PADDLEOCR_ACCESS_TOKEN`) |
 | 身份驗證 | **Firebase Auth** (BoM 33.9.0) + Analytics |
-| 相機 | **CameraX 1.5.3** (core / camera2 / lifecycle / view) |
+| 相機 | **CameraX 1.5.3** |
 | 定位 / 地點 | **play-services-location 21.3.0** + **Places SDK (New) 4.1.0** |
-| (相依但未呼叫) | **Gemini generativeai 0.9.0**(保留為相依,程式碼目前改用 Groq) |
-| 後端導航 | 見 [`backend/`](backend/README.md):FastAPI · GroundingDINO · EasyOCR · Ollama VLM · NetworkX |
-
-### 執行環境
-- Android **8.0+** 建議(實際 `minSdk = 24` / Android 7.0;`targetSdk = compileSdk = 35`)。
-- 後置相機、GPS + 網路連線;需 Google Play Services。
-- 開發:Android Studio、AGP 9.1.0、Kotlin 2.2.10。
+| (相依但未呼叫) | Gemini generativeai 0.9.0(程式碼目前改用 Groq) |
+| 後端導航 | FastAPI · GroundingDINO · EasyOCR · Ollama (LLaMA 3.2 Vision) · NetworkX — 見 [`backend/`](backend/README.md) |
 
 ---
 
-## 設定金鑰 (API Keys)
+## 🔑 設定金鑰 (API Keys)
 
-金鑰透過專案根目錄的 `.env` 載入並注入 `BuildConfig`(`.env` 已列入 `.gitignore`,請參考 `.env.example` 建立):
+金鑰透過專案根目錄 `.env` 載入並注入 `BuildConfig`(`.env` 已 `.gitignore`,請參考 `.env.example`):
 
 ```
 MAPS_API_KEY=            # Google Places / Maps
@@ -135,97 +184,63 @@ PADDLEOCR_ACCESS_TOKEN=  # PaddleOCR REST
 
 ---
 
-## 安裝與使用 (Installation & Usage)
+## 📲 安裝與使用 (Installation & Usage)
 
-> ⚠️ 本節僅涵蓋 **Android App**。賣場視覺定位所用的 AI 模型(GroundingDINO + EasyOCR + Ollama VLM)**不在 App 內**,而是放在獨立的 **[`backend/`](backend/README.md)** 資料夾(獨立的 Python / FastAPI 服務);其安裝、模型下載與啟動請見 **[`backend/README.md`](backend/README.md)**。
+> ⚠️ 本節僅涵蓋 **Android App**。賣場視覺定位所用的 AI 模型(GroundingDINO + EasyOCR + Ollama VLM)**不在 App 內**,而在獨立的 **[`backend/`](backend/README.md)** 資料夾(獨立 Python / FastAPI 服務),其安裝、模型下載與啟動請見 **[`backend/README.md`](backend/README.md)**。
 
 ### 前置需求
-- **Android Studio**(Hedgehog 或更新版)+ **JDK 11**
-- **Android SDK**(compileSdk 35)
+- **Android Studio**(Hedgehog+)+ **JDK 11** · **Android SDK**(compileSdk 35)
 - 實機或模擬器,**Android 7.0 (API 24) 以上**
-- Firebase 專案的 `google-services.json`(放入 `app/`)
+- Firebase `google-services.json`(放入 `app/`)
 
 ### 安裝步驟
-1. 取得原始碼:
-   ```bash
-   git clone https://github.com/B1229013/Shopping-Navigation.git
-   cd Shopping-Navigation
-   ```
-2. **設定金鑰**:於專案根目錄將 `.env.example` 複製為 `.env`,填入 4 把金鑰(見上一節「設定金鑰」)。
-3. 放入 Firebase 設定檔 `app/google-services.json`。
-4. 以 Android Studio 開啟專案並讓 Gradle 同步;或用命令列建置:
-   ```bash
-   ./gradlew :app:assembleDebug      # macOS / Linux
-   gradlew.bat :app:assembleDebug    # Windows
-   ```
-5. 安裝到裝置(或在 Android Studio 直接按 ▶ Run):
-   ```bash
-   ./gradlew :app:installDebug
-   ```
+```bash
+# 1) 取得原始碼
+git clone https://github.com/B1229013/Shopping-Navigation.git
+cd Shopping-Navigation
 
-### 模型 / 服務安裝(App 端)
-本 App 的 AI 能力來自外部模型與服務,**手機端無需自行下載大型模型**,只要設定好金鑰即可:
-- **Groq (LLaMA 3.3)** — 雲端呼叫,需 `GROQ_API_KEY`。用於 AI 助理與收據結構化。
-- **ML Kit Text Recognition** — 隨 Google Play Services 提供,首次使用會自動下載辨識模組(收據 OCR)。
-- **PaddleOCR** — 呼叫自架 REST 服務,需 `PADDLEOCR_ACCESS_TOKEN` 與 `R.string.paddleocr_api_url`(成分 OCR)。
-- **Google Places / Firebase** — 需 `MAPS_API_KEY` 與 `app/google-services.json`。
+# 2) 設定金鑰:複製 .env.example 為 .env 並填入 4 把金鑰
+#    放入 Firebase 設定檔 app/google-services.json
+
+# 3) 建置 + 安裝(或在 Android Studio 直接按 ▶ Run)
+gradlew.bat :app:assembleDebug    # Windows  (macOS/Linux: ./gradlew ...)
+gradlew.bat :app:installDebug
+```
+
+### 模型 / 服務(App 端)
+手機端**無需下載大型模型**,設定好金鑰即可:**Groq**(需 `GROQ_API_KEY`)、**ML Kit**(隨 Play Services 自動下載)、**PaddleOCR**(自架 REST)、**Places / Firebase**。
 
 ### 使用流程
-1. 首次啟動於 `login` 頁註冊,收驗證信完成 **Email 驗證**後登入。
-2. 「**清單**」新增購物項目(「首頁」可快速搜尋加入)。
-3. 「**分析**」拍攝食品成分 → 自動偵測過敏原並做熱量 / 運動換算。
-4. 「**預算**」拍攝收據 → 自動結構化品項並更新預算圓環圖。
-5. 「**助理**」以自然語言詢問購物 / 預算 / 健康(情境感知)。
-6. 「**賣場導航**」:於 `teammate_home` 確認清單與附近商店後按「開始導航」進入相機 + AR 畫面。**賣場視覺定位需先啟動 [`backend/`](backend/README.md) 後端伺服器**。
+`註冊→Email 驗證→登入` → 「清單」加商品 → 「分析」拍成分(過敏/熱量) → 「預算」拍收據(自動入帳) → 「助理」問問題 → 「賣場導航」確認清單後開始導航(需先啟動後端)。
 
 ---
 
-## 專案結構 (Project Structure)
+## 📁 專案結構 (Project Structure)
 
 ```
 Shopping-Navigation/
 ├── app/                                  # Android 客戶端
 │   └── src/main/java/com/example/shopping/
 │       ├── MainActivity.kt               # 單一 Activity + NavHost
-│       ├── model/                        # ShoppingItem / DietRecord / UserProfile
-│       │                                 #   ShoppingContext / GeminiBudgetResponse
+│       ├── model/                        # ShoppingItem / DietRecord / UserProfile / ShoppingContext
 │       └── ui/
-│           ├── screens/                  # 各畫面
-│           │   ├── MainContainer.kt      # 六分頁容器 + BudgetScreen + Groq/OCR/DonutChart
-│           │   ├── HomeScreen.kt         # 首頁
-│           │   ├── ShoppingListScreen.kt # 清單
-│           │   ├── IngredientsScreen.kt  # 分析(PaddleOCR + 過敏原 + MET)
-│           │   ├── HistoryScreen.kt      # 紀錄
-│           │   ├── AIScreen.kt           # 助理(Groq + ShoppingContext)
-│           │   ├── NavigationScreen.kt   # 賣場導航(CameraX + AR;含 TeammateHomeScreen)
-│           │   ├── NearbyStoresSheet.kt / NearbyStoresAr.kt
-│           │   ├── LoginScreen.kt / SettingsScreen.kt
-│           │   └── ...
-│           ├── components/               # CinematicComponents / 互動元件
-│           ├── utils/                    # CategoryClassifier / FoodIcons
-│           └── theme/
+│           ├── screens/                  # MainContainer(含 BudgetScreen) / Home / ShoppingList
+│           │                             #   Ingredients / History / AI / Navigation / NearbyStores ...
+│           ├── components/ · utils/ · theme/
 │
-├── backend/                              # Python 後端導航伺服器 (FastAPI)
+├── backend/                              # Python 後端導航伺服器 (FastAPI) — 見 backend/README.md
 │   ├── server/                           # GroundingDINO + EasyOCR + Ollama VLM + NetworkX
 │   ├── eval/ · generate_topomap.py · build_store_*.py · ...
 │   └── README.md
 │
-├── Map/                                  # 賣場地圖資料(執行期)
-├── .env.example · build.gradle.kts · settings.gradle.kts · README.md
+├── Map/ · .env.example · build.gradle.kts · settings.gradle.kts · README.md
 ```
 
 ---
 
-## 已知限制
+## ⚠️ 已知限制與容錯 (Limitations & Robustness)
 
-- **賣場視覺定位未完成**:`NavigationScreen` 的逐幀分析為佔位實作,尚待串接 `backend/` 導航伺服器。
-- **OCR 光學條件**:光線不足、包裝反光、字體過小會降低 ML Kit / PaddleOCR 成功率。
-- **第三方 API 配額**:Groq、Places 受官方頻率與配額限制;需網路連線。
-- **過敏原偵測**:以內建字典比對,涵蓋範圍有限,僅供參考非醫療建議。
-
-## 容錯與安全
-
-- **網路容錯**:LLM 呼叫以 `try-catch` 包覆,錯誤時於對話中回報而不致崩潰。
-- **金鑰管理**:API 金鑰經 `.env` → `BuildConfig` 注入,`.env` 不入庫。
-- **資料本地化**:購物 / 飲食 / 預算 / 個人資料僅存於 `filesDir`。
-- **身份屏障**:Email 未驗證帳號自動 `signOut()` 攔截於登入頁面。
+- **賣場視覺定位未完成**:`NavigationScreen` 逐幀分析為佔位,待串接 `backend/`。
+- **OCR 光學條件**:光線不足、反光、字體過小會降低 ML Kit / PaddleOCR 成功率。
+- **第三方 API 配額**:Groq、Places 受官方頻率/配額限制,需網路連線。
+- **容錯**:LLM 呼叫以 `try-catch` 包覆;金鑰經 `.env`→`BuildConfig`(不入庫);資料僅存 `filesDir`;Email 未驗證帳號自動 `signOut()` 攔截。

@@ -135,6 +135,51 @@ PADDLEOCR_ACCESS_TOKEN=  # PaddleOCR REST
 
 ---
 
+## 安裝與使用 (Installation & Usage)
+
+> ⚠️ 本節僅涵蓋 **Android App**。賣場視覺定位所用的 AI 模型(GroundingDINO + EasyOCR + Ollama VLM)**不在 App 內**,而是放在獨立的 **[`backend/`](backend/README.md)** 資料夾(獨立的 Python / FastAPI 服務);其安裝、模型下載與啟動請見 **[`backend/README.md`](backend/README.md)**。
+
+### 前置需求
+- **Android Studio**(Hedgehog 或更新版)+ **JDK 11**
+- **Android SDK**(compileSdk 35)
+- 實機或模擬器,**Android 7.0 (API 24) 以上**
+- Firebase 專案的 `google-services.json`(放入 `app/`)
+
+### 安裝步驟
+1. 取得原始碼:
+   ```bash
+   git clone https://github.com/B1229013/Shopping-Navigation.git
+   cd Shopping-Navigation
+   ```
+2. **設定金鑰**:於專案根目錄將 `.env.example` 複製為 `.env`,填入 4 把金鑰(見上一節「設定金鑰」)。
+3. 放入 Firebase 設定檔 `app/google-services.json`。
+4. 以 Android Studio 開啟專案並讓 Gradle 同步;或用命令列建置:
+   ```bash
+   ./gradlew :app:assembleDebug      # macOS / Linux
+   gradlew.bat :app:assembleDebug    # Windows
+   ```
+5. 安裝到裝置(或在 Android Studio 直接按 ▶ Run):
+   ```bash
+   ./gradlew :app:installDebug
+   ```
+
+### 模型 / 服務安裝(App 端)
+本 App 的 AI 能力來自外部模型與服務,**手機端無需自行下載大型模型**,只要設定好金鑰即可:
+- **Groq (LLaMA 3.3)** — 雲端呼叫,需 `GROQ_API_KEY`。用於 AI 助理與收據結構化。
+- **ML Kit Text Recognition** — 隨 Google Play Services 提供,首次使用會自動下載辨識模組(收據 OCR)。
+- **PaddleOCR** — 呼叫自架 REST 服務,需 `PADDLEOCR_ACCESS_TOKEN` 與 `R.string.paddleocr_api_url`(成分 OCR)。
+- **Google Places / Firebase** — 需 `MAPS_API_KEY` 與 `app/google-services.json`。
+
+### 使用流程
+1. 首次啟動於 `login` 頁註冊,收驗證信完成 **Email 驗證**後登入。
+2. 「**清單**」新增購物項目(「首頁」可快速搜尋加入)。
+3. 「**分析**」拍攝食品成分 → 自動偵測過敏原並做熱量 / 運動換算。
+4. 「**預算**」拍攝收據 → 自動結構化品項並更新預算圓環圖。
+5. 「**助理**」以自然語言詢問購物 / 預算 / 健康(情境感知)。
+6. 「**賣場導航**」:於 `teammate_home` 確認清單與附近商店後按「開始導航」進入相機 + AR 畫面。**賣場視覺定位需先啟動 [`backend/`](backend/README.md) 後端伺服器**。
+
+---
+
 ## 專案結構 (Project Structure)
 
 ```

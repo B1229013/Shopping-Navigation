@@ -72,11 +72,14 @@
 # 1) 安裝伺服器執行階段相依套件
 pip install -r requirements-server.txt
 
-# 2) 安裝並啟動 Ollama，拉取視覺模型
-ollama pull llama3.2-vision
+# 2) 安裝 Ollama（https://ollama.com）並啟動服務，拉取視覺模型
+ollama pull llama3.2-vision        # 約 7–8 GB，首次拉取較久
+ollama serve                       # 預設監聽 127.0.0.1:11434
 
-# 3) 下載 GroundingDINO 權重，放到 models/groundingdino_swint_ogc.pth
-#    （並備妥 GroundingDINO 設定檔，路徑由 server/config.py 自動偵測）
+# 3) 下載 GroundingDINO 權重（zero-shot 物件偵測模型），放到 models/groundingdino_swint_ogc.pth
+#    權重來源：https://github.com/IDEA-Research/GroundingDINO（檔名 groundingdino_swint_ogc.pth）
+#    並 clone GroundingDINO 以取得設定檔 GroundingDINO_SwinT_OGC.py（路徑由 server/config.py 自動偵測）
+#    EasyOCR 模型會於首次執行時自動下載，無需手動處理
 
 # 4) 啟動伺服器（於本 backend/ 目錄下執行）
 python -m server.run_server
@@ -85,6 +88,37 @@ uvicorn server.server:app --host 0.0.0.0 --port 8000
 ```
 
 > 建圖管線（下節）另需 ML 相依套件：`torch`、`groundingdino`、`matplotlib`、`pyvis`、`pillow`、`pillow-heif` 等；建議於具 GPU 的環境（如 WSL conda 環境）執行。
+
+---
+
+## 使用方式 (Usage)
+
+伺服器啟動後，一次顧客導航流程如下（以 `curl` 為例）：
+
+```bash
+# 1) 建立 session，輸入要找的商品
+curl -X POST http://localhost:8000/session \
+  -H "Content-Type: application/json" \
+  -d '{"goal": "find milk"}'
+# → { "session_id": "...", "guidance": "...", "goal_objects": ["milk","dairy",...] }
+
+# 2) 每走一步上傳一張照片，取得導航動作
+curl -X POST http://localhost:8000/session/<session_id>/photo \
+  -F "photo=@step1.jpg"
+# → { "action": "MOVE|ASK|ARRIVED", "guidance": "...", "question": "...",
+#     "annotated_photo_url": "/session/<id>/photo/0.jpg" }
+
+# 3) 若 action 為 ASK，回答後繼續
+curl -X POST http://localhost:8000/session/<session_id>/answer \
+  -H "Content-Type: application/json" \
+  -d '{"answer": "yes"}'
+```
+
+- `action = MOVE` → 顯示 `guidance` 指引顧客移動，再拍下一張照片。
+- `action = ASK` → 顯示 `question`，由顧客回答（`/answer`）。
+- `action = ARRIVED` → 已抵達目標，session 結束。
+
+> Android App 端由 `NavigationScreen` 對應呼叫上述端點（目前 App 的 `processImageForModel()` 仍為佔位實作，待串接此後端）。
 
 ---
 

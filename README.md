@@ -157,21 +157,6 @@ App 端直接呼叫雲端服務完成「OCR + 文字理解」;賣場視覺定位
 **後端** — Python 3.12 · FastAPI · GroundingDINO · EasyOCR · Ollama(LLaMA 3.2 Vision)· NetworkX
 **備註** — Gemini generativeai 0.9.0 仍列為相依,但程式碼目前一律改用 Groq。
 
----
-
-## 金鑰設定 (.env)
-
-金鑰放在專案根目錄 `.env`(已 `.gitignore`,參考 `.env.example`),建置時注入 `BuildConfig`:
-
-```bash
-MAPS_API_KEY=            # Google Places / Maps（亦注入 AndroidManifest）
-GROQ_API_KEY=            # Groq LLM
-PADDLEOCR_ACCESS_TOKEN=  # PaddleOCR REST
-GEMINI_API_KEY=          # 目前未實際使用
-```
-
----
-
 ## 建置與執行
 
 **Android App**

@@ -1,4 +1,4 @@
-"""VLM client: send (image + prompt) to Ollama and parse structured response."""
+"""VLM client: send (image + prompt) to Gemini (default) or Ollama, parse structured response."""
 from __future__ import annotations
 
 import base64
@@ -11,7 +11,12 @@ from typing import List, Optional
 import requests
 from PIL import Image
 
-from server.config import OLLAMA_URL, OLLAMA_MODEL, VLM_TIMEOUT_S
+from server.config import (
+    GEMINI_API_KEY, GEMINI_MODEL,
+    OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL,
+    OLLAMA_URL, OLLAMA_MODEL,
+    VLM_TIMEOUT_S, VLM_BACKEND,
+)
 from server.models import VLMAction, VLMResponse
 from server.prompts import PER_TURN_PROMPT, PRIOR_ANSWER_BLOCK
 
@@ -23,6 +28,8 @@ _FALLBACK = VLMResponse(
     question=None,
     vlm_summary="",
 )
+
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
 
 
 def _build_prompt(
@@ -65,8 +72,31 @@ def _parse(text: str) -> Optional[VLMResponse]:
         return None
 
 
-def _generate(prompt: str, images: Optional[List[str]] = None) -> str:
-    """One Ollama generate call. ``format=json`` makes the model emit parseable JSON."""
+# ── Gemini backend ──
+
+def _gemini_generate(prompt: str, image_b64: Optional[str] = None) -> str:
+    url = _GEMINI_URL.format(model=GEMINI_MODEL, key=GEMINI_API_KEY)
+    parts: list = []
+    if image_b64:
+        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": image_b64}})
+    parts.append({"text": prompt})
+    body = {
+        "contents": [{"parts": parts}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 512},
+    }
+    r = requests.post(url, json=body, timeout=VLM_TIMEOUT_S)
+    r.raise_for_status()
+    resp = r.json()
+    candidates = resp.get("candidates", [])
+    if not candidates:
+        return ""
+    text_parts = [p.get("text", "") for p in candidates[0].get("content", {}).get("parts", [])]
+    return "".join(text_parts)
+
+
+# ── Ollama backend ──
+
+def _ollama_generate(prompt: str, images: Optional[List[str]] = None) -> str:
     body = {"model": OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json"}
     if images:
         body["images"] = images
@@ -75,31 +105,60 @@ def _generate(prompt: str, images: Optional[List[str]] = None) -> str:
     return r.json().get("response", "")
 
 
-def ask_about_image(image_pil: Image.Image, prompt: str) -> str:
-    """TASK 3 helper — ask the VLM a free-form question about a (cropped) image.
+# ── OpenAI backend ──
 
-    Used to confirm a goal detection. Plain text reply (no ``format=json``) so a
-    short "yes"/"no" comes back cleanly. Encodes the PIL image to base64 JPEG.
-    """
+def _openai_generate(prompt: str, image_b64: Optional[str] = None) -> str:
+    url = f"{OPENAI_BASE_URL}/chat/completions"
+    content: list = []
+    if image_b64:
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}})
+    content.append({"type": "text", "text": prompt})
+    body = {
+        "model": OPENAI_MODEL,
+        "messages": [{"role": "user", "content": content}],
+        "temperature": 0.2,
+        "max_tokens": 512,
+    }
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    r = requests.post(url, json=body, headers=headers, timeout=VLM_TIMEOUT_S)
+    r.raise_for_status()
+    choices = r.json().get("choices", [])
+    if not choices:
+        return ""
+    return choices[0].get("message", {}).get("content", "")
+
+
+# ── Unified dispatch ──
+
+def _generate(prompt: str, image_b64: Optional[str] = None) -> str:
+    if VLM_BACKEND == "gemini":
+        return _gemini_generate(prompt, image_b64=image_b64)
+    elif VLM_BACKEND == "openai":
+        return _openai_generate(prompt, image_b64=image_b64)
+    else:
+        return _ollama_generate(prompt, images=[image_b64] if image_b64 else None)
+
+
+def ask_about_image(image_pil: Image.Image, prompt: str) -> str:
     buf = io.BytesIO()
     image_pil.convert("RGB").save(buf, format="JPEG")
     img_b64 = base64.b64encode(buf.getvalue()).decode()
-    body = {"model": OLLAMA_MODEL, "prompt": prompt, "stream": False, "images": [img_b64]}
-    r = requests.post(f"{OLLAMA_URL}/api/generate", json=body, timeout=VLM_TIMEOUT_S)
-    r.raise_for_status()
-    return r.json().get("response", "")
+    return _generate(prompt, image_b64=img_b64)
 
 
 def warm_up() -> None:
-    """Prime the model so the first real photo doesn't eat the cold-start cost.
-
-    Best-effort: failures (Ollama down/not pulled) are logged, never raised.
-    """
+    backend = VLM_BACKEND
+    if backend == "gemini" and not GEMINI_API_KEY:
+        log.warning("GEMINI_API_KEY not set — VLM warm-up skipped")
+        return
+    if backend == "openai" and not OPENAI_API_KEY:
+        log.warning("OPENAI_API_KEY not set — VLM warm-up skipped")
+        return
     try:
-        _generate("Reply with an empty JSON object.")
-        log.info("VLM warm-up complete")
+        _generate("Reply with an empty JSON object: {}")
+        log.info("VLM warm-up complete (%s)", backend)
     except Exception as e:
-        log.warning("VLM warm-up failed (continuing): %s", e)
+        log.warning("VLM warm-up failed (continuing, backend=%s): %s", backend, e)
 
 
 def decide(
@@ -112,19 +171,30 @@ def decide(
     prior_answer: Optional[str],
     ocr_summary: Optional[str] = None,
 ) -> VLMResponse:
+    if VLM_BACKEND == "gemini" and not GEMINI_API_KEY:
+        log.error("GEMINI_API_KEY not set — cannot call VLM")
+        return _FALLBACK
+    if VLM_BACKEND == "openai" and not OPENAI_API_KEY:
+        log.error("OPENAI_API_KEY not set — cannot call VLM")
+        return _FALLBACK
+
     prompt = _build_prompt(goal, goal_objects, topomap_summary, detections_summary, prior_question, prior_answer, ocr_summary=ocr_summary)
     try:
-        with open(image_path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode()
+        img = Image.open(image_path).convert("RGB")
+        max_dim = 1024
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        img_b64 = base64.b64encode(buf.getvalue()).decode()
+        log.info("VLM image resized to %s, %d KB", img.size, len(buf.getvalue()) // 1024)
     except Exception as e:
         log.warning("VLM could not read image %s: %s", image_path, e)
         return _FALLBACK
 
-    # Retry once: the first response (especially right after startup) is the most
-    # likely to be unparseable, and a single retry recovers most of those.
     for attempt in (1, 2):
         try:
-            text = _generate(prompt, images=[img_b64])
+            text = _generate(prompt, image_b64=img_b64)
         except Exception as e:
             log.warning("VLM call failed (attempt %d/2): %s", attempt, e)
             continue

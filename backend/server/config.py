@@ -9,6 +9,16 @@ from pathlib import Path
 # Project root (where this repo lives)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# Load .env from project root (Shopping-Navigation/.env)
+_dotenv = PROJECT_ROOT.parent / ".env"
+if _dotenv.exists():
+    for line in _dotenv.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            v = v.split("#")[0].strip()
+            os.environ.setdefault(k.strip(), v)
+
 # Model weights — check local project first, then WSL paths
 _LOCAL_MODELS = PROJECT_ROOT / "models"
 _WSL_MODELS = Path("/home/user/UniGoal/data/models")
@@ -25,7 +35,15 @@ _GDINO_REPO = Path(os.environ.get(
     "GROUNDINGDINO_REPO",
     str(PROJECT_ROOT.parent / "GroundingDINO")
 ))
+def _gdino_site_packages_config() -> Path:
+    try:
+        import groundingdino
+        return Path(groundingdino.__file__).parent / "config" / "GroundingDINO_SwinT_OGC.py"
+    except ImportError:
+        return Path("_not_installed_")
+
 _GDINO_CONFIG_CANDIDATES = [
+    _gdino_site_packages_config(),
     _GDINO_REPO / "groundingdino" / "config" / "GroundingDINO_SwinT_OGC.py",
     PROJECT_ROOT.parent.parent / "GroundingDINO" / "groundingdino" / "config" / "GroundingDINO_SwinT_OGC.py",
     Path("C:/Users/user/Downloads/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"),
@@ -42,7 +60,13 @@ SAM_WEIGHTS = _LOCAL_MODELS / "sam_vit_h_4b8939.pth"
 # Output
 OUTPUT_ROOT = PROJECT_ROOT / "output" / "sessions"
 
-# LLM services
+# LLM services — "gemini" (default), "openai", or "ollama"
+VLM_BACKEND = os.environ.get("VLM_BACKEND", "gemini")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2-vision")
 
@@ -51,9 +75,10 @@ SERVER_HOST = os.environ.get("SERVER_HOST", "0.0.0.0")
 SERVER_PORT = int(os.environ.get("SERVER_PORT", "8000"))
 
 # Detection thresholds (TASK 1 — raised for busy store shelves; retry lower only if nothing found)
-GROUNDINGDINO_BOX_THRESHOLD = 0.40           # was 0.30 — fewer false positives on dense shelves
-GROUNDINGDINO_TEXT_THRESHOLD = 0.30          # was 0.25
-GROUNDINGDINO_BOX_THRESHOLD_FALLBACK = 0.30  # retry at this only if primary threshold finds nothing
+PERCEPTION_ENABLED = os.environ.get("PERCEPTION_ENABLED", "1") != "0"
+GROUNDINGDINO_BOX_THRESHOLD = 0.30
+GROUNDINGDINO_TEXT_THRESHOLD = 0.25
+GROUNDINGDINO_BOX_THRESHOLD_FALLBACK = 0.20
 SAM_TOP_K_BOXES = 10                          # was 5 — stores have more objects per scene
 
 # TASK 3 — crop-verify a goal detection with the VLM before trusting it.
@@ -71,7 +96,7 @@ OCR_MIN_CONFIDENCE = float(os.environ.get("OCR_MIN_CONFIDENCE", "0.3"))
 OCR_MAX_RESULTS = int(os.environ.get("OCR_MAX_RESULTS", "15"))
 
 # Timeouts
-VLM_TIMEOUT_S = 60
+VLM_TIMEOUT_S = int(os.environ.get("VLM_TIMEOUT_S", "120"))
 GOAL_DECOMPOSE_TIMEOUT_S = 30
 
 

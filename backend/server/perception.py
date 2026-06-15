@@ -5,7 +5,10 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None  # type: ignore[assignment]
 from PIL import Image
 
 from server.config import (
@@ -53,17 +56,22 @@ def verify_goal_detection(
 
 class Perception:
     def __init__(self) -> None:
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if torch and torch.cuda.is_available():
+            vram_mb = torch.cuda.get_device_properties(0).total_memory // (1024 * 1024)
+            # GroundingDINO + BERT needs ~1.8GB; use GPU only if enough VRAM
+            self.device = "cuda" if vram_mb >= 3072 else "cpu"
+            if self.device == "cpu":
+                log.info("GPU has %dMB VRAM (< 3GB), GroundingDINO will use CPU", vram_mb)
+        else:
+            self.device = "cpu"
         self._gd_model = None
         self._sam_predictor = None
 
     def load(self) -> None:
         from groundingdino.util.inference import load_model
 
-        log.info("loading GroundingDINO from %s", GROUNDINGDINO_WEIGHTS)
-        self._gd_model = load_model(str(GROUNDINGDINO_CONFIG), str(GROUNDINGDINO_WEIGHTS))
-        # SAM is intentionally not loaded: detect() only needs GroundingDINO boxes,
-        # and SAM ViT-H + llama3.2-vision together exceed the 8 GB VRAM budget.
+        log.info("loading GroundingDINO from %s (device=%s)", GROUNDINGDINO_WEIGHTS, self.device)
+        self._gd_model = load_model(str(GROUNDINGDINO_CONFIG), str(GROUNDINGDINO_WEIGHTS), device=self.device)
         self._sam_predictor = None
         log.info("perception loaded on %s (GroundingDINO only)", self.device)
 

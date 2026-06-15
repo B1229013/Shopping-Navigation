@@ -1,10 +1,17 @@
 """FastAPI app — endpoints for in-store navigation sessions."""
 from __future__ import annotations
 
+import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 import requests as _requests
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -14,7 +21,8 @@ from PIL import Image
 from server import scene
 from server.annotator import annotate
 from server.config import (
-    OLLAMA_MODEL, OLLAMA_URL, OCR_ENABLED, OCR_LANGUAGES,
+    OLLAMA_URL, OLLAMA_MODEL,
+    PERCEPTION_ENABLED, OCR_ENABLED, OCR_LANGUAGES,
     OCR_MIN_CONFIDENCE, OCR_MAX_RESULTS, ARRIVED_MIN_DETECTION_SCORE,
     GOAL_CROP_VERIFY, ensure_output_dir,
 )
@@ -49,21 +57,41 @@ def get_store() -> SessionStore:
     return _store
 
 
-def get_perception() -> Perception:
-    global _perception
+_perception_failed = False
+
+def get_perception() -> Optional[Perception]:
+    global _perception, _perception_failed
+    if not PERCEPTION_ENABLED or _perception_failed:
+        return None
     if _perception is None:
-        _perception = Perception()
-        _perception.load()
+        try:
+            p = Perception()
+            p.load()
+            _perception = p
+        except Exception as e:
+            log.warning("Perception unavailable: %s", e)
+            _perception_failed = True
+            return None
     return _perception
 
 
+_ocr_failed = False
+
 def get_ocr() -> Optional[OCR]:
-    global _ocr
+    global _ocr, _ocr_failed
+    if _ocr_failed:
+        return None
     if not OCR_ENABLED:
         return None
     if _ocr is None:
-        _ocr = OCR(languages=OCR_LANGUAGES)
-        _ocr.load()
+        try:
+            o = OCR(languages=OCR_LANGUAGES)
+            o.load()
+            _ocr = o
+        except Exception as e:
+            log.warning("OCR unavailable: %s", e)
+            _ocr_failed = True
+            return None
     return _ocr
 
 
@@ -99,6 +127,7 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
     if not req.goal.strip():
         raise HTTPException(status_code=400, detail={"error": "bad_request", "detail": "goal is empty"})
     goal_objects = decompose_goal(req.goal)
+    log.info("New session | goal: %s | goal_objects: %s", req.goal, goal_objects)
     s = _store.create(goal=req.goal, goal_objects=goal_objects)
     return StartSessionResponse(
         session_id=s.id,
@@ -117,16 +146,32 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     if s.pending_question is not None:
         raise HTTPException(status_code=409, detail={"error": "answer_pending", "detail": "POST /answer first"})
 
+    t_start = time.time()
     out_dir = ensure_output_dir(session_id)
     photo_bytes = await photo.read()
     nid_for_path = s.topomap.graph.number_of_nodes()
     photo_path = out_dir / "photo" / f"{nid_for_path}.jpg"
     photo_path.write_bytes(photo_bytes)
-    img_w, img_h = _image_size(str(photo_path))
+
+    # Read image dimensions; only re-save if resize is needed
+    im = Image.open(photo_path)
+    im = im.convert("RGB")
+    img_w, img_h = im.size
+    if max(img_w, img_h) > 1600:
+        im.thumbnail((1600, 1600))
+        img_w, img_h = im.size
+        im.save(photo_path, format="JPEG", quality=85)
+        log.info("Photo resized to %dx%d for faster processing", img_w, img_h)
+    im.close()
+
+    t_resize = time.time()
 
     perception = get_perception()
-    detections = perception.detect(str(photo_path), s.goal_objects)
+    log.info("GroundingDINO prompt: %s", s.goal_objects)
+    detections = perception.detect(str(photo_path), s.goal_objects) if perception else []
     detected_labels = [d.label for d in detections]
+    t_detect = time.time()
+    log.info("⏱ GroundingDINO: %.1fs", t_detect - t_resize)
 
     # Run OCR to extract text from the photo
     ocr_engine = get_ocr()
@@ -141,6 +186,8 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         ocr_text_summary = scene.format_ocr(ocr_results, img_w, img_h)
         if ocr_results:
             log.info("OCR found %d text regions: %s", len(ocr_results), ocr_text_summary[:100])
+    t_ocr = time.time()
+    log.info("⏱ EasyOCR: %.1fs", t_ocr - t_detect)
 
     # Match OCR signs to the goal (store aisle/section signs are the strongest signal).
     ocr_matches = scene.match_ocr_to_goal(ocr_results, s.goal_objects)
@@ -158,6 +205,10 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     detections_summary = scene.format_detections(detections, img_w, img_h)
     topomap_summary = s.topomap.summarize_for_vlm(current_id=nid)
 
+    log.info("[session %s] photo #%d | detections: %s | ocr: %s",
+             session_id, nid, detected_labels or "(none)", ocr_text_summary[:80])
+
+    t_vlm_start = time.time()
     vlm_resp = vlm_decide(
         image_path=str(photo_path),
         goal=s.goal,
@@ -168,6 +219,10 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         prior_answer=None,
         ocr_summary=ocr_text_summary,
     )
+    t_vlm = time.time()
+
+    log.info("[session %s] VLM → %s | %s", session_id, vlm_resp.action.value, vlm_resp.guidance[:120])
+    log.info("⏱ VLM: %.1fs | Total: %.1fs", t_vlm - t_vlm_start, t_vlm - t_start)
 
     # TASK 3 — when the VLM claims ARRIVED, crop the best goal-matching detection
     # and ask the VLM to confirm that region really shows the goal. This catches
@@ -202,6 +257,14 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
 
     annotated_path = out_dir / "annotated" / f"{nid}.jpg"
     annotate(str(photo_path), str(annotated_path), detections, banner_text=f"{vlm_resp.action.value}: {vlm_resp.guidance}", ocr_results=ocr_results)
+
+    # Save map JSON and PNG after each photo
+    map_dir = out_dir / "map"
+    map_dir.mkdir(parents=True, exist_ok=True)
+    map_json = s.topomap.to_dict(current_node=nid, goal_node=s.goal_node)
+    (map_dir / f"map_{nid}.json").write_text(json.dumps(map_json, ensure_ascii=False, indent=2), encoding="utf-8")
+    map_png = s.topomap.render_png(current_id=nid)
+    (map_dir / f"map_{nid}.png").write_bytes(map_png)
 
     s.history.append({
         "kind": "photo",
@@ -243,6 +306,7 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
     detections_summary = scene.format_detections(s.last_detections, img_w, img_h)
     topomap_summary = s.topomap.summarize_for_vlm(current_id=s.last_node_id)
     prior_question = s.pending_question
+    log.info("[session %s] answer: Q=%s A=%s", session_id, prior_question[:60], req.answer[:60])
 
     vlm_resp = vlm_decide(
         image_path=s.last_photo_path,
@@ -254,6 +318,8 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
         prior_answer=req.answer,
         ocr_summary=getattr(s, "last_ocr_summary", None),
     )
+
+    log.info("[session %s] VLM → %s | %s", session_id, vlm_resp.action.value, vlm_resp.guidance[:120])
 
     # If the user is answering our own confirm question, trust ARRIVED; otherwise gate it.
     _raw_action = vlm_resp.action
@@ -303,18 +369,29 @@ def get_map(session_id: str, format: str = Query(default="json")):
 
 
 @app.on_event("startup")
-def _check_ollama_and_warm_perception():
-    try:
-        r = _requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
-        r.raise_for_status()
-        models = [m["name"] for m in r.json().get("models", [])]
-        if not any(m.startswith(OLLAMA_MODEL) for m in models):
-            log.warning("Ollama is reachable but model %s is not pulled. Run `ollama pull %s`.", OLLAMA_MODEL, OLLAMA_MODEL)
-    except Exception as e:
-        log.error("Ollama unreachable at startup: %s. Start it: `sudo systemctl start ollama`.", e)
+def _check_vlm_and_warm():
+    from server.config import VLM_BACKEND, GEMINI_API_KEY, GEMINI_MODEL, OPENAI_API_KEY, OPENAI_MODEL
+    log.info("VLM backend: %s", VLM_BACKEND)
+    if VLM_BACKEND == "gemini":
+        if not GEMINI_API_KEY:
+            log.error("GEMINI_API_KEY not set. Add it to .env or environment variables.")
+        else:
+            log.info("Gemini model: %s", GEMINI_MODEL)
+    elif VLM_BACKEND == "openai":
+        if not OPENAI_API_KEY:
+            log.error("OPENAI_API_KEY not set. Add it to .env or environment variables.")
+        else:
+            log.info("OpenAI model: %s", OPENAI_MODEL)
+    else:
+        try:
+            r = _requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+            r.raise_for_status()
+            models = [m["name"] for m in r.json().get("models", [])]
+            if not any(m.startswith(OLLAMA_MODEL) for m in models):
+                log.warning("Ollama model %s not pulled. Run: ollama pull %s", OLLAMA_MODEL, OLLAMA_MODEL)
+        except Exception as e:
+            log.error("Ollama unreachable: %s", e)
 
-    # Prime the VLM so the first photo isn't slow / unparseable. Skipped under
-    # test mode to keep the suite fast and offline.
     if not os.environ.get("UNIGOAL_TEST_MODE"):
         _vlm_warm_up()
 

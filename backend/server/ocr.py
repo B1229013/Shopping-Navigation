@@ -32,9 +32,18 @@ class OCR:
         import easyocr
 
         log.info("Loading EasyOCR with languages: %s", self._languages)
+        try:
+            import torch
+            if torch.cuda.is_available():
+                vram_mb = torch.cuda.get_device_properties(0).total_memory // (1024 * 1024)
+                use_gpu = vram_mb >= 3072
+            else:
+                use_gpu = False
+        except ImportError:
+            use_gpu = False
         self._reader = easyocr.Reader(
             self._languages,
-            gpu=True,
+            gpu=use_gpu,
             verbose=False,
         )
         log.info("EasyOCR loaded successfully")
@@ -59,7 +68,17 @@ class OCR:
             self.load()
 
         try:
-            raw = self._reader.readtext(image_path)
+            from PIL import Image as _PILImage
+            img = _PILImage.open(image_path)
+            max_dim = 2048
+            if max(img.size) > max_dim:
+                img.thumbnail((max_dim, max_dim))
+                resized_path = image_path + ".ocr_tmp.jpg"
+                img.save(resized_path, format="JPEG", quality=90)
+                raw = self._reader.readtext(resized_path)
+                import os; os.remove(resized_path)
+            else:
+                raw = self._reader.readtext(image_path)
         except Exception as e:
             log.warning("OCR failed on %s: %s", image_path, e)
             return []

@@ -20,6 +20,7 @@ val mapsApiKey: String = secret("MAPS_API_KEY")
 val geminiApiKey: String = secret("GEMINI_API_KEY")
 val groqApiKey: String = secret("GROQ_API_KEY")
 val paddleOcrAccessToken: String = secret("PADDLEOCR_ACCESS_TOKEN")
+val backendUrl: String = secret("BACKEND_URL")
 
 android {
     namespace = "com.example.shopping"
@@ -38,6 +39,7 @@ android {
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
         buildConfigField("String", "GROQ_API_KEY", "\"$groqApiKey\"")
         buildConfigField("String", "PADDLEOCR_ACCESS_TOKEN", "\"$paddleOcrAccessToken\"")
+        buildConfigField("String", "BACKEND_URL", "\"$backendUrl\"")
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 

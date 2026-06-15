@@ -1,17 +1,18 @@
 """Centralized prompt templates for goal decomposition and per-turn VLM calls."""
 
 GOAL_DECOMPOSE_PROMPT = """\
-A customer wants to find "{goal}" in a retail store. List the object labels an
-object detector should look for, covering ALL of:
-- the exact product and its common variants (e.g. milk, milk bottle, milk carton)
-- the store section it belongs to (e.g. dairy section, refrigerated aisle)
-- nearby landmark objects (e.g. refrigerator, cooler, freezer door)
-- aisle signage words (e.g. dairy sign, aisle 5 sign)
-Give 6-10 items as a single comma-separated list. Be specific to a store.
+A person wants to find "{goal}" in an indoor environment (could be a retail
+store, supermarket, office, department, or campus building). List the object
+labels an object detector should look for, covering ALL of:
+- the exact target and its common variants
+- the area or section it belongs to (e.g. dairy section, reception area, corridor)
+- nearby landmark objects (e.g. refrigerator, shelf, door, sign, cabinet)
+- signage text that might appear (e.g. section sign, room name plate, directional sign)
+Give 6-10 items as a single comma-separated list. Be specific.
 Reply ONLY with the list, no preamble.
 
 Example for "find milk":
-milk, milk carton, milk bottle, dairy section, refrigerated aisle, refrigerator, cooler, dairy sign
+milk, milk carton, milk bottle, dairy section, refrigerator, cooler, dairy sign
 """
 
 
@@ -44,7 +45,8 @@ Rules:
 - MOVE otherwise. Tell the user a concrete direction (e.g., "turn left and walk down the corridor, then take another photo").
 - USE the listed positions to give correct directions: if a goal-related item or sign is on the left, say turn left; if it is on the right, say turn right; if it is centered and near, say go straight toward it.
 - Do NOT invent details not in the photo or detections.
-- USE the OCR text to identify specific places, sections, aisle names, signs, and labels. The text tells you WHERE you are (e.g., "Dairy", "Aisle 5", "Exit", "Checkout").
+- USE the OCR text to identify specific places, sections, signs, and labels. The text tells you WHERE you are (e.g., "Dairy", "Exit", a room name, a directional sign).
+- Do NOT invent or assume aisle numbers, room numbers, or location names that are not visible in the photo or OCR text. Only reference locations you can see evidence for.
 """
 
 

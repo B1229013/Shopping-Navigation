@@ -10,7 +10,29 @@ from server.perception import Detection
 if TYPE_CHECKING:
     from server.ocr import OCRResult
 
-_BANNER_HEIGHT = 60
+_BANNER_HEIGHT = 80
+
+
+def _get_font(size: int):
+    for path in [
+        "C:/Windows/Fonts/msjh.ttc",
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]:
+        try:
+            return ImageFont.truetype(path, size)
+        except (OSError, IOError):
+            continue
+    return ImageFont.load_default()
+
+
+def _draw_label(draw: ImageDraw.Draw, xy: tuple, text: str,
+                fill: tuple, bg: tuple, font) -> None:
+    x, y = xy
+    bbox = draw.textbbox((x, y), text, font=font)
+    draw.rectangle((bbox[0] - 2, bbox[1] - 1, bbox[2] + 2, bbox[3] + 1), fill=bg)
+    draw.text((x, y), text, fill=fill, font=font)
 
 
 def annotate(
@@ -23,32 +45,33 @@ def annotate(
     img = Image.open(src_path).convert("RGB")
     w, h = img.size
 
+    scale = max(w, h) / 1000
+    font_size = max(14, int(16 * scale))
+    box_width = max(2, int(3 * scale))
+
+    font = _get_font(font_size)
+    banner_font = _get_font(max(14, int(14 * scale)))
+
     canvas = Image.new("RGB", (w, h + _BANNER_HEIGHT), color=(20, 20, 20))
     canvas.paste(img, (0, 0))
     draw = ImageDraw.Draw(canvas)
 
-    # Draw GroundingDINO detection boxes (green)
     for d in detections:
         x1, y1, x2, y2 = d.box
-        draw.rectangle((x1, y1, x2, y2), outline=(0, 255, 0), width=3)
-        draw.text((x1 + 4, max(0, y1 - 14)), f"{d.label} {d.score:.2f}", fill=(0, 255, 0))
+        draw.rectangle((x1, y1, x2, y2), outline=(0, 255, 0), width=box_width)
+        label = f"{d.label} {d.score:.0%}"
+        _draw_label(draw, (x1 + 4, max(0, y1 - font_size - 4)), label,
+                    fill=(255, 255, 255), bg=(0, 160, 0), font=font)
 
-    # Draw OCR text regions (cyan)
     if ocr_results:
         for r in ocr_results:
             if len(r.bbox) >= 4:
                 pts = [(int(p[0]), int(p[1])) for p in r.bbox]
-                draw.polygon(pts, outline=(0, 255, 255))
-                draw.text(
-                    (pts[0][0], max(0, pts[0][1] - 14)),
-                    f'OCR: "{r.text}" {r.confidence:.0%}',
-                    fill=(0, 255, 255),
-                )
+                draw.polygon(pts, outline=(0, 255, 255), width=box_width)
+                label = f'"{r.text}" {r.confidence:.0%}'
+                _draw_label(draw, (pts[0][0], max(0, pts[0][1] - font_size - 4)),
+                            label, fill=(255, 255, 255), bg=(0, 140, 140), font=font)
 
-    try:
-        font = ImageFont.load_default()
-    except Exception:
-        font = None
-    draw.text((10, h + 8), banner_text[:200], fill=(255, 255, 255), font=font)
+    draw.text((10, h + 8), banner_text[:300], fill=(255, 255, 255), font=banner_font)
 
     canvas.save(dst_path, "JPEG", quality=85)

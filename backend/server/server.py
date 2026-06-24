@@ -16,15 +16,16 @@ logging.basicConfig(
 import requests as _requests
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
-from PIL import Image
+from PIL import Image, ImageOps
 
 from server import scene
 from server.annotator import annotate
+from server.graph_renderer import render_goal_graph, render_scene_graph
 from server.config import (
     OLLAMA_URL, OLLAMA_MODEL,
     PERCEPTION_ENABLED, OCR_ENABLED, OCR_LANGUAGES,
     OCR_MIN_CONFIDENCE, OCR_MAX_RESULTS, ARRIVED_MIN_DETECTION_SCORE,
-    GOAL_CROP_VERIFY, ensure_output_dir,
+    GOAL_CROP_VERIFY, GENERIC_INDOOR_OBJECTS, ensure_output_dir,
 )
 from server.goal_decomposer import decompose_goal
 from server.ocr import OCR
@@ -129,6 +130,14 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
     goal_objects = decompose_goal(req.goal)
     log.info("New session | goal: %s | goal_objects: %s", req.goal, goal_objects)
     s = _store.create(goal=req.goal, goal_objects=goal_objects)
+
+    # Generate goal graph
+    out_dir = ensure_output_dir(s.id)
+    graph_dir = out_dir / "graph"
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    render_goal_graph(req.goal, goal_objects, str(graph_dir / "goal_graph.png"))
+    log.info("Goal graph saved to %s", graph_dir / "goal_graph.png")
+
     return StartSessionResponse(
         session_id=s.id,
         guidance="Upload a starting photo so I can see where you are.",
@@ -153,22 +162,25 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     photo_path = out_dir / "photo" / f"{nid_for_path}.jpg"
     photo_path.write_bytes(photo_bytes)
 
-    # Read image dimensions; only re-save if resize is needed
+    # Fix rotation from EXIF and resize if needed
     im = Image.open(photo_path)
+    im = ImageOps.exif_transpose(im)
     im = im.convert("RGB")
     img_w, img_h = im.size
-    if max(img_w, img_h) > 1600:
+    resized = max(img_w, img_h) > 1600
+    if resized:
         im.thumbnail((1600, 1600))
         img_w, img_h = im.size
-        im.save(photo_path, format="JPEG", quality=85)
-        log.info("Photo resized to %dx%d for faster processing", img_w, img_h)
+    im.save(photo_path, format="JPEG", quality=85)
+    log.info("Photo %s %dx%d", "resized" if resized else "saved", img_w, img_h)
     im.close()
 
     t_resize = time.time()
 
     perception = get_perception()
-    log.info("GroundingDINO prompt: %s", s.goal_objects)
-    detections = perception.detect(str(photo_path), s.goal_objects) if perception else []
+    combined_prompts = list(dict.fromkeys(s.goal_objects + GENERIC_INDOOR_OBJECTS))
+    log.info("GroundingDINO prompt: %s", combined_prompts)
+    detections = perception.detect(str(photo_path), combined_prompts) if perception else []
     detected_labels = [d.label for d in detections]
     t_detect = time.time()
     log.info("⏱ GroundingDINO: %.1fs", t_detect - t_resize)
@@ -256,7 +268,9 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     s.last_node_id = nid
 
     annotated_path = out_dir / "annotated" / f"{nid}.jpg"
-    annotate(str(photo_path), str(annotated_path), detections, banner_text=f"{vlm_resp.action.value}: {vlm_resp.guidance}", ocr_results=ocr_results)
+    annotate(str(photo_path), str(annotated_path), detections,
+             banner_text=f"{vlm_resp.action.value}: {vlm_resp.guidance}",
+             ocr_results=ocr_results, goal_objects=s.goal_objects)
 
     # Save map JSON and PNG after each photo
     map_dir = out_dir / "map"
@@ -272,6 +286,48 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         "vlm_action": vlm_resp.action.value,
         "vlm_guidance": vlm_resp.guidance,
     })
+
+    # Build observations list and render cumulative scene graph
+    observations = []
+    for h in s.history:
+        if h["kind"] == "photo":
+            hid = h["node_id"]
+            node_data = s.topomap.graph.nodes.get(hid, {})
+            observations.append({
+                "step": hid,
+                "photo": Path(node_data.get("photo_path", "")).name,
+                "detections": [{"label": d, "score": 0.5}
+                               for d in node_data.get("detected", [])],
+                "vlm_summary": node_data.get("summary", ""),
+                "ocr_texts": node_data.get("ocr_texts", []),
+            })
+    # Override last observation with full detection scores
+    if observations and detections:
+        observations[-1]["detections"] = [
+            {"label": d.label, "score": d.score} for d in detections
+        ]
+    graph_dir = out_dir / "graph"
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    render_scene_graph(observations, s.goal, s.goal_objects,
+                       str(graph_dir / f"scene_graph_{nid}.png"))
+
+    # Save detection + OCR results as JSON
+    det_json = {
+        "node_id": nid,
+        "goal": s.goal,
+        "detections": [
+            {"label": d.label, "score": round(d.score, 4), "box": list(d.box)}
+            for d in detections
+        ],
+        "ocr": [
+            {"text": r.text, "confidence": round(r.confidence, 4),
+             "bbox": [list(p) for p in r.bbox]}
+            for r in (ocr_results or [])
+        ],
+    }
+    (out_dir / "annotated" / f"detections_{nid}.json").write_text(
+        json.dumps(det_json, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     if vlm_resp.action == VLMAction.ARRIVED:
         s.arrived = True

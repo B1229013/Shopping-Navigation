@@ -47,6 +47,7 @@ Rules:
 - Do NOT invent details not in the photo or detections.
 - USE the OCR text to identify specific places, sections, signs, and labels. The text tells you WHERE you are (e.g., "Dairy", "Exit", a room name, a directional sign).
 - Do NOT invent or assume aisle numbers, room numbers, or location names that are not visible in the photo or OCR text. Only reference locations you can see evidence for.
+- ALWAYS reply the "guidance" and "question" fields in Traditional Chinese (繁體中文).
 """
 
 

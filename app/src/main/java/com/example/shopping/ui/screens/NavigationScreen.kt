@@ -1,11 +1,7 @@
 package com.example.shopping.ui.screens
 
 import android.Manifest
-import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Matrix
 import android.location.Location
 import android.net.Uri
 import android.util.Log
@@ -14,10 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -25,6 +18,8 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -50,27 +45,22 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.example.shopping.model.ShoppingItem
-import com.example.shopping.network.AnswerRequest
 import com.example.shopping.network.NavigationApi
 import com.example.shopping.network.StartSessionRequest
-import com.example.shopping.network.TurnResponse
 import com.example.shopping.ui.components.*
 import com.example.shopping.ui.theme.*
+import com.example.shopping.viewmodel.NavigationViewModel
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
-import java.io.FileOutputStream
-import java.util.concurrent.Executors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -331,15 +321,18 @@ fun TeammateHomeScreen(navController: NavController) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NavigationScreen(navController: NavController) {
+fun NavigationScreen(navController: NavController, vm: NavigationViewModel = viewModel()) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
-    val sessionId = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_session_id")
-    val goal = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_goal") ?: ""
-    val initialGuidance = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_guidance") ?: ""
+    val navSessionId = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_session_id")
+    val navGoal = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_goal") ?: ""
+    val navGuidance = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_guidance") ?: ""
+
+    LaunchedEffect(navSessionId) {
+        vm.init(navSessionId, navGoal, navGuidance)
+    }
 
     var currentLocation by remember { mutableStateOf<Location?>(null) }
     var hasCameraPermission by remember {
@@ -355,22 +348,6 @@ fun NavigationScreen(navController: NavController) {
         hasCameraPermission = permissions[Manifest.permission.CAMERA] ?: hasCameraPermission
         hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: hasLocationPermission
     }
-
-    // Navigation state
-    var guidance by remember { mutableStateOf(initialGuidance) }
-    var currentAction by remember { mutableStateOf("TAKE_PHOTO") }
-    var pendingQuestion by remember { mutableStateOf<String?>(null) }
-    var answerText by remember { mutableStateOf("") }
-    var isUploading by remember { mutableStateOf(false) }
-    var isAnswering by remember { mutableStateOf(false) }
-    var hasArrived by remember { mutableStateOf(false) }
-    var annotatedPhotoUrl by remember { mutableStateOf<String?>(null) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var photoCount by remember { mutableIntStateOf(0) }
-
-    // Camera capture
-    val imageCapture = remember { ImageCapture.Builder().build() }
-    val captureExecutor = remember { Executors.newSingleThreadExecutor() }
 
     LaunchedEffect(Unit) {
         if (!hasCameraPermission || !hasLocationPermission) {
@@ -389,115 +366,14 @@ fun NavigationScreen(navController: NavController) {
         }
     }
 
-    fun handleTurnResponse(response: TurnResponse) {
-        guidance = response.guidance
-        currentAction = response.action
-        annotatedPhotoUrl = response.annotated_photo_url
-
-        when (response.action) {
-            "ARRIVED" -> {
-                hasArrived = true
-                pendingQuestion = null
-            }
-            "ASK" -> {
-                pendingQuestion = response.question
-            }
-            "MOVE" -> {
-                pendingQuestion = null
-            }
-        }
-    }
-
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
-        if (uri == null || sessionId == null || isUploading || hasArrived || pendingQuestion != null) return@rememberLauncherForActivityResult
-        isUploading = true
-        errorMessage = null
-        scope.launch {
-            try {
-                val response = withContext(Dispatchers.IO) {
-                    val photoFile = File(context.cacheDir, "gallery_${System.currentTimeMillis()}.jpg")
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        FileOutputStream(photoFile).use { output -> input.copyTo(output) }
-                    } ?: throw Exception("無法讀取照片")
-                    val requestBody = photoFile.asRequestBody("image/jpeg".toMediaType())
-                    val part = MultipartBody.Part.createFormData("photo", photoFile.name, requestBody)
-                    val resp = NavigationApi.service.uploadPhoto(sessionId, part)
-                    photoFile.delete()
-                    resp
-                }
-                handleTurnResponse(response)
-                photoCount++
-            } catch (e: Exception) {
-                Log.e("NavGallery", "Gallery upload failed", e)
-                errorMessage = "上傳失敗: ${e.message}"
-            } finally {
-                isUploading = false
-            }
-        }
-    }
-
-    fun submitAnswer() {
-        if (sessionId == null || answerText.isBlank() || isAnswering) return
-        isAnswering = true
-        errorMessage = null
-
-        scope.launch {
-            try {
-                val response = withContext(Dispatchers.IO) {
-                    NavigationApi.service.postAnswer(sessionId, AnswerRequest(answer = answerText))
-                }
-                handleTurnResponse(response)
-                answerText = ""
-            } catch (e: Exception) {
-                Log.e("NavAnswer", "Answer failed", e)
-                errorMessage = "回答提交失敗: ${e.message}"
-            } finally {
-                isAnswering = false
-            }
-        }
-    }
-
-    fun captureAndUpload() {
-        if (sessionId == null || isUploading || hasArrived || pendingQuestion != null) return
-        isUploading = true
-        errorMessage = null
-
-        val photoFile = File(context.cacheDir, "nav_photo_${System.currentTimeMillis()}.jpg")
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-
-        imageCapture.takePicture(outputOptions, captureExecutor, object : ImageCapture.OnImageSavedCallback {
-            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                scope.launch {
-                    try {
-                        val response = withContext(Dispatchers.IO) {
-                            val requestBody = photoFile.asRequestBody("image/jpeg".toMediaType())
-                            val part = MultipartBody.Part.createFormData("photo", photoFile.name, requestBody)
-                            NavigationApi.service.uploadPhoto(sessionId, part)
-                        }
-                        handleTurnResponse(response)
-                        photoCount++
-                    } catch (e: Exception) {
-                        Log.e("NavUpload", "Upload failed", e)
-                        errorMessage = "上傳失敗: ${e.message}"
-                    } finally {
-                        isUploading = false
-                        photoFile.delete()
-                    }
-                }
-            }
-
-            override fun onError(e: ImageCaptureException) {
-                Log.e("NavCapture", "Capture failed", e)
-                isUploading = false
-                errorMessage = "拍照失敗: ${e.message}"
-            }
-        })
+        if (uri != null) vm.uploadFromGallery(context, uri)
     }
 
     // No session — show error and go back
-    if (sessionId == null) {
+    if (vm.sessionId == null) {
         Box(
             modifier = Modifier.fillMaxSize().background(Noir),
             contentAlignment = Alignment.Center
@@ -514,9 +390,9 @@ fun NavigationScreen(navController: NavController) {
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Noir)) {
-        // Camera preview
+        // Camera preview (full screen background)
         if (hasCameraPermission) {
-            CameraPreviewWithCapture(lifecycleOwner, imageCapture)
+            CameraPreviewWithCapture(lifecycleOwner, vm.imageCapture)
         }
 
         // AR store markers
@@ -526,232 +402,195 @@ fun NavigationScreen(navController: NavController) {
             }
         }
 
-        // ── Top: Goal & Status bar ──
-        Column(
+        // ── Overlay: top status + middle guidance + bottom buttons ──
+        BoxWithConstraints(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .padding(top = 48.dp, start = 16.dp, end = 16.dp)
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
         ) {
+            val maxH = maxHeight
+            Column(modifier = Modifier.fillMaxSize()) {
+            // ── Top: Status bar ──
             Surface(
-                color = Noir.copy(alpha = 0.8f),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Gold.copy(alpha = 0.3f))
+                color = Color(0xFF90CAF9).copy(alpha = 0.70f),
+                shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (hasArrived) Icons.Default.CheckCircle else Icons.Default.Navigation,
-                            null,
-                            tint = if (hasArrived) Color(0xFF4CAF50) else Gold,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            if (hasArrived) "已到達目標！" else "導航中",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = if (hasArrived) Color(0xFF4CAF50) else Gold
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            "📷 $photoCount",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = TextSecondary
-                        )
-                    }
-
-                    Spacer(Modifier.height(6.dp))
-
                     Text(
-                        goal,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        maxLines = 1
+                        if (vm.hasArrived) "已到達目標！" else "導航中",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF1A237E)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "目標　${vm.goal}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF1A237E).copy(alpha = 0.8f),
+                        maxLines = 2
                     )
                 }
             }
-        }
 
-        // ── Center: Guidance panel ──
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(bottom = 140.dp, start = 16.dp, end = 16.dp)
-        ) {
-            // Guidance message
+            // ── Middle: camera view area (spacer) ──
+            Spacer(modifier = Modifier.weight(1f))
+
+            // ── Guidance panel (max 30% of screen, scrollable) ──
             Surface(
-                color = Noir.copy(alpha = 0.85f),
+                color = Color(0xFFA5D6A7).copy(alpha = 0.75f),
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(
-                    1.dp,
-                    when (currentAction) {
-                        "ARRIVED" -> Color(0xFF4CAF50).copy(alpha = 0.5f)
-                        "ASK" -> Color(0xFFFF9800).copy(alpha = 0.5f)
-                        else -> Gold.copy(alpha = 0.3f)
-                    }
-                )
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .heightIn(max = maxH * 0.30f)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            color = when (currentAction) {
-                                "ARRIVED" -> Color(0xFF4CAF50)
-                                "ASK" -> Color(0xFFFF9800)
-                                "MOVE" -> Gold
-                                else -> TextSecondary
-                            },
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                when (currentAction) {
-                                    "ARRIVED" -> "到達"
-                                    "ASK" -> "詢問"
-                                    "MOVE" -> "移動"
-                                    else -> "等待"
-                                },
-                                color = Noir,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "AI 導航指引",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = TextSecondary
-                        )
-                    }
-
-                    Spacer(Modifier.height(10.dp))
-
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.Start
+                ) {
                     Text(
-                        guidance,
+                        "導航指引",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF1B5E20).copy(alpha = 0.7f)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        vm.guidance,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = TextPrimary,
+                        color = Color(0xFF1B5E20),
                         lineHeight = 22.sp
                     )
 
-                    // ASK flow — question + answer input
-                    if (pendingQuestion != null && !hasArrived) {
-                        Spacer(Modifier.height(12.dp))
-                        Surface(
-                            color = Color(0xFFFF9800).copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(
-                                    pendingQuestion!!,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color(0xFFFFCC80),
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    OutlinedTextField(
-                                        value = answerText,
-                                        onValueChange = { answerText = it },
-                                        placeholder = { Text("輸入回答...", color = TextTertiary) },
-                                        modifier = Modifier.weight(1f),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = TextPrimary,
-                                            unfocusedTextColor = TextPrimary,
-                                            focusedBorderColor = Gold,
-                                            unfocusedBorderColor = TextSecondary.copy(alpha = 0.3f),
-                                            cursorColor = Gold
-                                        ),
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                        keyboardActions = KeyboardActions(onSend = { submitAnswer() })
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Button(
-                                        onClick = { submitAnswer() },
-                                        enabled = answerText.isNotBlank() && !isAnswering,
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800), contentColor = Noir),
-                                        shape = CircleShape,
-                                        contentPadding = PaddingValues(12.dp),
-                                        modifier = Modifier.size(48.dp)
-                                    ) {
-                                        if (isAnswering) {
-                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Noir, strokeWidth = 2.dp)
-                                        } else {
-                                            Icon(Icons.Default.Send, null, modifier = Modifier.size(18.dp))
-                                        }
-                                    }
+                    // ASK flow
+                    if (vm.pendingQuestion != null && !vm.hasArrived) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            vm.pendingQuestion!!,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFE65100),
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = vm.answerText,
+                                onValueChange = { vm.answerText = it },
+                                placeholder = { Text("輸入回答...", color = Color(0xFF666666)) },
+                                modifier = Modifier.weight(1f),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFF1B5E20),
+                                    unfocusedTextColor = Color(0xFF1B5E20),
+                                    focusedBorderColor = Color(0xFF388E3C),
+                                    unfocusedBorderColor = Color(0xFF81C784),
+                                    cursorColor = Color(0xFF388E3C)
+                                ),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = { vm.submitAnswer() })
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Button(
+                                onClick = { vm.submitAnswer() },
+                                enabled = vm.answerText.isNotBlank() && !vm.isAnswering,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFFF9800),
+                                    contentColor = Color.White
+                                ),
+                                shape = CircleShape,
+                                contentPadding = PaddingValues(12.dp),
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                if (vm.isAnswering) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Default.Send, null, modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
                     }
 
                     // Error
-                    errorMessage?.let { err ->
+                    vm.errorMessage?.let { err ->
                         Spacer(Modifier.height(8.dp))
-                        Text(err, color = Color(0xFFFF6B6B), style = MaterialTheme.typography.bodySmall)
+                        Text(err, color = Color(0xFFD32F2F), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
-        }
 
-        // ── Bottom: Action buttons ──
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 24.dp, vertical = 24.dp)
-                .navigationBarsPadding(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Back button
-            Button(
-                onClick = { navController.popBackStack() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (hasArrived) Color(0xFF4CAF50).copy(alpha = 0.85f) else Color(0xFFCF6679).copy(alpha = 0.85f),
-                    contentColor = TextPrimary
-                ),
-                shape = RoundedCornerShape(14.dp)
+            Spacer(Modifier.height(12.dp))
+
+            // ── Bottom: Action buttons ──
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    if (hasArrived) "完成" else "結束導航",
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
-
-            // Capture & Gallery buttons — only if not arrived and no pending question
-            if (!hasArrived && pendingQuestion == null) {
-                // Gallery pick
                 Button(
-                    onClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                    enabled = !isUploading,
-                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceBase, contentColor = Gold),
-                    shape = RoundedCornerShape(14.dp)
+                    onClick = { navController.popBackStack() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (vm.hasArrived) Color(0xFF4CAF50) else Color(0xFFEF5350),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(24.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    modifier = Modifier.weight(1f).height(46.dp)
                 ) {
-                    Icon(Icons.Default.PhotoLibrary, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("相簿", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (vm.hasArrived) "完成" else "結束導航",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
                 }
 
-                // Camera capture
-                Button(
-                    onClick = { captureAndUpload() },
-                    enabled = !isUploading,
-                    colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Noir),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if (isUploading) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Noir, strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("分析中...", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    } else {
-                        Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("拍照分析", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                if (!vm.hasArrived && vm.pendingQuestion == null) {
+                    Button(
+                        onClick = { vm.captureAndUpload(context) },
+                        enabled = !vm.isUploading,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF66BB6A),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(24.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.weight(1f).height(46.dp)
+                    ) {
+                        if (vm.isUploading) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            Spacer(Modifier.width(4.dp))
+                            Text("分析中...", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        } else {
+                            Text("拍照分析", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                    }
+
+                    Button(
+                        onClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        enabled = !vm.isUploading,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF42A5F5),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(24.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.weight(1f).height(46.dp)
+                    ) {
+                        Text("選擇照片", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
                 }
             }
-        }
+            } // Column
+        } // BoxWithConstraints
     }
 }
 

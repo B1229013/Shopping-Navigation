@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 _FALLBACK = VLMResponse(
     action=VLMAction.MOVE,
-    guidance="I had trouble understanding the scene. Try walking forward a few steps and uploading another photo.",
+    guidance="無法辨識目前場景，請往前走幾步再拍一張照片上傳。",
     question=None,
     vlm_summary="",
 )

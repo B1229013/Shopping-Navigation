@@ -23,35 +23,49 @@ if _dotenv.exists():
 _LOCAL_MODELS = PROJECT_ROOT / "models"
 _WSL_MODELS = Path("/home/user/UniGoal/data/models")
 
-if (_LOCAL_MODELS / "groundingdino_swint_ogc.pth").exists():
-    GROUNDINGDINO_WEIGHTS = _LOCAL_MODELS / "groundingdino_swint_ogc.pth"
-elif (_WSL_MODELS / "groundingdino_swint_ogc.pth").exists():
-    GROUNDINGDINO_WEIGHTS = _WSL_MODELS / "groundingdino_swint_ogc.pth"
-else:
-    GROUNDINGDINO_WEIGHTS = _LOCAL_MODELS / "groundingdino_swint_ogc.pth"  # default
+# GDINO_BACKBONE: "swint" (default, faster) or "swinb" (more accurate, slower)
+GDINO_BACKBONE = os.environ.get("GDINO_BACKBONE", "swint")
 
-# GroundingDINO config — check cloned repo locations
+_WEIGHTS_MAP = {
+    "swint": "groundingdino_swint_ogc.pth",
+    "swinb": "groundingdino_swinb_cogcoor.pth",
+}
+_weights_file = _WEIGHTS_MAP.get(GDINO_BACKBONE, _WEIGHTS_MAP["swint"])
+
+if (_LOCAL_MODELS / _weights_file).exists():
+    GROUNDINGDINO_WEIGHTS = _LOCAL_MODELS / _weights_file
+elif (_WSL_MODELS / _weights_file).exists():
+    GROUNDINGDINO_WEIGHTS = _WSL_MODELS / _weights_file
+else:
+    GROUNDINGDINO_WEIGHTS = _LOCAL_MODELS / _weights_file
+
+# GroundingDINO config — auto-detect from pip site-packages
 _GDINO_REPO = Path(os.environ.get(
     "GROUNDINGDINO_REPO",
     str(PROJECT_ROOT.parent / "GroundingDINO")
 ))
+
+_CONFIG_MAP = {
+    "swint": "GroundingDINO_SwinT_OGC.py",
+    "swinb": "GroundingDINO_SwinB_cfg.py",
+}
+_config_file = _CONFIG_MAP.get(GDINO_BACKBONE, _CONFIG_MAP["swint"])
+
 def _gdino_site_packages_config() -> Path:
     try:
         import groundingdino
-        return Path(groundingdino.__file__).parent / "config" / "GroundingDINO_SwinT_OGC.py"
+        return Path(groundingdino.__file__).parent / "config" / _config_file
     except ImportError:
         return Path("_not_installed_")
 
 _GDINO_CONFIG_CANDIDATES = [
     _gdino_site_packages_config(),
-    _GDINO_REPO / "groundingdino" / "config" / "GroundingDINO_SwinT_OGC.py",
-    PROJECT_ROOT.parent.parent / "GroundingDINO" / "groundingdino" / "config" / "GroundingDINO_SwinT_OGC.py",
-    Path("C:/Users/user/Downloads/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"),
-    Path("/home/user/UniGoal/third_party/Grounded-Segment-Anything/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"),
+    _GDINO_REPO / "groundingdino" / "config" / _config_file,
+    PROJECT_ROOT.parent.parent / "GroundingDINO" / "groundingdino" / "config" / _config_file,
 ]
 GROUNDINGDINO_CONFIG = next(
     (p for p in _GDINO_CONFIG_CANDIDATES if p.exists()),
-    _GDINO_CONFIG_CANDIDATES[0],  # default to first candidate
+    _GDINO_CONFIG_CANDIDATES[0],
 )
 
 # SAM weights (optional — not loaded by default to stay under VRAM budget)
@@ -79,7 +93,18 @@ PERCEPTION_ENABLED = os.environ.get("PERCEPTION_ENABLED", "1") != "0"
 GROUNDINGDINO_BOX_THRESHOLD = 0.30
 GROUNDINGDINO_TEXT_THRESHOLD = 0.25
 GROUNDINGDINO_BOX_THRESHOLD_FALLBACK = 0.20
-SAM_TOP_K_BOXES = 10                          # was 5 — stores have more objects per scene
+SAM_TOP_K_BOXES = 10
+
+# Generic indoor objects — always detected alongside goal_objects for spatial context
+GENERIC_INDOOR_OBJECTS = [
+    # 同學的 DEFAULT_CLASSES（19 項）
+    "door", "cabinet", "chair", "table", "desk", "sofa", "sign",
+    "fire extinguisher", "plant", "printer", "whiteboard", "monitor",
+    "computer", "bookshelf", "window", "counter", "reception",
+    "bulletin board", "notice board",
+    # 額外補充
+    "refrigerator", "water dispenser", "shelf", "trash can", "poster",
+]
 
 # TASK 3 — crop-verify a goal detection with the VLM before trusting it.
 # Disabled under test mode so the offline suite never makes a network call.

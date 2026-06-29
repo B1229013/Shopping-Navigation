@@ -20,12 +20,17 @@ class Session:
     pending_is_confirm: bool = False  # is pending_question our arrival-confirm question?
     last_planned_action: Optional[str] = None
     arrived: bool = False
+    pending_arrival: bool = False
     goal_node: Optional[int] = None
     last_node_id: Optional[int] = None
     last_detections: List[dict] = field(default_factory=list)
     last_photo_path: Optional[str] = None
     last_ocr_summary: Optional[str] = None
     last_ocr_matches: List[str] = field(default_factory=list)
+    last_img_w: int = 0
+    last_img_h: int = 0
+    corrections: List[str] = field(default_factory=list)
+    false_positive_nodes: List[int] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 

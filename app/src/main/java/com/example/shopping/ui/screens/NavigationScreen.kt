@@ -421,7 +421,9 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        if (vm.hasArrived) "已到達目標！" else "導航中",
+                        if (vm.hasArrived) "已到達目標！"
+                        else if (vm.pendingArrival) "請確認是否到達目標"
+                        else "導航中",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF1A237E)
@@ -527,65 +529,124 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
             Spacer(Modifier.height(12.dp))
 
             // ── Bottom: Action buttons ──
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(
-                    onClick = { navController.popBackStack() },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (vm.hasArrived) Color(0xFF4CAF50) else Color(0xFFEF5350),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(24.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    modifier = Modifier.weight(1f).height(46.dp)
+            if (vm.pendingArrival) {
+                // Arrival confirmation buttons
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        if (vm.hasArrived) "完成" else "結束導航",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
-                }
-
-                if (!vm.hasArrived && vm.pendingQuestion == null) {
                     Button(
-                        onClick = { vm.captureAndUpload(context) },
-                        enabled = !vm.isUploading,
+                        onClick = { vm.confirmArrival("confirmed") },
+                        enabled = !vm.isConfirming,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF66BB6A),
+                            containerColor = Color(0xFF4CAF50),
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(24.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier = Modifier.weight(1f).height(46.dp)
+                        modifier = Modifier.fillMaxWidth().height(46.dp)
                     ) {
-                        if (vm.isUploading) {
+                        if (vm.isConfirming) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                            Spacer(Modifier.width(4.dp))
-                            Text("分析中...", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         } else {
-                            Text("拍照分析", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("確認到達", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
                     }
-
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { vm.confirmArrival("false_positive") },
+                            enabled = !vm.isConfirming,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF9E9E9E),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).height(42.dp)
+                        ) {
+                            Text("不是目標", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                        Button(
+                            onClick = { vm.confirmArrival("wrong_instance") },
+                            enabled = !vm.isConfirming,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF9C27B0),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).height(42.dp)
+                        ) {
+                            Text("同類非目標", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Button(
-                        onClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                        enabled = !vm.isUploading,
+                        onClick = { navController.popBackStack() },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF42A5F5),
+                            containerColor = if (vm.hasArrived) Color(0xFF4CAF50) else Color(0xFFEF5350),
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(24.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                         modifier = Modifier.weight(1f).height(46.dp)
                     ) {
-                        Text("選擇照片", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text(
+                            if (vm.hasArrived) "完成" else "結束導航",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+
+                    if (!vm.hasArrived && vm.pendingQuestion == null) {
+                        Button(
+                            onClick = { vm.captureAndUpload(context) },
+                            enabled = !vm.isUploading,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF66BB6A),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).height(46.dp)
+                        ) {
+                            if (vm.isUploading) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(4.dp))
+                                Text("分析中...", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            } else {
+                                Text("拍照分析", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                        }
+
+                        Button(
+                            onClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                            enabled = !vm.isUploading,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF42A5F5),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).height(46.dp)
+                        ) {
+                            Text("選擇照片", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
                     }
                 }
             }

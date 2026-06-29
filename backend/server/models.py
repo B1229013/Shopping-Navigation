@@ -41,6 +41,10 @@ class AnswerRequest(BaseModel):
     answer: str
 
 
+class ConfirmArrivalRequest(BaseModel):
+    kind: Literal["confirmed", "false_positive", "wrong_instance"]
+
+
 class TurnResponse(BaseModel):
     action: VLMAction
     guidance: str

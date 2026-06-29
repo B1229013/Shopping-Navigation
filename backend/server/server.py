@@ -20,7 +20,10 @@ from PIL import Image, ImageOps
 
 from server import scene
 from server.annotator import annotate
-from server.graph_renderer import render_goal_graph, render_scene_graph
+from server.graph_renderer import (
+    render_goal_graph, render_scene_graph, assign_detection_ids,
+    postprocess_detections, augment_goal_classes,
+)
 from server.config import (
     OLLAMA_URL, OLLAMA_MODEL,
     PERCEPTION_ENABLED, OCR_ENABLED, OCR_LANGUAGES,
@@ -32,6 +35,7 @@ from server.ocr import OCR
 from server.models import (
     AnswerRequest,
     ErrorResponse,
+    ConfirmArrivalRequest,
     StartSessionRequest,
     StartSessionResponse,
     TurnResponse,
@@ -128,6 +132,7 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
     if not req.goal.strip():
         raise HTTPException(status_code=400, detail={"error": "bad_request", "detail": "goal is empty"})
     goal_objects = decompose_goal(req.goal)
+    goal_objects = augment_goal_classes(req.goal, goal_objects)
     log.info("New session | goal: %s | goal_objects: %s", req.goal, goal_objects)
     s = _store.create(goal=req.goal, goal_objects=goal_objects)
 
@@ -152,6 +157,8 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
     if s.arrived:
         raise HTTPException(status_code=409, detail={"error": "already_arrived", "detail": "session is complete"})
+    if s.pending_arrival:
+        raise HTTPException(status_code=409, detail={"error": "confirm_pending", "detail": "POST /confirm first"})
     if s.pending_question is not None:
         raise HTTPException(status_code=409, detail={"error": "answer_pending", "detail": "POST /answer first"})
 
@@ -261,7 +268,30 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     arrival_downgraded = _raw_action == VLMAction.ARRIVED and vlm_resp.action == VLMAction.ASK
 
     s.topomap.graph.nodes[nid]["summary"] = vlm_resp.vlm_summary
-    s.last_detections = [d.__dict__ for d in detections]
+    det_dicts = [{"label": d.label, "score": d.score, "box": list(d.box)} for d in detections]
+
+    # Build OCR bbox list for door-nameplate association
+    ocr_bbox_list = [
+        {"text": r.text, "confidence": r.confidence,
+         "bbox": [list(p) for p in r.bbox]}
+        for r in (ocr_results or [])
+    ]
+
+    # Full post-processing: NMS → merge → OCR-door → spatial → entity tracking → IDs
+    det_dicts = postprocess_detections(
+        det_dicts, img_w, img_h,
+        ocr_with_bbox=ocr_bbox_list or None,
+        prev_dets=s.last_detections or None,
+        prev_w=s.last_img_w,
+        prev_h=s.last_img_h,
+    )
+
+    # Persist full detection dicts in topomap node for scene graph history
+    s.topomap.graph.nodes[nid]["det_dicts"] = det_dicts
+
+    s.last_detections = det_dicts
+    s.last_img_w = img_w
+    s.last_img_h = img_h
     s.last_ocr_summary = ocr_text_summary
     s.last_ocr_matches = ocr_matches
     s.last_photo_path = str(photo_path)
@@ -288,24 +318,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     })
 
     # Build observations list and render cumulative scene graph
-    observations = []
-    for h in s.history:
-        if h["kind"] == "photo":
-            hid = h["node_id"]
-            node_data = s.topomap.graph.nodes.get(hid, {})
-            observations.append({
-                "step": hid,
-                "photo": Path(node_data.get("photo_path", "")).name,
-                "detections": [{"label": d, "score": 0.5}
-                               for d in node_data.get("detected", [])],
-                "vlm_summary": node_data.get("summary", ""),
-                "ocr_texts": node_data.get("ocr_texts", []),
-            })
-    # Override last observation with full detection scores
-    if observations and detections:
-        observations[-1]["detections"] = [
-            {"label": d.label, "score": d.score} for d in detections
-        ]
+    observations = _build_observations(s)
     graph_dir = out_dir / "graph"
     graph_dir.mkdir(parents=True, exist_ok=True)
     render_scene_graph(observations, s.goal, s.goal_objects,
@@ -316,8 +329,16 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         "node_id": nid,
         "goal": s.goal,
         "detections": [
-            {"label": d.label, "score": round(d.score, 4), "box": list(d.box)}
-            for d in detections
+            {
+                "id": d.get("id", d["label"]),
+                "label": d["label"],
+                "score": round(d["score"], 4),
+                "box": d["box"],
+                **({"context": d["context"]} if d.get("context") else {}),
+                **({"nameplate_text": d["nameplate_text"]} if d.get("nameplate_text") else {}),
+                **({"same_entity": True} if d.get("same_entity") else {}),
+            }
+            for d in det_dicts
         ],
         "ocr": [
             {"text": r.text, "confidence": round(r.confidence, 4),
@@ -330,7 +351,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     )
 
     if vlm_resp.action == VLMAction.ARRIVED:
-        s.arrived = True
+        s.pending_arrival = True
         s.goal_node = nid
         s.last_planned_action = None
     elif vlm_resp.action == VLMAction.ASK:
@@ -395,7 +416,7 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
     s.pending_question = None
     s.pending_is_confirm = False
     if vlm_resp.action == VLMAction.ARRIVED:
-        s.arrived = True
+        s.pending_arrival = True
         s.goal_node = s.last_node_id
         s.last_planned_action = None
     elif vlm_resp.action == VLMAction.ASK:
@@ -411,6 +432,108 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
         node_id=s.last_node_id,
         annotated_photo_url=f"/session/{session_id}/photo/{s.last_node_id}.jpg",
     )
+
+
+@app.post("/session/{session_id}/confirm", response_model=TurnResponse)
+def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse:
+    """User confirms or rejects the ARRIVED decision."""
+    s = _store.get(session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
+    if not s.pending_arrival:
+        raise HTTPException(status_code=409, detail={"error": "no_pending_arrival", "detail": "no ARRIVED to confirm"})
+
+    arrived_node = s.goal_node
+    s.pending_arrival = False
+
+    if req.kind == "confirmed":
+        s.arrived = True
+        # Mark goal detections as arrived in scene graph
+        if arrived_node == s.last_node_id and s.last_detections:
+            for d in s.last_detections:
+                if _is_goal_det(d, s.goal_objects):
+                    d["status"] = "arrived"
+        msg = f"已確認到達目標：{s.goal}"
+        log.info("[session %s] confirmed arrival at node %s", session_id, arrived_node)
+        s.history.append({"kind": "confirm", "node_id": arrived_node, "message": msg})
+    else:
+        s.goal_node = None
+        status_label = req.kind
+
+        for h in s.history:
+            if h.get("kind") == "photo" and h.get("node_id") == arrived_node:
+                h["rejected"] = status_label
+                break
+
+        if arrived_node == s.last_node_id and s.last_detections:
+            for d in s.last_detections:
+                if _is_goal_det(d, s.goal_objects):
+                    d["status"] = status_label
+
+        if req.kind == "false_positive":
+            s.false_positive_nodes.append(arrived_node)
+            msg = f"步驟 {arrived_node} 的目標宣告是誤判，繼續搜索{s.goal}"
+        else:
+            msg = f"步驟 {arrived_node} 是同種目標（{s.goal}）但非要找的，繼續搜索"
+
+        s.corrections.append(msg)
+        log.info("[session %s] rejected arrival: %s | %s", session_id, req.kind, msg)
+        s.history.append({
+            "kind": "reject", "node_id": arrived_node,
+            "reject_type": req.kind, "message": msg,
+        })
+
+    # Re-render scene graph
+    out_dir = ensure_output_dir(session_id)
+    graph_dir = out_dir / "graph"
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    observations = _build_observations(s)
+    render_scene_graph(observations, s.goal, s.goal_objects,
+                       str(graph_dir / f"scene_graph_{arrived_node}_confirm.png"))
+
+    action = VLMAction.ARRIVED if req.kind == "confirmed" else VLMAction.MOVE
+    return TurnResponse(
+        action=action,
+        guidance=msg,
+        question=None,
+        node_id=arrived_node,
+        annotated_photo_url=f"/session/{session_id}/photo/{arrived_node}.jpg",
+    )
+
+
+def _is_goal_det(d: dict, goal_objects: list[str]) -> bool:
+    label_l = d.get("label", "").lower()
+    return any(g.lower() in label_l or label_l in g.lower() for g in goal_objects)
+
+
+def _build_observations(s) -> list[dict]:
+    """Build observations list from session history for scene graph rendering."""
+    observations = []
+    for h in s.history:
+        if h["kind"] == "photo":
+            hid = h["node_id"]
+            node_data = s.topomap.graph.nodes.get(hid, {})
+            stored_dets = node_data.get("det_dicts")
+            if stored_dets is not None:
+                dets = [dict(d) for d in stored_dets]
+            else:
+                dets = [{"label": d, "score": 0.5}
+                        for d in node_data.get("detected", [])]
+            obs = {
+                "step": hid,
+                "photo": Path(node_data.get("photo_path", "")).name,
+                "detections": dets,
+                "vlm_summary": node_data.get("summary", ""),
+                "ocr_texts": node_data.get("ocr_texts", []),
+                "false_positive": hid in s.false_positive_nodes,
+            }
+            rejected = h.get("rejected")
+            if rejected:
+                for d in obs["detections"]:
+                    if _is_goal_det(d, s.goal_objects):
+                        d["status"] = rejected
+            observations.append(obs)
+    return observations
 
 
 @app.get("/session/{session_id}/map")

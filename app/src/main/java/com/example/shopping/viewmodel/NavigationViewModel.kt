@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.shopping.network.AnswerRequest
+import com.example.shopping.network.ConfirmArrivalRequest
 import com.example.shopping.network.NavigationApi
 import com.example.shopping.network.TurnResponse
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,8 @@ class NavigationViewModel : ViewModel() {
     var isUploading: Boolean by mutableStateOf(false)
     var isAnswering: Boolean by mutableStateOf(false)
     var hasArrived: Boolean by mutableStateOf(false)
+    var pendingArrival: Boolean by mutableStateOf(false)
+    var isConfirming: Boolean by mutableStateOf(false)
     var annotatedPhotoUrl: String? by mutableStateOf(null)
     var errorMessage: String? by mutableStateOf(null)
     var photoCount: Int by mutableIntStateOf(0)
@@ -56,7 +59,7 @@ class NavigationViewModel : ViewModel() {
 
         when (response.action) {
             "ARRIVED" -> {
-                hasArrived = true
+                pendingArrival = true
                 pendingQuestion = null
             }
             "ASK" -> {
@@ -64,13 +67,14 @@ class NavigationViewModel : ViewModel() {
             }
             "MOVE" -> {
                 pendingQuestion = null
+                pendingArrival = false
             }
         }
     }
 
     fun uploadFromGallery(context: Context, uri: Uri) {
         val sid = sessionId ?: return
-        if (isUploading || hasArrived || pendingQuestion != null) return
+        if (isUploading || hasArrived || pendingArrival || pendingQuestion != null) return
         isUploading = true
         errorMessage = null
 
@@ -122,7 +126,7 @@ class NavigationViewModel : ViewModel() {
 
     fun captureAndUpload(context: Context) {
         val sid = sessionId ?: return
-        if (isUploading || hasArrived || pendingQuestion != null) return
+        if (isUploading || hasArrived || pendingArrival || pendingQuestion != null) return
         isUploading = true
         errorMessage = null
 
@@ -156,5 +160,38 @@ class NavigationViewModel : ViewModel() {
                 errorMessage = "拍照失敗: ${e.message}"
             }
         })
+    }
+
+    fun confirmArrival(kind: String) {
+        val sid = sessionId ?: return
+        if (isConfirming) return
+        isConfirming = true
+        errorMessage = null
+
+        viewModelScope.launch {
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    NavigationApi.service.confirmArrival(sid, ConfirmArrivalRequest(kind = kind))
+                }
+                pendingArrival = false
+                guidance = response.guidance
+                currentAction = response.action
+                annotatedPhotoUrl = response.annotated_photo_url
+
+                when (response.action) {
+                    "ARRIVED" -> {
+                        hasArrived = true
+                    }
+                    "MOVE" -> {
+                        pendingQuestion = null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("NavConfirm", "Confirm failed", e)
+                errorMessage = "確認失敗: ${e.message}"
+            } finally {
+                isConfirming = false
+            }
+        }
     }
 }

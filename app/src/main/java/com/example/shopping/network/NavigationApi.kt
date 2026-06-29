@@ -30,6 +30,8 @@ data class TurnResponse(
 
 data class AnswerRequest(val answer: String)
 
+data class ConfirmArrivalRequest(val kind: String)  // "confirmed", "false_positive", "wrong_instance"
+
 data class SessionState(
     val id: String,
     val goal: String,
@@ -83,6 +85,12 @@ interface NavigationApiService {
     suspend fun postAnswer(
         @Path("sessionId") sessionId: String,
         @Body req: AnswerRequest
+    ): TurnResponse
+
+    @POST("session/{sessionId}/confirm")
+    suspend fun confirmArrival(
+        @Path("sessionId") sessionId: String,
+        @Body req: ConfirmArrivalRequest
     ): TurnResponse
 
     @GET("session/{sessionId}")

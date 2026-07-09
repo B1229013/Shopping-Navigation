@@ -74,13 +74,23 @@ SAM_WEIGHTS = _LOCAL_MODELS / "sam_vit_h_4b8939.pth"
 # Output
 OUTPUT_ROOT = PROJECT_ROOT / "output" / "sessions"
 
-# LLM services — "gemini" (default), "openai", or "ollama"
-VLM_BACKEND = os.environ.get("VLM_BACKEND", "gemini")
+# LLM services — "openai" (default), "gemini", or "ollama".
+# Kept as a str (not Literal) because a third backend, Gemini, is still supported;
+# see docstring above ``goal_decomposer.decompose_goal`` and ``vlm._generate``.
+VLM_BACKEND = os.environ.get("VLM_BACKEND", "openai")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+# CGU LLM gateway — OpenAI-compatible: one key (CGU_API_KEY) unlocks every model;
+# only the endpoint differs by model type. See server/llm_gateway.py.
+CGU_API_KEY = os.environ.get("CGU_API_KEY", "")
+CGU_BASE_URL = os.environ.get("CGU_BASE_URL", "https://air.cgu.edu.tw/cgullmapi/v1")
+
+# The existing VLM backend reuses the CGU key/URL when OPENAI_* are unset, so
+# running VLM_BACKEND=openai against the gateway needs only CGU_API_KEY in .env.
+# Setting OPENAI_API_KEY/OPENAI_BASE_URL explicitly still targets real OpenAI.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") or CGU_API_KEY
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or (CGU_BASE_URL if CGU_API_KEY else "https://api.openai.com/v1")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2-vision")
 

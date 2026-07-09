@@ -54,6 +54,30 @@ def verify_goal_detection(
         return False
 
 
+def ocr_on_detection(
+    image_pil: Image.Image,
+    box_xyxy: List[float],
+    models: List[str],
+    prompt: str = "Extract all text visible in this image exactly as written, "
+                  "preserving Traditional Chinese characters. Return only the text.",
+) -> List[dict]:
+    """Crop a detection box and run it through gateway OCR/chat models for comparison.
+
+    Bridges the object-detection pipeline to the CGU gateway: feed a detected object's
+    image crop into the OCR models (deepseek-ocr / glm-ocr) to compare their text
+    extraction, or into chat models for scene/navigation reasoning. Returns one entry
+    per model ({model, kind, text, error}); a dead model (e.g. an OCR 502) is captured
+    per-entry rather than raised, so one outage never sinks the rest.
+    """
+    from server.llm_gateway import run_on_image  # lazy: keeps perception import light
+
+    x1, y1, x2, y2 = [int(c) for c in box_xyxy]
+    if x2 <= x1 or y2 <= y1:
+        return [{"model": m, "kind": None, "text": "", "error": "invalid box"} for m in models]
+    crop = image_pil.crop((x1, y1, x2, y2))
+    return run_on_image(models, prompt, image_pil=crop, temperature=0.0)
+
+
 class Perception:
     def __init__(self) -> None:
         if torch and torch.cuda.is_available():

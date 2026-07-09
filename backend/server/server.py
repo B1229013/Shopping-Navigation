@@ -15,6 +15,7 @@ logging.basicConfig(
 
 import requests as _requests
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from PIL import Image, ImageOps
 
@@ -52,6 +53,15 @@ from server.vlm import (
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="UniGoal Indoor Navigation Server")
+
+# Allow the standalone browser comparison tool (compare.html, opened as a local
+# file → Origin "null", or from localhost) to call /ocr directly.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _store = SessionStore()
 _perception: Optional[Perception] = None
@@ -573,6 +583,41 @@ def _check_vlm_and_warm():
 
     if not os.environ.get("UNIGOAL_TEST_MODE"):
         _vlm_warm_up()
+
+
+@app.post("/ocr")
+async def ocr_extract(image: UploadFile = File(...)):
+    """Run the existing EasyOCR engine on one uploaded image and return its text.
+
+    Exposes the same ``OCR`` engine and config the photo turn uses (so results
+    match production) as a standalone endpoint, letting the browser comparison
+    tool put EasyOCR side-by-side with the gateway OCR models.
+    """
+    engine = get_ocr()
+    if engine is None:
+        raise HTTPException(status_code=503, detail={"error": "ocr_unavailable",
+                            "detail": "EasyOCR disabled or failed to load"})
+    import tempfile
+    data = await image.read()
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
+            tf.write(data)
+            tmp = tf.name
+        results = engine.read(tmp, min_confidence=OCR_MIN_CONFIDENCE, max_results=OCR_MAX_RESULTS)
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.remove(tmp)
+    return {
+        "engine": "easyocr",
+        "languages": OCR_LANGUAGES,
+        "text": " ".join(r.text for r in results),
+        "regions": [
+            {"text": r.text, "confidence": round(r.confidence, 4),
+             "bbox": [list(p) for p in r.bbox]}
+            for r in results
+        ],
+    }
 
 
 @app.get("/health")

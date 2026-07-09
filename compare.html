@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AppNav VLM×OCR Comparison — CGU Gateway + Local</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1f242e; --border: #2a303c;
+    --text: #e6e8ee; --muted: #9aa3b2; --accent: #7c9cff; --accent-2: #4f7cff;
+    --danger: #ff6b6b; --ok: #58d68d; --warn: #f7c948; --a: #4f7cff; --b: #f0a020;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  h1 { margin: 0 0 12px; font-size: 18px; }
+  h2 { font-size: 12px; margin: 16px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600; }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .setup { display: grid; gap: 20px; padding: 20px 24px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .setup.c3 { grid-template-columns: 1fr 1fr 1fr; }
+  .setup.c2 { grid-template-columns: 1fr 1fr; }
+  .setup.c1 { grid-template-columns: 1fr; }
+  .col { display: flex; flex-direction: column; gap: 6px; }
+  .slot { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--panel-2); }
+  .slot.a { border-left: 3px solid var(--a); }
+  .slot.b { border-left: 3px solid var(--b); }
+  label { font-size: 12px; color: var(--muted); }
+  input[type=text], input[type=password], input[type=url], input[type=number], select, textarea {
+    width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 9px; font: inherit; outline: none; }
+  .slot select, .slot input { background: var(--panel); }
+  textarea { resize: vertical; min-height: 130px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  button { background: var(--accent-2); color: white; border: 0; border-radius: 6px; padding: 9px 14px; font: 600 13px/1 inherit; cursor: pointer; }
+  button:hover:not(:disabled) { background: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  button.danger { background: var(--danger); }
+  .folder-btn { background: var(--accent-2); color: white; border-radius: 6px; padding: 9px 14px; font: 600 13px/1 inherit; cursor: pointer; display: inline-block; border: 0; }
+  .folder-btn:hover { background: var(--accent); }
+  .drop-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 20px; text-align: center; color: var(--muted); font-size: 13px; background: var(--panel-2); cursor: pointer; }
+  .drop-zone.drag { border-color: var(--accent); background: rgba(124,156,255,0.08); color: var(--text); }
+  .drop-zone strong { color: var(--text); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .toolbar { padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--panel); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .status { font-size: 12px; color: var(--muted); }
+  .status.ok { color: var(--ok); } .status.err { color: var(--danger); } .status.warn { color: var(--warn); }
+  .note { padding: 8px 10px; border-radius: 6px; background: rgba(124,156,255,0.08); border: 1px solid rgba(124,156,255,0.3); color: #b8c8ff; font-size: 12px; line-height: 1.5; }
+  .progress { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; flex: 1; max-width: 400px; }
+  .progress > div { height: 100%; background: var(--accent); transition: width 0.3s; }
+  .summary { margin: 20px 24px; padding: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+  .summary table { border-collapse: collapse; width: 100%; }
+  .summary th, .summary td { text-align: left; padding: 6px 10px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  .summary th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+  .summary td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+  .badge.a { background: var(--a); color: white; } .badge.b { background: var(--b); color: #1a1a1a; }
+  .grid { padding: 0 24px 24px; display: flex; flex-direction: column; gap: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: grid; grid-template-columns: 220px 1fr 1fr; gap: 14px; align-items: stretch; }
+  .card .thumb { display: flex; flex-direction: column; gap: 6px; }
+  .card .thumb img { width: 100%; border-radius: 6px; border: 1px solid var(--border); background: #000; }
+  .card .thumb .name { font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+  .pane { display: flex; flex-direction: column; gap: 8px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
+  .pane.a { border-left: 3px solid var(--a); } .pane.b { border-left: 3px solid var(--b); }
+  .pane .pane-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pane .stats { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pane .ocrbox { padding: 6px 8px; border-radius: 4px; background: rgba(240,160,32,0.07); border: 1px solid rgba(240,160,32,0.25); font-size: 12px; color: #ffd9a0; max-height: 90px; overflow-y: auto; white-space: pre-wrap; }
+  .pane .ocrbox .k { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+  .pane .body { white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, monospace; max-height: 300px; overflow-y: auto; }
+  .pane .body.error { color: var(--danger); }
+  .pane .parsed { padding: 6px 8px; border-radius: 4px; background: rgba(88,214,141,0.08); border: 1px solid rgba(88,214,141,0.3); font-size: 12px; color: #b8ecc8; }
+  .pane .parsed .k { color: var(--muted); }
+  .pane .parsed.bad { background: rgba(255,107,107,0.08); border-color: rgba(255,107,107,0.3); color: #ffb4b4; }
+  .agreement { font-size: 12px; color: var(--muted); padding: 4px 10px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--border); align-self: flex-start; }
+  .agreement.match { color: var(--ok); border-color: rgba(88,214,141,0.3); background: rgba(88,214,141,0.06); }
+  .agreement.diff { color: var(--warn); border-color: rgba(247,201,72,0.3); background: rgba(247,201,72,0.06); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AppNav VLM×OCR Comparison</h1>
+  <div class="status">
+    VLM and OCR are chosen <b>independently</b> per slot. Each slot runs its OCR engine, injects the extracted text
+    into the VLM prompt, then runs its VLM — so you can hold the VLM fixed and compare OCR engines (EasyOCR vs
+    deepseek-ocr vs glm-ocr), or hold OCR fixed and compare VLMs. CGU models use one key + base URL; Ollama is local;
+    EasyOCR is your backend's <code>POST /ocr</code>.
+  </div>
+</header>
+
+<div class="setup c1" style="padding-bottom:14px;">
+  <div class="row">
+    <strong style="font-size:13px;">Mode:</strong>
+    <label class="row" style="gap:6px;"><input type="radio" name="mode" value="batch" checked style="width:auto;" /> Batch (whole folder)</label>
+    <label class="row" style="gap:6px;"><input type="radio" name="mode" value="interactive" style="width:auto;" /> Interactive (turn-by-turn navigation)</label>
+  </div>
+</div>
+
+<!-- Connections -->
+<div class="setup c3">
+  <div class="col">
+    <h2>CGU Gateway</h2>
+    <label for="baseUrl">Base URL</label>
+    <input type="url" id="baseUrl" value="https://air.cgu.edu.tw/cgullmapi/v1" />
+    <label for="apiKey">API key (localStorage only)</label>
+    <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off" />
+    <div class="row" style="margin-top:4px;">
+      <button id="loadModels" class="secondary">Load models</button>
+      <span class="status" id="modelsStatus">No CGU models loaded.</span>
+    </div>
+  </div>
+  <div class="col">
+    <h2>Local Ollama (VLM)</h2>
+    <label for="ollamaUrl">Base URL</label>
+    <input type="url" id="ollamaUrl" value="http://localhost:11434" />
+    <div class="note">Needs Ollama running with <code>OLLAMA_ORIGINS=*</code>. <b>llava:7b</b> works on your 0.31.1;
+      <b>llama3.2-vision</b> is the config tag but errors (mllama) until Ollama is upgraded.</div>
+  </div>
+  <div class="col">
+    <h2>EasyOCR (backend)</h2>
+    <label for="easyocrUrl">Backend URL</label>
+    <input type="url" id="easyocrUrl" value="http://localhost:8000" />
+    <div class="note">Calls <code>POST {url}/ocr</code> — the FastAPI route wrapping your existing EasyOCR engine.
+      Requires the backend server running.</div>
+  </div>
+</div>
+
+<!-- Slots -->
+<div class="setup c2">
+  <div class="col"><h2>Slot A</h2>
+    <div class="slot a">
+      <label for="vlmA">VLM</label>
+      <select id="vlmA"></select>
+      <label for="ocrA" style="margin-top:8px;">OCR</label>
+      <select id="ocrA"></select>
+    </div>
+  </div>
+  <div class="col"><h2>Slot B</h2>
+    <div class="slot b">
+      <label for="vlmB">VLM</label>
+      <select id="vlmB"></select>
+      <label for="ocrB" style="margin-top:8px;">OCR</label>
+      <select id="ocrB"></select>
+    </div>
+  </div>
+</div>
+
+<!-- Item + params -->
+<div class="setup c3">
+  <div class="col">
+    <h2>Item to find</h2>
+    <label for="item">Typed into the prompt at request time (replaces <code>[[ITEM]]</code>)</label>
+    <input type="text" id="item" value="milk" placeholder="e.g. milk, 牛奶, bread…" />
+  </div>
+  <div class="col">
+    <h2>Params</h2>
+    <label for="temperature">Temperature (VLM)</label>
+    <input type="number" id="temperature" value="0.2" step="0.1" min="0" max="2" />
+    <label for="maxTokens">Max output tokens</label>
+    <input type="number" id="maxTokens" value="512" min="1" max="4096" />
+  </div>
+  <div class="col">
+    <h2>&nbsp;</h2>
+    <label for="resizeMax">Downscale images to (max px)</label>
+    <input type="number" id="resizeMax" value="1024" min="256" max="2048" />
+    <label for="concurrency">Photos processed in parallel</label>
+    <input type="number" id="concurrency" value="1" min="1" max="8" />
+  </div>
+</div>
+
+<!-- Prompt -->
+<div class="setup c1">
+  <div class="col">
+    <h2>VLM prompt template — <code>[[ITEM]]</code> = item field, <code>[[OCR]]</code> = chosen OCR's text</h2>
+    <textarea id="prompt">You are guiding a person through a grocery store using their phone camera. Goal: "find the [[ITEM]]".
+
+Sign/label text extracted by OCR (may be empty or noisy): [[OCR]]
+
+Reply with EXACTLY one JSON object on one line, nothing else:
+{"action": "ARRIVED" | "MOVE" | "ASK", "guidance": "<one or two sentences in Traditional Chinese 繁體中文>", "question": "<short question, only if ASK, else null>", "vlm_summary": "<one English phrase summarizing the location>"}
+
+Rules:
+- ARRIVED only if the [[ITEM]] is clearly visible in the photo — point at it in guidance.
+- ASK if two directions are plausible and a yes/no answer would resolve it.
+- MOVE otherwise. Give one concrete direction: "turn left", "turn right", or "go straight".
+- Use the OCR sign text above to help, but do NOT invent text you cannot see.
+- guidance and question MUST be in Traditional Chinese (繁體中文).</textarea>
+  </div>
+</div>
+
+<!-- Photos (batch mode) -->
+<div class="setup c1" id="batchPhotos">
+  <div class="col">
+    <h2>Photos (full frames, or detected-object crops for OCR)</h2>
+    <div id="dropZone" class="drop-zone">
+      <div><strong>Drop the folder here</strong> or use the buttons below.</div>
+      <div style="margin-top:6px; font-size:12px;">Downscaled before sending.</div>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <label for="folder" class="folder-btn">Choose folder…</label>
+      <input type="file" id="folder" webkitdirectory directory multiple style="display:none;" />
+      <label for="files" class="folder-btn">Choose files…</label>
+      <input type="file" id="files" multiple accept="image/*" style="display:none;" />
+      <span class="status" id="folderStatus">No photos loaded.</span>
+    </div>
+  </div>
+</div>
+
+<div class="toolbar" id="batchToolbar">
+  <button id="run">Run comparison</button>
+  <button id="cancel" class="danger" disabled>Cancel</button>
+  <button id="save" class="secondary" disabled>Save report (.html)</button>
+  <div class="progress"><div id="progressBar" style="width:0%"></div></div>
+  <span class="status" id="progressText"></span>
+</div>
+
+<!-- Interactive mode -->
+<div id="interactivePanel" class="setup c1" style="display:none;">
+  <div class="col">
+    <h2>Interactive navigation — attach one photo per step, say where you are</h2>
+    <div class="row" style="align-items:flex-start; gap:16px;">
+      <div class="col" style="flex:0 0 220px;">
+        <label for="turnFile" class="folder-btn">Attach one photo…</label>
+        <input type="file" id="turnFile" accept="image/*" style="display:none;" />
+        <img id="turnPreview" alt="attached" style="width:220px;border-radius:6px;border:1px solid var(--border);display:none;margin-top:8px;" />
+        <span class="status" id="turnFileStatus">No photo attached.</span>
+      </div>
+      <div class="col" style="flex:1;">
+        <label for="turnMsg">Your message this step (e.g. “I’m at the entrance” / “I followed the instruction, now here”)</label>
+        <textarea id="turnMsg" style="min-height:70px;">I am at the entrance.</textarea>
+        <div class="row">
+          <button id="sendTurn">Send step</button>
+          <button id="resetSession" class="secondary">Reset session</button>
+          <span class="status" id="turnStatus"></span>
+        </div>
+        <div class="note">Each step runs the chosen OCR on the new photo, then the VLM answers <b>with memory of all prior steps</b> in the session (both slots independently). “Reset session” clears the memory to start a new walk.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="transcript" class="grid" style="display:none;"></div>
+
+<div id="summary" class="summary" style="display:none;"></div>
+<div id="grid" class="grid"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const KEYS = {
+    baseUrl:"appnav_x_base", apiKey:"appnav_x_key", ollamaUrl:"appnav_x_ollama", easyocrUrl:"appnav_x_easyocr",
+    vlmA:"appnav_x_vlmA", ocrA:"appnav_x_ocrA", vlmB:"appnav_x_vlmB", ocrB:"appnav_x_ocrB",
+    item:"appnav_x_item", temperature:"appnav_x_temp", maxTokens:"appnav_x_max",
+    resizeMax:"appnav_x_resize", concurrency:"appnav_x_conc", prompt:"appnav_x_prompt",
+  };
+  const els = {}; Object.keys(KEYS).forEach((k) => els[k] = $(k));
+  ["loadModels","modelsStatus","folder","files","dropZone","folderStatus","run","cancel","save","progressBar","progressText","summary","grid",
+   "batchPhotos","batchToolbar","interactivePanel","transcript","turnFile","turnPreview","turnFileStatus","turnMsg","sendTurn","resetSession","turnStatus"]
+    .forEach((k) => els[k] = $(k));
+
+  const OCR_PROMPT = "Extract all text visible in this image exactly as written, preserving Traditional Chinese characters. Return only the extracted text.";
+  const modelKind = (id) => { const m=(id||"").toLowerCase(); if(/embedding|bge-m3/.test(m))return"embedding"; if(/ocr/.test(m))return"ocr"; return"chat"; };
+  const parseSel = (v) => { const i=(v||"").indexOf("::"); return i<0?{provider:v||"",model:""}:{provider:v.slice(0,i),model:v.slice(i+2)}; };
+  const gwBase = () => els.baseUrl.value.trim().replace(/\/+$/,"");
+
+  // ── build the four selects (static local options always; CGU groups added after load) ──
+  let cguChat = [], cguOcr = [];
+  const opt = (val, label) => `<option value="${val}">${label||val}</option>`;
+  const grp = (label, inner) => inner ? `<optgroup label="${label}">${inner}</optgroup>` : "";
+  const buildSelects = () => {
+    const vlmHtml =
+      grp("Local Ollama", opt("ollama::llava:7b","llava:7b (works)") + opt("ollama::llama3.2-vision","llama3.2-vision (mllama — errors on 0.31.1)")) +
+      grp("CGU gateway (chat/vision)", cguChat.map((m)=>opt("cgu::"+m,m)).join(""));
+    // vision-capable chat models double as OCR engines (useful when the dedicated
+    // OCR models are 502 or the EasyOCR backend isn't running)
+    const visionOcr = cguChat.filter((m)=>/^gpt-(4o|5)/.test(m) && !/codex|realtime|transcribe|tts|image/.test(m));
+    const ocrHtml =
+      opt("none","(no OCR)") + opt("easyocr","EasyOCR (local backend — needs server on :8000)") +
+      grp("CGU dedicated OCR", cguOcr.map((m)=>opt("cgu::"+m,m)).join("")) +
+      grp("CGU vision-LLM as OCR (works now)", visionOcr.map((m)=>opt("cgu::"+m,m)).join(""));
+    for (const s of ["A","B"]) {
+      const keepV = els["vlm"+s].value, keepO = els["ocr"+s].value;
+      els["vlm"+s].innerHTML = vlmHtml; els["ocr"+s].innerHTML = ocrHtml;
+      const wantV = keepV || localStorage.getItem(KEYS["vlm"+s]) || "ollama::llava:7b";
+      const wantO = keepO || localStorage.getItem(KEYS["ocr"+s]) || (s==="A" ? "easyocr" : "cgu::deepseek-ocr:latest");
+      if ([...els["vlm"+s].options].some((o)=>o.value===wantV)) els["vlm"+s].value = wantV;
+      if ([...els["ocr"+s].options].some((o)=>o.value===wantO)) els["ocr"+s].value = wantO;
+    }
+  };
+
+  const restore = () => {
+    for (const [k, sk] of Object.entries(KEYS)) {
+      const v = localStorage.getItem(sk);
+      if (v!=null && els[k] && els[k].tagName!=="SELECT") els[k].value = v;
+    }
+    buildSelects();
+  };
+  Object.keys(KEYS).forEach((k) => { if(!els[k])return;
+    els[k].addEventListener("change",(e)=>localStorage.setItem(KEYS[k], e.target.value));
+    els[k].addEventListener("input",(e)=>localStorage.setItem(KEYS[k], e.target.value)); });
+
+  els.loadModels.onclick = async () => {
+    const key = els.apiKey.value.trim();
+    if (!key) { els.modelsStatus.textContent="Enter the API key first."; els.modelsStatus.className="status err"; return; }
+    els.modelsStatus.textContent="Loading…"; els.modelsStatus.className="status";
+    try {
+      const r = await fetch(gwBase()+"/models",{headers:{Authorization:"Bearer "+key}});
+      if(!r.ok) throw new Error("HTTP "+r.status+": "+(await r.text()).slice(0,160));
+      const data = await r.json();
+      const ids = (data.data||[]).map((m)=>m.id).sort();
+      cguChat = ids.filter((m)=>modelKind(m)==="chat");
+      cguOcr = ids.filter((m)=>modelKind(m)==="ocr");
+      buildSelects();
+      els.modelsStatus.textContent = `${ids.length} models · ${cguChat.length} chat · ${cguOcr.length} OCR`;
+      els.modelsStatus.className="status ok";
+    } catch(e) { els.modelsStatus.textContent="Load failed: "+e.message; els.modelsStatus.className="status err"; }
+  };
+
+  // ── files ──
+  let files = [];
+  const acceptFiles = (rawList, source) => {
+    files = Array.from(rawList||[]).filter((f)=>/\.(jpe?g|png|webp|bmp)$/i.test(f.name))
+      .sort((a,b)=>{const na=parseInt(a.name.match(/\d+/)?.[0]||"0",10),nb=parseInt(b.name.match(/\d+/)?.[0]||"0",10);return na-nb||a.name.localeCompare(b.name);});
+    els.folderStatus.textContent = files.length ? files.length+" images loaded ("+source+")." : "No image files found.";
+    els.folderStatus.className = files.length ? "status ok" : "status err";
+  };
+  els.folder.onchange=(e)=>acceptFiles(e.target.files,"folder");
+  els.files.onchange=(e)=>acceptFiles(e.target.files,"files");
+  const stop=(e)=>{e.preventDefault();e.stopPropagation();};
+  els.dropZone.addEventListener("click",()=>els.folder.click());
+  ["dragenter","dragover"].forEach((ev)=>els.dropZone.addEventListener(ev,(e)=>{stop(e);els.dropZone.classList.add("drag");}));
+  ["dragleave","drop"].forEach((ev)=>els.dropZone.addEventListener(ev,(e)=>{stop(e);els.dropZone.classList.remove("drag");}));
+  els.dropZone.addEventListener("drop",async(e)=>{
+    const items=e.dataTransfer.items; if(!items)return acceptFiles(e.dataTransfer.files,"drop");
+    const out=[]; const walk=async(entry)=>{ if(entry.isFile){const f=await new Promise((res)=>entry.file(res));out.push(f);}
+      else if(entry.isDirectory){const reader=entry.createReader();const kids=await new Promise((res)=>reader.readEntries(res));for(const k of kids)await walk(k);} };
+    const entries=[]; for(const it of items){const en=it.webkitGetAsEntry&&it.webkitGetAsEntry();if(en)entries.push(en);}
+    if(entries.length){for(const en of entries)await walk(en);acceptFiles(out,"drop");}else acceptFiles(e.dataTransfer.files,"drop");
+  });
+
+  // resize → { dataUrl, b64, blob, w, h, sizeKB }
+  const loadAndResize = (file, maxDim) => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale=Math.min(1,maxDim/Math.max(img.width,img.height));
+      const w=Math.round(img.width*scale), h=Math.round(img.height*scale);
+      const canvas=document.createElement("canvas"); canvas.width=w; canvas.height=h;
+      canvas.getContext("2d").drawImage(img,0,0,w,h);
+      const dataUrl=canvas.toDataURL("image/jpeg",0.85);
+      canvas.toBlob((blob)=>{ URL.revokeObjectURL(img.src);
+        resolve({dataUrl, b64:dataUrl.split(",")[1], blob, w, h, sizeKB:Math.round(dataUrl.length*0.75/1024)}); }, "image/jpeg", 0.85);
+    };
+    img.onerror = reject; img.src = URL.createObjectURL(file);
+  });
+
+  const extractJSON = (t) => { const m=(t||"").match(/\{[\s\S]*?\}/); if(!m)return null; try{return JSON.parse(m[0]);}catch{return null;} };
+  const hasTC = (s) => /[㐀-鿿]/.test(s||"");
+  const escapeHtml = (s) => (s||"").replace(/[&<>]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+  // ── OCR call (routes by provider) ──
+  const runOCR = async (sel, img, cfg) => {
+    const {provider,model}=parseSel(sel); const t0=performance.now();
+    if(provider==="none") return {engine:"none", ok:true, elapsed:0, text:""};
+    try {
+      if(provider==="easyocr"){
+        const fd=new FormData(); fd.append("image", img.blob, "photo.jpg");
+        const r=await fetch(cfg.easyocrUrl.replace(/\/+$/,"")+"/ocr",{method:"POST",body:fd});
+        const el=(performance.now()-t0)/1000;
+        if(!r.ok) return {engine:"easyocr", ok:false, elapsed:el, text:`HTTP ${r.status}: ${(await r.text()).slice(0,240)}`};
+        const d=await r.json(); return {engine:"easyocr", ok:true, elapsed:el, text:d.text||"", regions:d.regions};
+      }
+      // CGU OCR model via /chat/completions with image
+      const res=await callGateway(model, OCR_PROMPT, img, cfg, 0);
+      return {engine:model, ok:res.ok, elapsed:res.elapsed, text:res.text};
+    } catch(e){ return {engine:provider, ok:false, elapsed:(performance.now()-t0)/1000, text:"Failed: "+e.message}; }
+  };
+
+  // ── VLM call (routes by provider) ──
+  const runVLM = async (sel, prompt, img, cfg) => {
+    const {provider,model}=parseSel(sel); const t0=performance.now();
+    if(provider==="ollama"){
+      const body={model, messages:[{role:"user", content:prompt, images:[img.b64]}], stream:false, options:{temperature:cfg.temperature, num_predict:cfg.maxTokens}};
+      try {
+        const r=await fetch(cfg.ollamaUrl.replace(/\/+$/,"")+"/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+        const el=(performance.now()-t0)/1000;
+        if(!r.ok) return {ok:false, elapsed:el, model, text:`HTTP ${r.status}: ${(await r.text()).slice(0,300)}`};
+        const d=await r.json(); return {ok:true, elapsed:el, model, text:d.message?.content??""};
+      } catch(e){ return {ok:false, elapsed:(performance.now()-t0)/1000, model, text:"Failed to fetch: "+e.message+" (Ollama running with OLLAMA_ORIGINS=*?)"}; }
+    }
+    return await callGateway(model, prompt, img, cfg, cfg.temperature);
+  };
+
+  // Colon-id models (deepseek-ocr:latest, glm-ocr:latest, gpt-oss:20b, translategemma:latest)
+  // are Ollama-served on the gateway and reject OpenAI's content-array: they need Ollama's
+  // native message (content:string + images:[raw b64]) and a minimal body (no max_tokens/temp).
+  const isOllamaHosted = (model) => (model||"").includes(":");
+  const userImgMsg = (model, text, img) => isOllamaHosted(model)
+    ? {role:"user", content:text, images:[img.b64]}
+    : {role:"user", content:[{type:"image_url",image_url:{url:img.dataUrl}},{type:"text",text}]};
+  const gatewayPost = async (model, messages, cfg, temperature) => {
+    const t0=performance.now();
+    const body = isOllamaHosted(model)
+      ? {model, messages, stream:false}
+      : {model, messages, temperature, ...(/^gpt-5/.test(model)?{max_completion_tokens:cfg.maxTokens}:{max_tokens:cfg.maxTokens})};
+    try {
+      const r=await fetch(gwBase()+"/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+cfg.key},body:JSON.stringify(body)});
+      const el=(performance.now()-t0)/1000;
+      if(!r.ok) return {ok:false, elapsed:el, model, text:`HTTP ${r.status}: ${(await r.text()).slice(0,300)}`};
+      const d=await r.json(); return {ok:true, elapsed:el, model, text:d.choices?.[0]?.message?.content??"", inTok:d.usage?.prompt_tokens, outTok:d.usage?.completion_tokens};
+    } catch(e){ return {ok:false, elapsed:(performance.now()-t0)/1000, model, text:"Failed to fetch: "+e.message}; }
+  };
+  const callGateway = (model, prompt, img, cfg, temperature) => gatewayPost(model, [userImgMsg(model, prompt, img)], cfg, temperature);
+
+  // ── one slot: OCR → inject → VLM ──
+  const runSlot = async (slot, img, cfg) => {
+    const ocr = await runOCR(slot.ocr, img, cfg);
+    const ocrText = ocr.ok ? ocr.text : "";
+    const prompt = cfg.prompt.split("[[ITEM]]").join(cfg.item || "the item").split("[[OCR]]").join(ocrText || "(none)");
+    const vlm = await runVLM(slot.vlm, prompt, img, cfg);
+    vlm.parsed = extractJSON(vlm.text);
+    vlm.hasTC = hasTC(vlm.parsed?.guidance) || hasTC(vlm.text);
+    return {ocr, vlm, total:(ocr.elapsed||0)+(vlm.elapsed||0), vlmLabel:slot.vlm, ocrLabel:slot.ocr};
+  };
+
+  const renderPane = (slot, res) => {
+    const p=document.createElement("div"); p.className="pane "+slot;
+    if(!res){ p.innerHTML=`<div class="pane-head"><span class="badge ${slot}">${slot}</span></div>`; return p; }
+    const {ocr,vlm}=res;
+    const ocrHtml = parseSel(res.ocrLabel).provider==="none" ? "" :
+      `<div class="ocrbox"><span class="k">ocr · ${escapeHtml(ocr.engine)} · ${ocr.elapsed.toFixed(2)}s${ocr.ok?"":" · ERR"}</span>\n${escapeHtml(ocr.text||"(empty)")}</div>`;
+    const parsed = vlm.parsed
+      ? `<div class="parsed"><span class="k">action</span> ${vlm.parsed.action??"(free text)"} · <span class="k">tc</span> ${vlm.hasTC?"✓":"✗"}</div>`
+      : `<div class="parsed bad">no JSON · <span class="k">tc</span> ${vlm.hasTC?"✓":"✗"}</div>`;
+    p.innerHTML = `
+      <div class="pane-head">
+        <span class="badge ${slot}">${slot}</span>
+        <span class="stats">VLM ${escapeHtml(vlm.model)}</span>
+        <span class="stats" style="margin-left:auto;">${vlm.elapsed.toFixed(2)}s${vlm.inTok!=null?` · ${vlm.inTok}/${vlm.outTok} tok`:""}</span>
+      </div>
+      ${ocrHtml}${parsed}
+      <div class="body${vlm.ok?"":" error"}">${escapeHtml(vlm.text)}</div>`;
+    return p;
+  };
+
+  const renderCard = (r) => {
+    const card=document.createElement("div"); card.className="card";
+    const thumb=document.createElement("div"); thumb.className="thumb";
+    thumb.innerHTML=`<img src="${r.imgDataUrl}" alt="${r.name}" /><div class="name">${r.name}</div><div class="name">${r.w}×${r.h}, ${r.sizeKB} KB</div>`;
+    card.appendChild(thumb);
+    card.appendChild(renderPane("a", r.a));
+    card.appendChild(renderPane("b", r.b));
+    const aa=r.a?.vlm?.parsed?.action, ba=r.b?.vlm?.parsed?.action;
+    if(aa&&ba){ const agree=aa===ba; const d=document.createElement("div");
+      d.className="agreement "+(agree?"match":"diff"); d.textContent=agree?`Both VLMs said ${aa}`:`A: ${aa} / B: ${ba}`;
+      d.style.gridColumn="1 / -1"; card.appendChild(d); }
+    return card;
+  };
+
+  const mean=(a)=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
+  const pct=(a,b)=>b?Math.round(100*a/b)+"%":"-";
+  const slotStats=(results,slot)=>{ const runs=results.filter((r)=>r[slot]);
+    return { n:runs.length, ok:runs.filter((r)=>r[slot].vlm.ok).length,
+      parseOk:runs.filter((r)=>r[slot].vlm.parsed).length, tcOk:runs.filter((r)=>r[slot].vlm.hasTC).length,
+      avg:mean(runs.filter((r)=>r[slot].vlm.ok).map((r)=>r[slot].total)),
+      vlm:runs[0]?.[slot]?.vlm?.model||"—", ocr:parseSel(runs[0]?.[slot]?.ocrLabel||"").provider==="cgu"?parseSel(runs[0][slot].ocrLabel).model:parseSel(runs[0]?.[slot]?.ocrLabel||"none").provider }; };
+  const updateSummary=(results,cfg)=>{
+    const a=slotStats(results,"a"), b=slotStats(results,"b");
+    const agree=results.filter((r)=>r.a?.vlm?.parsed?.action&&r.b?.vlm?.parsed?.action&&r.a.vlm.parsed.action===r.b.vlm.parsed.action).length;
+    const both=results.filter((r)=>r.a?.vlm?.parsed?.action&&r.b?.vlm?.parsed?.action).length;
+    const row=(slot,s,cls)=>`<tr><td><span class="badge ${cls}">${slot}</span></td><td>${s.vlm}</td><td>${s.ocr}</td>
+      <td class="num">${s.n}</td><td class="num">${s.ok}</td>
+      <td class="num">${s.parseOk} (${pct(s.parseOk,s.n)})</td><td class="num">${s.tcOk} (${pct(s.tcOk,s.n)})</td>
+      <td class="num">${s.avg.toFixed(2)}s</td></tr>`;
+    els.summary.style.display="block";
+    els.summary.innerHTML=`
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+        <div><strong>Summary</strong> — ${results.length} images · item “${escapeHtml(cfg.item)}”</div>
+        <div class="status">temp ${cfg.temperature} · max_tokens ${cfg.maxTokens}</div></div>
+      <table><thead><tr><th>Slot</th><th>VLM</th><th>OCR</th><th class="num">Runs</th><th class="num">OK</th>
+        <th class="num">JSON parseable</th><th class="num">Trad. Chinese</th><th class="num">Avg latency (OCR+VLM)</th></tr></thead>
+      <tbody>${row("A",a,"a")}${row("B",b,"b")}</tbody></table>
+      <div style="margin-top:8px;font-size:12px;color:var(--muted);">Agreement on <code>action</code> (both parsed): ${agree} / ${both} (${pct(agree,both)})</div>`;
+  };
+
+  // ── run ──
+  let cancelled=false;
+  els.cancel.onclick=()=>{cancelled=true; els.cancel.disabled=true;};
+  const readCfg=()=>({
+    key:els.apiKey.value.trim(), ollamaUrl:els.ollamaUrl.value.trim(), easyocrUrl:els.easyocrUrl.value.trim(),
+    slotA:{vlm:els.vlmA.value, ocr:els.ocrA.value}, slotB:{vlm:els.vlmB.value, ocr:els.ocrB.value},
+    item:els.item.value.trim(), temperature:parseFloat(els.temperature.value)||0, maxTokens:parseInt(els.maxTokens.value,10)||512,
+    resizeMax:parseInt(els.resizeMax.value,10)||1024, concurrency:Math.max(1,parseInt(els.concurrency.value,10)||1), prompt:els.prompt.value,
+  });
+  const cfgNeedsKey=(cfg)=>[cfg.slotA.vlm,cfg.slotA.ocr,cfg.slotB.vlm,cfg.slotB.ocr].some((s)=>parseSel(s).provider==="cgu");
+
+  els.run.onclick=async()=>{
+    if(!files.length){alert("Load a folder of photos first.");return;}
+    const cfg=readCfg();
+    const needsKey=cfgNeedsKey(cfg);
+    if(needsKey&&!cfg.key){alert("A CGU model is selected but no API key is set.");return;}
+    els.grid.innerHTML=""; els.summary.style.display="none";
+    els.run.disabled=true; els.cancel.disabled=false; els.save.disabled=true; cancelled=false;
+    const results=[];
+    const runOne=async(file)=>{
+      if(cancelled)return; let img;
+      try{img=await loadAndResize(file,cfg.resizeMax);}catch(e){console.warn("resize failed",file.name,e);return;}
+      const r={name:file.name, imgDataUrl:img.dataUrl, w:img.w, h:img.h, sizeKB:img.sizeKB};
+      const [a,b]=await Promise.all([runSlot(cfg.slotA,img,cfg), runSlot(cfg.slotB,img,cfg)]);
+      r.a=a; r.b=b; results.push(r);
+      els.grid.appendChild(renderCard(r));
+      els.progressBar.style.width=(100*results.length/files.length)+"%";
+      els.progressText.textContent=`${results.length} / ${files.length}`;
+      updateSummary(results,cfg);
+    };
+    let idx=0;
+    while(idx<files.length&&!cancelled){ await Promise.all(files.slice(idx,idx+cfg.concurrency).map((f)=>runOne(f))); idx+=cfg.concurrency; }
+    els.run.disabled=false; els.cancel.disabled=true; els.save.disabled=results.length===0;
+    els.progressText.textContent=cancelled?"cancelled":"done";
+    window.__lastResults={results,cfg};
+  };
+
+  els.save.onclick=()=>{
+    if(!window.__lastResults)return; const {results,cfg}=window.__lastResults;
+    const style=document.querySelector("style").outerHTML; const stamp=new Date().toISOString();
+    const cards=results.map((r)=>renderCard(r).outerHTML).join("\n");
+    const html=`<!doctype html><html><head><meta charset="utf-8"><title>AppNav VLM×OCR Report</title>${style}</head>
+<body><header><h1>AppNav VLM×OCR Comparison Report</h1>
+<div class="status">Generated ${stamp} · ${results.length} images · item “${escapeHtml(cfg.item)}” · A=(${escapeHtml(cfg.slotA.vlm)} / ${escapeHtml(cfg.slotA.ocr)}) · B=(${escapeHtml(cfg.slotB.vlm)} / ${escapeHtml(cfg.slotB.ocr)})</div></header>
+${els.summary.outerHTML}<div class="grid">${cards}</div></body></html>`;
+    const blob=new Blob([html],{type:"text/html"}); const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob); a.download=`appnav-vlmxocr-${stamp.slice(0,19).replace(/[:T]/g,"-")}.html`; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  };
+
+  // ── interactive (turn-by-turn) mode ──
+  const modeEls = document.getElementsByName("mode");
+  const currentMode = () => ([...modeEls].find((r)=>r.checked)?.value) || "batch";
+  const applyMode = () => {
+    const batch = currentMode()==="batch";
+    els.batchPhotos.style.display = batch ? "" : "none";
+    els.batchToolbar.style.display = batch ? "" : "none";
+    els.grid.style.display = batch ? "" : "none";
+    if(!batch) els.summary.style.display = "none";
+    els.interactivePanel.style.display = batch ? "none" : "";
+    els.transcript.style.display = batch ? "none" : "";
+  };
+  [...modeEls].forEach((r)=>r.addEventListener("change",applyMode));
+
+  let turnImgFile = null;
+  els.turnFile.onchange = (e) => {
+    const f = e.target.files[0]; if(!f) return;
+    turnImgFile = f; els.turnPreview.src = URL.createObjectURL(f); els.turnPreview.style.display = "block";
+    els.turnFileStatus.textContent = f.name; els.turnFileStatus.className = "status ok";
+  };
+
+  const sess = { a:{turns:[]}, b:{turns:[]} };
+  els.resetSession.onclick = () => { sess.a.turns=[]; sess.b.turns=[]; els.transcript.innerHTML=""; els.turnStatus.textContent="session reset — attach the first photo"; };
+
+  // provider-agnostic turns → provider messages (only the latest user turn carries
+  // the image, mirroring the backend: current photo + textual history of prior steps)
+  // nativeImages=true → Ollama shape (content string + images:[b64]); used for direct Ollama
+  // AND colon-id gateway models. Only the latest user turn carries the image.
+  const buildMessages = (turns, nativeImages) => {
+    const userIdxs = turns.map((t,i)=>t.role==="user"?i:-1).filter((i)=>i>=0);
+    const lastUserIdx = userIdxs[userIdxs.length-1];
+    return turns.map((t,i)=>{
+      if(nativeImages){ const m={role:t.role, content:t.text}; if(t.role==="user"&&i===lastUserIdx&&t.img) m.images=[t.img.b64]; return m; }
+      if(t.role==="user"&&i===lastUserIdx&&t.img) return {role:"user", content:[{type:"image_url",image_url:{url:t.img.dataUrl}},{type:"text",text:t.text}]};
+      return {role:t.role, content:t.text};
+    });
+  };
+  const callOllamaMsgs = async (model, messages, cfg) => { const t0=performance.now();
+    try{ const r=await fetch(cfg.ollamaUrl.replace(/\/+$/,"")+"/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model,messages,stream:false,options:{temperature:cfg.temperature,num_predict:cfg.maxTokens}})});
+      const el=(performance.now()-t0)/1000; if(!r.ok)return{ok:false,elapsed:el,model,text:`HTTP ${r.status}: ${(await r.text()).slice(0,300)}`};
+      const d=await r.json(); return{ok:true,elapsed:el,model,text:d.message?.content??""};
+    }catch(e){return{ok:false,elapsed:(performance.now()-t0)/1000,model,text:"Failed to fetch: "+e.message+" (Ollama running with OLLAMA_ORIGINS=*?)"};}
+  };
+  const runSlotSession = async (slotKey, slotSel, img, userMsg, cfg) => {
+    const s = sess[slotKey];
+    const ocr = await runOCR(slotSel.ocr, img, cfg);
+    const ocrText = ocr.ok ? ocr.text : "";
+    if(!s.turns.length){
+      const sys = cfg.prompt.split("[[ITEM]]").join(cfg.item||"the item").split("[[OCR]]").join("(provided with each step)");
+      s.turns.push({role:"system", text:sys, img:null});
+    }
+    s.turns.push({role:"user", text:`${userMsg||"(no message)"}\n\n[OCR sign text from this photo: ${ocrText||"none"}]`, img});
+    const {provider,model} = parseSel(slotSel.vlm);
+    const nativeImages = provider==="ollama" || isOllamaHosted(model);
+    const messages = buildMessages(s.turns, nativeImages);
+    const res = provider==="ollama" ? await callOllamaMsgs(model, messages, cfg)
+                                    : await gatewayPost(model, messages, cfg, cfg.temperature);
+    s.turns.push({role:"assistant", text:res.text});
+    res.parsed = extractJSON(res.text); res.hasTC = hasTC(res.parsed?.guidance) || hasTC(res.text);
+    return {ocr, vlm:res, vlmLabel:slotSel.vlm, ocrLabel:slotSel.ocr};
+  };
+  const renderTurn = ({img, userMsg, a, b}) => {
+    const card=document.createElement("div"); card.className="card";
+    const thumb=document.createElement("div"); thumb.className="thumb";
+    thumb.innerHTML=`<img src="${img.dataUrl}" alt="step" /><div class="name">you: ${escapeHtml(userMsg||"(no message)")}</div>`;
+    card.appendChild(thumb); card.appendChild(renderPane("a",a)); card.appendChild(renderPane("b",b));
+    const aa=a?.vlm?.parsed?.action, ba=b?.vlm?.parsed?.action;
+    if(aa&&ba){ const agree=aa===ba; const d=document.createElement("div"); d.className="agreement "+(agree?"match":"diff");
+      d.textContent=agree?`Both VLMs said ${aa}`:`A: ${aa} / B: ${ba}`; d.style.gridColumn="1 / -1"; card.appendChild(d); }
+    els.transcript.appendChild(card); card.scrollIntoView({behavior:"smooth",block:"end"});
+  };
+  els.sendTurn.onclick = async () => {
+    if(!turnImgFile){ alert("Attach one photo for this step."); return; }
+    const cfg = readCfg();
+    if(cfgNeedsKey(cfg) && !cfg.key){ alert("A CGU model is selected but no API key is set."); return; }
+    els.sendTurn.disabled=true; els.turnStatus.textContent="thinking…";
+    let img; try{ img=await loadAndResize(turnImgFile, cfg.resizeMax); }
+    catch(e){ els.turnStatus.textContent="image error"; els.sendTurn.disabled=false; return; }
+    const userMsg = els.turnMsg.value.trim();
+    const [a,b] = await Promise.all([ runSlotSession("a",cfg.slotA,img,userMsg,cfg), runSlotSession("b",cfg.slotB,img,userMsg,cfg) ]);
+    renderTurn({img, userMsg, a, b});
+    els.sendTurn.disabled=false; els.turnStatus.textContent="step "+((sess.a.turns.filter(t=>t.role==="user")).length)+" done — attach the next photo";
+    turnImgFile=null; els.turnFile.value=""; els.turnPreview.style.display="none"; els.turnFileStatus.textContent="No photo attached."; els.turnFileStatus.className="status";
+    els.turnMsg.value="I followed the instruction.";
+  };
+
+  restore();
+  applyMode();
+})();
+</script>
+</body>
+</html>

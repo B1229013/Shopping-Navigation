@@ -75,8 +75,6 @@ SAM_WEIGHTS = _LOCAL_MODELS / "sam_vit_h_4b8939.pth"
 OUTPUT_ROOT = PROJECT_ROOT / "output" / "sessions"
 
 # LLM services — "openai" (default), "gemini", or "ollama".
-# Kept as a str (not Literal) because a third backend, Gemini, is still supported;
-# see docstring above ``goal_decomposer.decompose_goal`` and ``vlm._generate``.
 VLM_BACKEND = os.environ.get("VLM_BACKEND", "openai")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
@@ -110,7 +108,7 @@ GENERIC_INDOOR_OBJECTS = [
     # 同學的 DEFAULT_CLASSES（19 項）
     "door", "cabinet", "chair", "table", "desk", "sofa", "sign",
     "fire extinguisher", "plant", "printer", "whiteboard", "monitor",
-    "computer", "bookshelf", "window", "counter", "reception",
+    "computer", "bookshelf", "window", "counter", "service counter",
     "bulletin board", "notice board",
     # 額外補充
     "refrigerator", "water dispenser", "shelf", "trash can", "poster",

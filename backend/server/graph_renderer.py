@@ -5,7 +5,7 @@
 
 這份實作參考了 navigate_one_by_one.py（單張照片逐步導航腳本）的繪圖邏輯，
 並將其中較成熟的部分（跨步實體精準比對、觀察點方框動態高度、
-物件節點三欄式排版、狀態表情符號標記）移植過來，
+物件節點三欄式排版、狀態純文字標記）移植過來，
 同時保留 APPNAV 後端（server.py）實際使用的資料結構：
     - observation dict 使用 "vlm_summary"（單一描述文字），而非
       navigate_one_by_one.py 的 "interactions"（多輪使用者問答）。
@@ -434,20 +434,21 @@ def postprocess_detections(
     prev_dets: Optional[list[dict]] = None,
     prev_w: int = 0,
     prev_h: int = 0,
+    skip_nms: bool = False,
 ) -> list[dict]:
     """依序執行：NMS → 同標籤合併 → 相似標籤合併 → OCR-門關聯 →
     空間關係推論 → 跨步實體追蹤 → ID 指派。
 
-    注意：跨步實體追蹤（tag_same_entity）需要用到「上一步」偵測結果的
-    'id' 欄位，而上一步的資料是在上一次呼叫本函式時就已經指派好 id，
-    所以這裡的呼叫順序沒有問題（本步驟的 id 要到最後才指派）。
+    skip_nms: VLM 模式下 bbox 是由位置描述產生的粗略區域，
+    同區域的不同物件會有幾乎相同的 bbox，不適合用 NMS/合併去重。
     """
     if not det_dicts:
         return det_dicts
 
-    det_dicts = apply_nms(det_dicts)
-    det_dicts = merge_adjacent_same_label(det_dicts)
-    det_dicts = merge_adjacent_similar_label(det_dicts)
+    if not skip_nms:
+        det_dicts = apply_nms(det_dicts)
+        det_dicts = merge_adjacent_same_label(det_dicts)
+        det_dicts = merge_adjacent_similar_label(det_dicts)
 
     if ocr_with_bbox:
         associate_ocr_to_doors(det_dicts, ocr_with_bbox)
@@ -584,26 +585,33 @@ def _wrap_text(text: str, line_w: int, max_lines: int = 8) -> list[str]:
 
 
 def _obs_box_h(vlm_summary: str, ocr_hit: bool, is_current: bool) -> float:
-    """計算觀察點方框需要的高度，讓 VLM 描述文字能完整顯示而不被裁切。"""
-    HEADER_H = 0.62   # 標題「觀察點 N」+ 照片檔名
-    LINE_H = 0.20
-    PAD = 0.15
-    line_w = 22 if is_current else 18
-    max_lines = 8 if is_current else 4
-    clean = vlm_summary.replace("\n", " ").strip()
-    n_lines = len(_wrap_text(clean, line_w, max_lines)) if clean else 0
-    extra = 0.20 if ocr_hit else 0.0
-    return max(1.54, HEADER_H + extra + n_lines * LINE_H + PAD)
+    """計算觀察點方框需要的高度，讓文字能完整顯示而不被裁切。"""
+    LINE_H = 0.26
+    PAD = 0.30
+    n_lines = 2
+    if ocr_hit:
+        n_lines += 1
+    if vlm_summary:
+        line_w = 18 if is_current else 14
+        max_lines = 5 if is_current else 3
+        clean = vlm_summary.replace("\n", " ").strip()
+        n_lines += len(_wrap_text(clean, line_w, max_lines))
+    return max(1.80, n_lines * LINE_H + PAD)
 
 
-def _row_h_for(n_dets: int, is_current: bool, obs_box_h: float) -> float:
-    """列高需同時滿足：容納觀察方框的高度、容納所有物件節點不重疊。"""
+def _row_h_for(n_nodes: int, is_current: bool, obs_box_h: float) -> float:
+    """列高需同時滿足：容納觀察方框的高度、容納所有節點不重疊。
+
+    n_nodes 包含偵測節點 + OCR 節點的總數。
+    公式：(n_nodes + 1) * (NODE_H + GAP) 確保 spacing > node_h。
+    """
     if is_current:
-        NODE_H, GAP = 0.58, 0.24
+        NODE_H, GAP = 0.78, 0.30
     else:
-        NODE_H, GAP = 0.44, 0.20
-    min_for_obs = max(2.20, 2 * obs_box_h - 1.54 + 0.50)
-    return max(min_for_obs, n_dets * (NODE_H + GAP) + 0.70)
+        NODE_H, GAP = 0.56, 0.24
+    min_for_obs = max(2.60, 2 * obs_box_h - 1.54 + 0.70)
+    min_for_nodes = (n_nodes + 1) * (NODE_H + GAP)
+    return max(min_for_obs, min_for_nodes)
 
 
 def render_scene_graph(
@@ -648,18 +656,42 @@ def render_scene_graph(
         _obs_box_h(obs.get("vlm_summary", ""), _ocr_hit(obs), obs.get("step", 0) == current_step)
         for obs in observations
     ]
+    def _count_nodes_for_row(obs: dict) -> int:
+        """計算該步驟要渲染的節點總數（偵測 + OCR），用來決定列高。"""
+        n_det = len(obs.get("detections", []))
+        ocr_raw = list(dict.fromkeys(obs.get("ocr_texts", [])))
+        ocr_raw = [t for t in ocr_raw if len(t) > 1 or t.isdigit()]
+        # 扣掉門牌已歸屬的
+        matched = set()
+        for d in obs.get("detections", []):
+            np_txt = d.get("nameplate_text", "")
+            if np_txt:
+                for w in np_txt.split():
+                    matched.add(w)
+        ocr_avail = [t for t in ocr_raw if t not in matched]
+        is_cur = obs.get("step", 0) == current_step
+        if is_cur:
+            ocr_goal = [t for t in ocr_avail if _is_goal(t, goal_objects)]
+            n_ocr = len(ocr_goal) + min(len(ocr_avail) - len(ocr_goal), max(0, 6 - len(ocr_goal)))
+        else:
+            ocr_goal = [t for t in ocr_avail if _is_goal(t, goal_objects)]
+            n_goal = min(3, len(ocr_goal))
+            n_other = min(len(ocr_avail) - len(ocr_goal), max(0, 3 - n_goal))
+            n_ocr = n_goal + n_other
+        return n_det + n_ocr
+
     row_heights = [
-        _row_h_for(len(obs.get("detections", [])),
+        _row_h_for(_count_nodes_for_row(obs),
                    obs.get("step", 0) == current_step, obs_box_heights[i])
         for i, obs in enumerate(observations)
     ]
     total_h = sum(row_heights)
     fig_h = max(6, total_h + 2.5)
 
-    fig, ax = plt.subplots(figsize=(15, fig_h))
+    fig, ax = plt.subplots(figsize=(14, fig_h))
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
-    ax.set_xlim(0, 17)
+    ax.set_xlim(0, 15)
     ax.set_ylim(0, fig_h)
     ax.axis("off")
 
@@ -699,118 +731,196 @@ def render_scene_graph(
         ec = "#ffc107" if is_false_pos else ("#5b9bd5" if is_current else "#a0b8cc")
         lw = 2.0 if is_current else (2.0 if is_false_pos else 1.2)
 
-        # 觀察方框：頂端固定在 y+0.77，向下延伸 box_h（動態高度）
-        box_top = y + 0.77
-        box_bot = box_top - box_h
-        box_center_y = box_top - box_h / 2
+        box_top = y + box_h / 2
+        box_bot = y - box_h / 2
+        box_center_y = y
 
-        box = FancyBboxPatch((obs_x - 1.5, box_bot), 3.0, box_h,
+        box = FancyBboxPatch((obs_x - 1.8, box_bot), 3.6, box_h,
                              boxstyle="round,pad=0.08",
                              facecolor=fc, edgecolor=ec, linewidth=lw, zorder=3)
         ax.add_patch(box)
 
+        obs_lines: list[tuple[str, float, str, str]] = []
         label_txt = f"觀察點 {s}" + (" [誤判]" if is_false_pos else "")
-        ax.text(obs_x, box_top - 0.20, label_txt, ha="center", va="center",
-                fontsize=12, fontproperties=fp,
-                color="#1a4a7a" if is_current else "#4a6a8a",
-                fontweight="bold" if is_current else "normal", zorder=4)
-        ax.text(obs_x, box_top - 0.38, photo,
-                ha="center", va="center", fontsize=8.5, color="#777", zorder=4)
-
-        text_cursor = box_top - 0.55
+        obs_lines.append((label_txt, 14, "#1a4a7a" if is_current else "#4a6a8a", "bold"))
+        if photo:
+            obs_lines.append((photo, 10, "#777", "normal"))
         if ocr_hit:
-            ax.text(obs_x, text_cursor, f"[OCR 命中] {goal}",
-                    ha="center", va="center", fontsize=8.5,
-                    color="#155724", fontproperties=fp, zorder=4)
-            text_cursor -= 0.20
-
+            obs_lines.append((f"[OCR 命中] {goal}", 11, "#155724", "bold"))
         if vlm_summary:
-            line_w = 22 if is_current else 18
-            max_lines = 8 if is_current else 4
+            line_w = 18 if is_current else 14
+            max_lines = 5 if is_current else 3
             for line in _wrap_text(vlm_summary, line_w, max_lines):
-                ax.text(obs_x, text_cursor, line,
-                        ha="center", va="center", fontsize=7,
-                        color="#444", fontproperties=fp, zorder=4)
-                text_cursor -= 0.20
+                obs_lines.append((line, 9, "#444", "normal"))
+
+        line_spacing = 0.26
+        total_text_h = (len(obs_lines) - 1) * line_spacing
+        start_y = box_center_y + total_text_h / 2
+        for li, (txt, fsize, fcolor, fweight) in enumerate(obs_lines):
+            ty = start_y - li * line_spacing
+            ax.text(obs_x, ty, txt, ha="center", va="center",
+                    fontsize=fsize, color=fcolor, fontproperties=fp,
+                    fontweight=fweight, zorder=4)
 
         if i < n_obs - 1:
             ns = observations[i + 1].get("step", i + 2)
             ny = obs_y[ns]
-            ax.annotate("", xy=(obs_x, ny + 0.77),
+            next_box_h = obs_box_heights[i + 1]
+            ax.annotate("", xy=(obs_x, ny + next_box_h / 2),
                         xytext=(obs_x, box_bot),
                         arrowprops=dict(arrowstyle="->", color="#7a9fc0", lw=1.3))
 
-        if not dets:
+        # ── 建立統一節點列表：偵測 + OCR 混合排列 ──────────────────────
+        # OCR 文字去重、過濾雜訊
+        ocr_texts_raw = obs.get("ocr_texts", [])
+        ocr_unique = list(dict.fromkeys(ocr_texts_raw))
+        ocr_unique = [t for t in ocr_unique if len(t) > 1 or t.isdigit()]
+
+        _ocr_conf_map: dict[str, float] = {}
+        for oc in obs.get("ocr_with_conf", []):
+            _ocr_conf_map.setdefault(oc["text"], oc["confidence"])
+
+        # 已歸屬到偵測節點門牌的 OCR 不重複顯示
+        matched_ocr: set[str] = set()
+        for det in dets:
+            np_txt = det.get("nameplate_text", "")
+            if np_txt:
+                for word in np_txt.split():
+                    matched_ocr.add(word)
+
+        ocr_to_show = [t for t in ocr_unique if t not in matched_ocr]
+        # 目標相關優先，其餘按資訊量排序
+        ocr_goal_list = [t for t in ocr_to_show if _is_goal(t, goal_objects)]
+        ocr_other_list = [t for t in ocr_to_show if not _is_goal(t, goal_objects)]
+        ocr_other_list.sort(key=lambda t: -(len(t) + (3 if any('一' <= c <= '鿿' for c in t) else 0)))
+        # 目前步驟：全部目標 OCR + 最多 6 個一般 OCR
+        # 歷史步驟：全部目標 OCR + 最多 3 個一般 OCR（保留區域資訊）
+        if is_current:
+            ocr_final = ocr_goal_list + ocr_other_list[:max(0, 6 - len(ocr_goal_list))]
+        else:
+            ocr_final = ocr_goal_list[:3] + ocr_other_list[:max(0, 3 - len(ocr_goal_list))]
+
+        # 統一節點列表：先偵測、再 OCR
+        unified_nodes: list[dict] = []
+        for det in dets:
+            unified_nodes.append({"type": "det", "data": det})
+        for ocr_t in ocr_final:
+            unified_nodes.append({"type": "ocr", "text": ocr_t})
+
+        if not unified_nodes:
             continue
 
-        n = len(dets)
+        n = len(unified_nodes)
         spacing = rh / (n + 1)
-        fs = 11.0 if is_current else 8.0
-        MIN_H = 0.52 if is_current else 0.38
-        node_h = max(MIN_H, min(MIN_H * 1.2, spacing - 0.14))
-        char_w_est = 0.140 if is_current else 0.098
+        fs = 14.0 if is_current else 10.0
+        MIN_H = 0.72 if is_current else 0.50
+        node_h = max(MIN_H, min(MIN_H * 1.3, spacing - 0.16))
+        char_w_est = 0.175 if is_current else 0.120
 
-        for j, det in enumerate(dets):
-            lbl = det.get("label", "")
-            uid = det.get("id", lbl)
-            score = det.get("score", 0)
-            context = det.get("context", "")
-            nameplate = det.get("nameplate_text", "")
-            same_entity = det.get("same_entity", False)
+        for j, unode in enumerate(unified_nodes):
             dy = y + rh / 2 - spacing * (j + 1)
 
-            # 三欄式排版：歷史步驟固定 x=5.0；目前步驟依「是否為跨步同一實體」
-            # 分成「新物件」(x=8.0) 與「同一實體」(x=12.5) 兩欄，避免擠在一起。
-            if is_current:
-                ox = 12.5 if same_entity else 8.0
+            ox = 8.0 if is_current else 5.0
+
+            if unode["type"] == "det":
+                det = unode["data"]
+                lbl = det.get("label", "")
+                uid = det.get("id", lbl)
+                score = det.get("score", 0)
+                context = det.get("context", "")
+                nameplate = det.get("nameplate_text", "")
+
+                if nameplate and any(kw in lbl.lower() for kw in _DOOR_LABELS):
+                    np_short = nameplate[:10]
+                    display_lbl = f"{uid}:{np_short}"
+                elif context:
+                    ctx_s = context if len(context) <= 9 else context[:8] + "…"
+                    display_lbl = f"{uid} ({ctx_s})"
+                else:
+                    display_lbl = uid
+                _mc = 20 if is_current else 14
+                if len(display_lbl) > _mc:
+                    display_lbl = display_lbl[:_mc - 1] + "…"
+
+                node_w = min(
+                    6.5 if is_current else 3.8,
+                    max(4.5 if is_current else 2.6,
+                        len(display_lbl) * char_w_est + 0.70)
+                )
+
+                fc2, ec2, tc, tag = _det_color_and_tag(det, goal_objects)
+
+                nb = FancyBboxPatch((ox - node_w / 2, dy - node_h / 2), node_w, node_h,
+                                    boxstyle="round,pad=0.05",
+                                    facecolor=fc2, edgecolor=ec2,
+                                    linewidth=1.4 if is_current else 0.8,
+                                    alpha=1.0 if is_current else 0.6, zorder=2)
+                ax.add_patch(nb)
+
+                label_y = dy + node_h * 0.18
+                conf_y = dy - node_h * 0.22
+                tagged_lbl = f"{tag} {display_lbl}" if tag else display_lbl
+                ax.text(ox, label_y, tagged_lbl,
+                        ha="center", va="center", fontsize=fs,
+                        color=tc, fontproperties=fp, zorder=3)
+                ax.text(ox, conf_y, f"conf: {score:.3f}",
+                        ha="center", va="center", fontsize=fs - 1.5,
+                        color="#999", zorder=3)
+
+                edge_color = "#5b9bd5" if is_current else "#ccc"
+                edge_lw = 0.9 if is_current else 0.4
+                ax.annotate("", xy=(ox - node_w / 2, dy),
+                            xytext=(obs_x + 1.8, box_center_y),
+                            arrowprops=dict(arrowstyle="->", color=edge_color, lw=edge_lw))
+
+                node_data.append({"label": lbl, "uid": uid, "step": s, "x": ox, "y": dy,
+                                  "node_w": node_w, "context": context})
             else:
-                ox = 5.0
+                # ── OCR 文字節點（與偵測同欄同層級）──
+                ocr_t = unode["text"]
+                is_goal_ocr = _is_goal(ocr_t, goal_objects)
 
-            if nameplate and any(kw in lbl.lower() for kw in _DOOR_LABELS):
-                np_short = nameplate[:10]
-                display_lbl = f"{uid}:{np_short}"
-            elif context:
-                ctx_s = context if len(context) <= 9 else context[:8] + "…"
-                display_lbl = f"{uid} ({ctx_s})"
-            else:
-                display_lbl = uid
-            _mc = 26 if is_current else 17
-            if len(display_lbl) > _mc:
-                display_lbl = display_lbl[:_mc - 1] + "…"
+                _ocr_max = 22 if is_current else 14
+                ocr_display = ocr_t[:_ocr_max] + ("…" if len(ocr_t) > _ocr_max else "")
+                ocr_label = f"[OCR] {ocr_display}"
 
-            node_w = min(
-                6.0 if is_current else 3.4,
-                max(4.2 if is_current else 2.3,
-                    len(display_lbl) * char_w_est + 0.55)
-            )
+                node_w = min(
+                    6.5 if is_current else 3.8,
+                    max(4.5 if is_current else 2.6,
+                        len(ocr_label) * char_w_est + 0.70)
+                )
 
-            fc2, ec2, tc, tag = _det_color_and_tag(det, goal_objects)
+                if is_goal_ocr:
+                    ofc, oec, otc = "#f8d7da", "#dc3545", "#721c24"
+                else:
+                    ofc, oec, otc = "#d4edda", "#28a745", "#155724"
 
-            nb = FancyBboxPatch((ox - node_w / 2, dy - node_h / 2), node_w, node_h,
-                                boxstyle="round,pad=0.05",
-                                facecolor=fc2, edgecolor=ec2,
-                                linewidth=1.4 if is_current else 0.8,
-                                alpha=1.0 if is_current else 0.6, zorder=2)
-            ax.add_patch(nb)
+                nb = FancyBboxPatch(
+                    (ox - node_w / 2, dy - node_h / 2), node_w, node_h,
+                    boxstyle="round,pad=0.05",
+                    facecolor=ofc, edgecolor=oec,
+                    linewidth=1.4 if is_current else 0.8,
+                    alpha=1.0 if is_current else 0.6,
+                    linestyle="dashed", zorder=2)
+                ax.add_patch(nb)
 
-            label_y = dy + node_h * 0.18
-            conf_y = dy - node_h * 0.22
-            tagged_lbl = f"{tag} {display_lbl}" if tag else display_lbl
-            ax.text(ox, label_y, tagged_lbl,
-                    ha="center", va="center", fontsize=fs,
-                    color=tc, fontproperties=fp, zorder=3)
-            ax.text(ox, conf_y, f"conf: {score:.3f}",
-                    ha="center", va="center", fontsize=fs - 1.5,
-                    color="#999", zorder=3)
+                conf = _ocr_conf_map.get(ocr_t)
+                label_y = dy + node_h * 0.18 if conf is not None else dy
+                ax.text(ox, label_y, ocr_label,
+                        ha="center", va="center", fontsize=fs,
+                        color=otc, fontproperties=fp,
+                        fontweight="bold" if is_goal_ocr else "normal", zorder=3)
+                if conf is not None:
+                    ax.text(ox, dy - node_h * 0.22, f"conf: {conf:.3f}",
+                            ha="center", va="center", fontsize=fs - 1.5,
+                            color="#999", zorder=3)
 
-            edge_color = "#5b9bd5" if is_current else "#ccc"
-            edge_lw = 0.9 if is_current else 0.4
-            ax.annotate("", xy=(ox - node_w / 2, dy),
-                        xytext=(obs_x + 1.5, box_center_y),
-                        arrowprops=dict(arrowstyle="->", color=edge_color, lw=edge_lw))
-
-            node_data.append({"label": lbl, "uid": uid, "step": s, "x": ox, "y": dy,
-                              "node_w": node_w, "context": context})
+                edge_color = "#dc3545" if is_goal_ocr else "#28a745"
+                edge_lw = 0.9 if is_current else 0.4
+                ax.annotate("", xy=(ox - node_w / 2, dy),
+                            xytext=(obs_x + 1.8, box_center_y),
+                            arrowprops=dict(arrowstyle="->", color=edge_color, lw=edge_lw,
+                                            linestyle="dotted"))
 
     # ── 跨步同一實體連線（依 label 分色 + 扇形展開避免重疊）───────────
     # 優先用 same_entity_prev_uid 精準比對上一步的節點；若舊資料沒有這個
@@ -898,6 +1008,10 @@ def render_scene_graph(
         mpatches.Patch(facecolor="#eeeeee", edgecolor="#757575", label="[誤判] 誤判（與目標完全無關）"),
         mpatches.Patch(facecolor="#cce5ff", edgecolor="#004085", label="[追蹤] 同一實體（跨步追蹤）"),
         mpatches.Patch(facecolor="#d4edda", edgecolor="#28a745", label="地標物件"),
+        mpatches.Patch(facecolor="#f8d7da", edgecolor="#dc3545", linestyle="dashed",
+                       label="[OCR] 目標相關文字"),
+        mpatches.Patch(facecolor="#d4edda", edgecolor="#28a745", linestyle="dashed",
+                       label="[OCR] 場景文字"),
         Line2D([0], [0], color="#004085", lw=1.2, linestyle="dashed",
                label="- - 跨步同一實體追蹤"),
         Line2D([0], [0], color="#1a7a40", lw=1.0, linestyle="dotted",

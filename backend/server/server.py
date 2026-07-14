@@ -41,11 +41,48 @@ from server.models import (
     StartSessionResponse,
     TurnResponse,
     VLMAction,
+    VLMResponse,
 )
-from server.perception import Perception, verify_goal_detection
+from server.perception import Detection as PerceptionDetection, Perception, verify_goal_detection
+from server.ocr import OCRResult
 from server.session import SessionStore
+
+import re as _re
+
+
+def _has_cjk(text: str) -> bool:
+    return bool(_re.search(r'[一-鿿]', text))
+
+
+def _bbox_key(bbox: list) -> tuple:
+    """Hashable key from a 4-point bbox for grouping same-region OCR entries."""
+    return tuple(round(c, 0) for p in bbox for c in p)
+
+
+def _clean_vlm_ocr(ocr_results: list[OCRResult], img_h: int = 0) -> list[OCRResult]:
+    """Clean VLM OCR: drop English text when CJK exists in same bbox region."""
+    if not ocr_results:
+        return ocr_results
+
+    from collections import defaultdict
+    groups: dict[tuple, list[OCRResult]] = defaultdict(list)
+    for r in ocr_results:
+        groups[_bbox_key(r.bbox)].append(r)
+
+    result: list[OCRResult] = []
+    for group in groups.values():
+        has_cjk = any(_has_cjk(r.text) for r in group)
+        for r in group:
+            if has_cjk and not _has_cjk(r.text) and _re.search(r'[a-zA-Z]', r.text):
+                continue
+            result.append(r)
+
+    return result
+
+
 from server.vlm import (
     decide as _vlm_decide_impl,
+    perceive_and_decide as _vlm_perceive_and_decide,
     warm_up as _vlm_warm_up,
     ask_about_image as _vlm_ask_about_image,
 )
@@ -54,8 +91,6 @@ log = logging.getLogger(__name__)
 
 app = FastAPI(title="UniGoal Indoor Navigation Server")
 
-# Allow the standalone browser comparison tool (compare.html, opened as a local
-# file → Origin "null", or from localhost) to call /ocr directly.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -143,6 +178,18 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
         raise HTTPException(status_code=400, detail={"error": "bad_request", "detail": "goal is empty"})
     goal_objects = decompose_goal(req.goal)
     goal_objects = augment_goal_classes(req.goal, goal_objects)
+    # 過濾掉和通用地標重複的詞，避免 shelf/aisle 等每張照片都標紅
+    # 但如果該詞是由 GOAL_CLASS_MAP 映射加入的（與目標直接相關），則保留
+    from server.graph_renderer import GOAL_CLASS_MAP
+    _goal_mapped: set[str] = set()
+    for key, info in GOAL_CLASS_MAP.items():
+        if key in req.goal:
+            _goal_mapped.update(c.lower() for c in info["classes"])
+    _generic_lower = {g.lower() for g in GENERIC_INDOOR_OBJECTS}
+    goal_objects = [
+        g for g in goal_objects
+        if g.lower() not in _generic_lower or g.lower() in _goal_mapped
+    ]
     log.info("New session | goal: %s | goal_objects: %s", req.goal, goal_objects)
     s = _store.create(goal=req.goal, goal_objects=goal_objects)
 
@@ -194,64 +241,154 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
 
     t_resize = time.time()
 
-    perception = get_perception()
-    combined_prompts = list(dict.fromkeys(s.goal_objects + GENERIC_INDOOR_OBJECTS))
-    log.info("GroundingDINO prompt: %s", combined_prompts)
-    detections = perception.detect(str(photo_path), combined_prompts) if perception else []
-    detected_labels = [d.label for d in detections]
-    t_detect = time.time()
-    log.info("⏱ GroundingDINO: %.1fs", t_detect - t_resize)
-
-    # Run OCR to extract text from the photo
+    perception_engine = get_perception()
     ocr_engine = get_ocr()
-    ocr_results = []
-    ocr_text_summary = "(no text detected)"
+    has_grounding = perception_engine is not None
+
+    # ── 先跑 EasyOCR（如果啟用）──────────────────────────────────
+    easyocr_results = []
     if ocr_engine is not None:
-        ocr_results = ocr_engine.read(
+        easyocr_results = ocr_engine.read(
             str(photo_path),
             min_confidence=OCR_MIN_CONFIDENCE,
             max_results=OCR_MAX_RESULTS,
         )
-        ocr_text_summary = scene.format_ocr(ocr_results, img_w, img_h)
-        if ocr_results:
-            log.info("OCR found %d text regions: %s", len(ocr_results), ocr_text_summary[:100])
+        if easyocr_results:
+            log.info("EasyOCR found %d text regions", len(easyocr_results))
     t_ocr = time.time()
-    log.info("⏱ EasyOCR: %.1fs", t_ocr - t_detect)
+    log.info("⏱ EasyOCR: %.1fs", t_ocr - t_resize)
 
-    # Match OCR signs to the goal (store aisle/section signs are the strongest signal).
-    ocr_matches = scene.match_ocr_to_goal(ocr_results, s.goal_objects)
-    if ocr_matches:
-        ocr_text_summary += "  SIGN MATCH: " + "; ".join(ocr_matches)
+    if has_grounding:
+        # ══ 模式 A：GroundingDINO + (EasyOCR) + 單階段 VLM ══
+        combined_prompts = list(dict.fromkeys(s.goal_objects + GENERIC_INDOOR_OBJECTS))
+        log.info("GroundingDINO prompt: %s", combined_prompts)
+        detections = perception_engine.detect(str(photo_path), combined_prompts)
+        detected_labels = [d.label for d in detections]
+        t_detect = time.time()
+        log.info("⏱ GroundingDINO: %.1fs", t_detect - t_ocr)
 
-    ocr_texts = [r.text for r in ocr_results]
-    nid = s.topomap.add_node(
-        photo_path=str(photo_path), detected=detected_labels,
-        summary="", ocr_texts=ocr_texts,
-    )
-    if s.last_node_id is not None:
-        s.topomap.add_edge(s.last_node_id, nid, action=s.last_planned_action or "(unknown)")
+        ocr_results = easyocr_results
+        ocr_text_summary = scene.format_ocr(ocr_results, img_w, img_h) if ocr_results else "(no text detected)"
 
-    detections_summary = scene.format_detections(detections, img_w, img_h)
-    topomap_summary = s.topomap.summarize_for_vlm(current_id=nid)
+        ocr_matches = scene.match_ocr_to_goal(ocr_results, s.goal_objects)
+        if ocr_matches:
+            ocr_text_summary += "  SIGN MATCH: " + "; ".join(ocr_matches)
 
-    log.info("[session %s] photo #%d | detections: %s | ocr: %s",
-             session_id, nid, detected_labels or "(none)", ocr_text_summary[:80])
+        ocr_texts = [r.text for r in ocr_results]
+        ocr_with_conf = [{"text": r.text, "confidence": r.confidence} for r in ocr_results]
+        nid = s.topomap.add_node(
+            photo_path=str(photo_path), detected=detected_labels,
+            summary="", ocr_texts=ocr_texts, ocr_with_conf=ocr_with_conf,
+        )
+        if s.last_node_id is not None:
+            s.topomap.add_edge(s.last_node_id, nid, action=s.last_planned_action or "(unknown)")
 
-    t_vlm_start = time.time()
-    vlm_resp = vlm_decide(
-        image_path=str(photo_path),
-        goal=s.goal,
-        goal_objects=s.goal_objects,
-        topomap_summary=topomap_summary,
-        detections_summary=detections_summary,
-        prior_question=None,
-        prior_answer=None,
-        ocr_summary=ocr_text_summary,
-    )
-    t_vlm = time.time()
+        detections_summary = scene.format_detections(detections, img_w, img_h)
+        topomap_summary = s.topomap.summarize_for_vlm(current_id=nid)
 
-    log.info("[session %s] VLM → %s | %s", session_id, vlm_resp.action.value, vlm_resp.guidance[:120])
-    log.info("⏱ VLM: %.1fs | Total: %.1fs", t_vlm - t_vlm_start, t_vlm - t_start)
+        log.info("[session %s] photo #%d | detections: %s | ocr: %s",
+                 session_id, nid, detected_labels or "(none)", ocr_text_summary[:80])
+
+        t_vlm_start = time.time()
+        vlm_resp = vlm_decide(
+            image_path=str(photo_path),
+            goal=s.goal,
+            goal_objects=s.goal_objects,
+            topomap_summary=topomap_summary,
+            detections_summary=detections_summary,
+            prior_question=None,
+            prior_answer=None,
+            ocr_summary=ocr_text_summary,
+        )
+        t_vlm = time.time()
+        log.info("[session %s] VLM → %s | %s", session_id, vlm_resp.action.value, vlm_resp.guidance[:120])
+        log.info("⏱ VLM: %.1fs | Total: %.1fs", t_vlm - t_vlm_start, t_vlm - t_start)
+
+    else:
+        # ══ 模式 B/C：兩階段 VLM（可搭配 EasyOCR）══
+        mode_label = "two-stage VLM + EasyOCR" if easyocr_results else "two-stage VLM only"
+        log.info("[session %s] Using %s", session_id, mode_label)
+
+        nid = s.topomap.add_node(
+            photo_path=str(photo_path), detected=[],
+            summary="", ocr_texts=[], ocr_with_conf=[],
+        )
+        if s.last_node_id is not None:
+            s.topomap.add_edge(s.last_node_id, nid, action=s.last_planned_action or "(unknown)")
+
+        topomap_summary = s.topomap.summarize_for_vlm(current_id=nid)
+
+        def _ocr_formatter(vlm_ocr_items):
+            raw = [OCRResult(text=t.text, confidence=t.score, bbox=t.bbox)
+                   for t in vlm_ocr_items]
+            cleaned = _clean_vlm_ocr(raw, img_h)
+            if not cleaned:
+                return "(no text detected)"
+            summary = scene.format_ocr(cleaned, img_w, img_h)
+            matches = scene.match_ocr_to_goal(cleaned, s.goal_objects)
+            if matches:
+                summary += "  SIGN MATCH: " + "; ".join(matches)
+            return summary
+
+        t_vlm_start = time.time()
+        vlm_perception, vlm_resp = _vlm_perceive_and_decide(
+            image_path=str(photo_path),
+            goal=s.goal,
+            goal_objects=s.goal_objects,
+            topomap_summary=topomap_summary,
+            img_w=img_w,
+            img_h=img_h,
+            prior_question=None,
+            prior_answer=None,
+            ocr_formatter=_ocr_formatter,
+        )
+        t_vlm = time.time()
+
+        detections = [
+            PerceptionDetection(label=d.label, box=d.bbox, score=d.score,
+                                position=d.position)
+            for d in vlm_perception.detections
+        ]
+        detected_labels = [d.label for d in detections]
+
+        vlm_ocr_results = [
+            OCRResult(text=t.text, confidence=t.score, bbox=t.bbox)
+            for t in vlm_perception.ocr_texts
+        ]
+
+        # 合併 EasyOCR + VLM OCR（去重：EasyOCR 優先，VLM 補充）
+        if easyocr_results:
+            existing_texts = {r.text.strip().lower() for r in easyocr_results}
+            for vr in vlm_ocr_results:
+                if vr.text.strip().lower() not in existing_texts:
+                    easyocr_results.append(vr)
+            ocr_results = easyocr_results
+        else:
+            ocr_results = vlm_ocr_results
+
+        # 清理 VLM OCR：合併走道編號、去除中英文重複
+        ocr_results = _clean_vlm_ocr(ocr_results, img_h)
+
+        ocr_text_summary = scene.format_ocr(ocr_results, img_w, img_h) if ocr_results else "(no text detected)"
+        ocr_matches = scene.match_ocr_to_goal(ocr_results, s.goal_objects)
+        if ocr_matches:
+            ocr_text_summary += "  SIGN MATCH: " + "; ".join(ocr_matches)
+
+        ocr_texts = [r.text for r in ocr_results]
+        ocr_with_conf = [{"text": r.text, "confidence": r.confidence} for r in ocr_results]
+        s.topomap.graph.nodes[nid]["detected"] = detected_labels
+        s.topomap.graph.nodes[nid]["ocr_texts"] = ocr_texts
+        s.topomap.graph.nodes[nid]["ocr_with_conf"] = ocr_with_conf
+
+        det_detail = "; ".join(f"{d.label}@{d.position}" for d in detections if d.position)
+        ocr_detail = "; ".join(f'"{r.text}"@{r.position}' for r in ocr_results
+                               if getattr(r, "position", ""))
+        log.info("[session %s] VLM 2-stage → %s | scene: %s",
+                 session_id, vlm_resp.action.value,
+                 vlm_perception.scene_description[:80])
+        log.info("  detections(%d): %s", len(detections), det_detail or "(none)")
+        log.info("  OCR(%d): %s", len(ocr_results), ocr_detail or "(none)")
+        log.info("⏱ VLM 2-stage: %.1fs | Total: %.1fs", t_vlm - t_vlm_start, t_vlm - t_start)
 
     # TASK 3 — when the VLM claims ARRIVED, crop the best goal-matching detection
     # and ask the VLM to confirm that region really shows the goal. This catches
@@ -278,7 +415,9 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     arrival_downgraded = _raw_action == VLMAction.ARRIVED and vlm_resp.action == VLMAction.ASK
 
     s.topomap.graph.nodes[nid]["summary"] = vlm_resp.vlm_summary
-    det_dicts = [{"label": d.label, "score": d.score, "box": list(d.box)} for d in detections]
+    det_dicts = [{"label": d.label, "score": d.score, "box": list(d.box),
+                  **({"position": d.position} if d.position else {})}
+                 for d in detections]
 
     # Build OCR bbox list for door-nameplate association
     ocr_bbox_list = [
@@ -288,12 +427,14 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     ]
 
     # Full post-processing: NMS → merge → OCR-door → spatial → entity tracking → IDs
+    # VLM 模式的 bbox 是粗略區域，跳過 NMS/合併避免誤刪不同物件
     det_dicts = postprocess_detections(
         det_dicts, img_w, img_h,
         ocr_with_bbox=ocr_bbox_list or None,
         prev_dets=s.last_detections or None,
         prev_w=s.last_img_w,
         prev_h=s.last_img_h,
+        skip_nms=not has_grounding,
     )
 
     # Persist full detection dicts in topomap node for scene graph history
@@ -310,7 +451,8 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     annotated_path = out_dir / "annotated" / f"{nid}.jpg"
     annotate(str(photo_path), str(annotated_path), detections,
              banner_text=f"{vlm_resp.action.value}: {vlm_resp.guidance}",
-             ocr_results=ocr_results, goal_objects=s.goal_objects)
+             ocr_results=ocr_results, goal_objects=s.goal_objects,
+             region_mode=not has_grounding)
 
     # Save map JSON and PNG after each photo
     map_dir = out_dir / "map"
@@ -347,6 +489,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
                 **({"context": d["context"]} if d.get("context") else {}),
                 **({"nameplate_text": d["nameplate_text"]} if d.get("nameplate_text") else {}),
                 **({"same_entity": True} if d.get("same_entity") else {}),
+                **({"position": d["position"]} if d.get("position") else {}),
             }
             for d in det_dicts
         ],
@@ -416,6 +559,17 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
     )
     arrival_downgraded = _raw_action == VLMAction.ARRIVED and vlm_resp.action == VLMAction.ASK
 
+    # 用戶回答含否定/不確定語氣時，ARRIVED 降級為 MOVE
+    _unsure_keywords = ("不確定", "繼續", "不是", "沒有", "沒看到", "不對", "再找", "還沒")
+    if vlm_resp.action == VLMAction.ARRIVED and any(k in req.answer for k in _unsure_keywords):
+        log.info("[session %s] User answer unsure (%s) — downgrade ARRIVED → MOVE", session_id, req.answer[:30])
+        vlm_resp = VLMResponse(
+            action=VLMAction.MOVE,
+            guidance="請繼續前進，拍另一張照片。",
+            question=None,
+            vlm_summary=vlm_resp.vlm_summary,
+        )
+
     s.history.append({
         "kind": "answer",
         "user_answer": req.answer,
@@ -463,6 +617,15 @@ def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
             for d in s.last_detections:
                 if _is_goal_det(d, s.goal_objects):
                     d["status"] = "arrived"
+        # Mark goal-matching OCR texts as arrived evidence
+        if arrived_node is not None:
+            node_data = s.topomap.graph.nodes.get(arrived_node, {})
+            ocr_texts = node_data.get("ocr_texts", [])
+            arrived_ocr = [t for t in ocr_texts
+                           if any(g.lower() in t.lower() or t.lower() in g.lower()
+                                  for g in s.goal_objects)]
+            if arrived_ocr:
+                node_data["arrived_ocr"] = arrived_ocr
         msg = f"已確認到達目標：{s.goal}"
         log.info("[session %s] confirmed arrival at node %s", session_id, arrived_node)
         s.history.append({"kind": "confirm", "node_id": arrived_node, "message": msg})
@@ -535,6 +698,8 @@ def _build_observations(s) -> list[dict]:
                 "detections": dets,
                 "vlm_summary": node_data.get("summary", ""),
                 "ocr_texts": node_data.get("ocr_texts", []),
+                "ocr_with_conf": node_data.get("ocr_with_conf", []),
+                "arrived_ocr": node_data.get("arrived_ocr", []),
                 "false_positive": hid in s.false_positive_nodes,
             }
             rejected = h.get("rejected")
@@ -587,12 +752,7 @@ def _check_vlm_and_warm():
 
 @app.post("/ocr")
 async def ocr_extract(image: UploadFile = File(...)):
-    """Run the existing EasyOCR engine on one uploaded image and return its text.
-
-    Exposes the same ``OCR`` engine and config the photo turn uses (so results
-    match production) as a standalone endpoint, letting the browser comparison
-    tool put EasyOCR side-by-side with the gateway OCR models.
-    """
+    """Run the existing EasyOCR engine on one uploaded image and return its text."""
     engine = get_ocr()
     if engine is None:
         raise HTTPException(status_code=503, detail={"error": "ocr_unavailable",
@@ -653,3 +813,5 @@ def serve_annotated_photo(session_id: str, node_id: int):
     if not p.exists():
         raise HTTPException(status_code=404, detail={"error": "photo_not_found", "detail": str(p)})
     return FileResponse(str(p), media_type="image/jpeg")
+
+

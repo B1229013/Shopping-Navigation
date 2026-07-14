@@ -77,6 +77,26 @@ class MapJSON(BaseModel):
     goal_node: Optional[int]
 
 
+class VLMDetectionItem(BaseModel):
+    label: str
+    bbox: List[float] = Field(..., description="[x1,y1,x2,y2] absolute pixels")
+    score: float
+    position: str = ""
+
+
+class VLMOCRItem(BaseModel):
+    text: str
+    bbox: List[List[float]] = Field(..., description="[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]")
+    score: float
+    position: str = ""
+
+
+class VLMPerceptionResponse(BaseModel):
+    detections: List[VLMDetectionItem] = []
+    ocr_texts: List[VLMOCRItem] = []
+    scene_description: str = ""
+
+
 class ErrorResponse(BaseModel):
     error: str
     detail: str

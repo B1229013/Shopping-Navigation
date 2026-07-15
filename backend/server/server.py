@@ -319,6 +319,15 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         topomap_summary = s.topomap.summarize_for_vlm(current_id=nid)
 
         def _ocr_formatter(vlm_ocr_items):
+            # EasyOCR 可用時，完全用 EasyOCR 結果取代 VLM OCR（避免幻覺）
+            if easyocr_results:
+                if not easyocr_results:
+                    return "(no text detected)"
+                summary = scene.format_ocr(easyocr_results, img_w, img_h)
+                matches = scene.match_ocr_to_goal(easyocr_results, s.goal_objects)
+                if matches:
+                    summary += "  SIGN MATCH: " + "; ".join(matches)
+                return summary
             raw = [OCRResult(text=t.text, confidence=t.score, bbox=t.bbox)
                    for t in vlm_ocr_items]
             cleaned = _clean_vlm_ocr(raw, img_h)
@@ -356,12 +365,8 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
             for t in vlm_perception.ocr_texts
         ]
 
-        # 合併 EasyOCR + VLM OCR（去重：EasyOCR 優先，VLM 補充）
+        # EasyOCR 可用時完全取代 VLM OCR（VLM OCR 容易幻覺）
         if easyocr_results:
-            existing_texts = {r.text.strip().lower() for r in easyocr_results}
-            for vr in vlm_ocr_results:
-                if vr.text.strip().lower() not in existing_texts:
-                    easyocr_results.append(vr)
             ocr_results = easyocr_results
         else:
             ocr_results = vlm_ocr_results

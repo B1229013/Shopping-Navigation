@@ -272,8 +272,48 @@ fun SettingsScreen(navController: NavController) {
                 }
             }
 
-            // ── Storage Info ──
+            // ── SensorLab ──
             StaggeredItem(index = 1) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(SurfaceBase)
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .background(ChartViolet.copy(alpha = 0.10f), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Sensors, null, tint = ChartViolet, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("SensorLab", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
+                            Text("感測器實驗與計步準確率測試", style = MaterialTheme.typography.bodySmall, color = TextTertiary)
+                        }
+                    }
+
+                    Button(
+                        onClick = { navController.navigate("sensor_lab") },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ChartViolet, contentColor = Color.White)
+                    ) {
+                        Icon(Icons.Default.Science, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("開啟 SensorLab", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
+            // ── Storage Info ──
+            StaggeredItem(index = 2) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

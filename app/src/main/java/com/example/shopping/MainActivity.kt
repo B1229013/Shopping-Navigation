@@ -87,6 +87,9 @@ class MainActivity : ComponentActivity() {
                         composable("settings") {
                             SettingsScreen(navController)
                         }
+                        composable("sensor_lab") {
+                            SensorLabScreen(navController)
+                        }
                     }
                 }
             }

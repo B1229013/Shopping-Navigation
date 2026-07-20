@@ -29,6 +29,8 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
+from server import config
+
 log = logging.getLogger(__name__)
 
 
@@ -246,3 +248,174 @@ def summarize_ocr(results: List[OCRResult]) -> str:
         parts.append(f'"{r.text}" ({r.confidence:.0%})')
 
     return ", ".join(parts)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# OpenAI 視覺 OCR / OpenAI vision OCR backend (gpt-4o-mini)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_OPENAI_OCR_PROMPT = (
+    "You are an OCR engine. Extract every piece of text visible in this image, "
+    "exactly as written, preserving Traditional Chinese characters. For each "
+    "distinct text region, give its text, a coarse position, and a confidence "
+    "between 0 and 1. Respond with ONLY a JSON object of the form:\n"
+    '{"texts": [{"text": "...", "position": "left|center|right top|middle|bottom", '
+    '"confidence": 0.0}]}\n'
+    'If no text is visible, respond with {"texts": []}.'
+)
+
+
+def _position_to_bbox(position: str, img_w: int, img_h: int) -> List[List[float]]:
+    """Map a coarse position word ('left top', 'center', …) to a 4-point pixel bbox.
+
+    gpt-4o-mini reports rough position reliably but not exact coordinates, so we
+    derive a quadrilateral from the position text. A valid (non-empty) 4-point
+    bbox is required downstream — scene._bbox_center averages the corners and
+    server._bbox_key hashes them, so an empty bbox would crash the pipeline.
+    """
+    pos = (position or "").lower()
+    if "left" in pos:
+        x1, x2 = 0.0, 0.34
+    elif "right" in pos:
+        x1, x2 = 0.66, 1.0
+    else:
+        x1, x2 = 0.33, 0.67
+    if "top" in pos:
+        y1, y2 = 0.0, 0.34
+    elif "bottom" in pos:
+        y1, y2 = 0.66, 1.0
+    else:
+        y1, y2 = 0.33, 0.67
+    ax1, ay1, ax2, ay2 = x1 * img_w, y1 * img_h, x2 * img_w, y2 * img_h
+    return [[ax1, ay1], [ax2, ay1], [ax2, ay2], [ax1, ay2]]
+
+
+class OpenAIOCR:
+    """gpt-4o-mini vision OCR — a drop-in replacement for the EasyOCR ``OCR`` class.
+
+    Exposes the same load()/read()/is_loaded interface and returns List[OCRResult],
+    so server.get_ocr() swaps engines via the OCR_BACKEND setting with no other
+    pipeline changes. Text is extracted by a single OpenAI /chat/completions vision
+    call (temperature 0) using the standard payload — same endpoint, headers, and
+    model family as the VLM, so OCR and VLM share one key and both run on gpt-4o-mini.
+    """
+
+    def __init__(self, languages: Optional[List[str]] = None) -> None:
+        # languages kept for interface parity with OCR(); the prompt asks for
+        # Traditional Chinese + English regardless of this value.
+        self._languages = languages or ["en", "ch_tra"]
+        self._ready = False
+
+    def load(self) -> None:
+        """Validate that a key is configured. No model weights to download."""
+        if not config.OPENAI_API_KEY:
+            raise RuntimeError(
+                "OPENAI_API_KEY (or CGU_API_KEY) is empty — the OpenAI OCR backend "
+                "cannot run. Set it in .env, or set OCR_BACKEND=easyocr."
+            )
+        self._ready = True
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._ready
+
+    # ── internals ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _prepare_image(image_path: str) -> tuple[str, int, int]:
+        import base64
+        import io
+        from PIL import Image as _PILImage
+
+        img = _PILImage.open(image_path).convert("RGB")
+        w, h = img.size
+        max_dim = 1024
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        return base64.b64encode(buf.getvalue()).decode(), w, h
+
+    @staticmethod
+    def _call(img_b64: str) -> str:
+        import requests
+
+        url = f"{config.OPENAI_BASE_URL}/chat/completions"
+        content = [
+            {"type": "image_url",
+             "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+            {"type": "text", "text": _OPENAI_OCR_PROMPT},
+        ]
+        body = {
+            "model": config.OPENAI_OCR_MODEL,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": 0.0,
+            "max_tokens": 1024,
+            "response_format": {"type": "json_object"},
+        }
+        headers = {
+            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        r = requests.post(url, json=body, headers=headers, timeout=config.VLM_TIMEOUT_S)
+        r.raise_for_status()
+        choices = r.json().get("choices", [])
+        if not choices:
+            return ""
+        return choices[0].get("message", {}).get("content", "") or ""
+
+    @staticmethod
+    def _parse(text: str) -> list:
+        import json
+        import re
+
+        if not text:
+            return []
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            return []
+        try:
+            obj = json.loads(match.group(0))
+        except (json.JSONDecodeError, ValueError):
+            return []
+        items = obj.get("texts") or obj.get("ocr_texts") or obj.get("results") or []
+        return items if isinstance(items, list) else []
+
+    def read(
+        self,
+        image_path: str,
+        min_confidence: float = 0.3,
+        max_results: int = 15,
+    ) -> List[OCRResult]:
+        """Extract text via gpt-4o-mini. Same signature/return type as OCR.read()."""
+        if not self._ready:
+            self.load()
+        try:
+            img_b64, img_w, img_h = self._prepare_image(image_path)
+        except Exception as e:
+            log.warning("OpenAI OCR could not read image %s: %s", image_path, e)
+            return []
+        try:
+            raw = self._call(img_b64)
+        except Exception as e:
+            log.warning("OpenAI OCR request failed: %s", e)
+            return []
+
+        results: List[OCRResult] = []
+        for item in self._parse(raw):
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text", "")).strip()
+            if not text:
+                continue
+            try:
+                conf = float(item.get("confidence", item.get("score", 0.9)))
+            except (TypeError, ValueError):
+                conf = 0.9
+            if conf < min_confidence:
+                continue
+            bbox = _position_to_bbox(str(item.get("position", "")), img_w, img_h)
+            results.append(OCRResult(text=text, confidence=conf, bbox=bbox))
+
+        results.sort(key=lambda r: -r.confidence)
+        return results[:max_results]

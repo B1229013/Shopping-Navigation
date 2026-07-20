@@ -141,7 +141,7 @@ fun TeammateHomeScreen(navController: NavController) {
                 navController.navigate("ar_navigation")
             } catch (e: Exception) {
                 Log.e("NavSession", "Failed to create session", e)
-                backendError = "無法連線後端伺服器: ${e.message}"
+                backendError = "無法連線導航伺服器，請確認伺服器已啟動後再試。"
             } finally {
                 isCreatingSession = false
             }

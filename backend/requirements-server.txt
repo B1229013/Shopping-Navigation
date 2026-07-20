@@ -3,6 +3,12 @@ uvicorn[standard]==0.27.1
 python-multipart==0.0.9
 networkx==3.1
 requests==2.31.0
+Pillow>=10.0.0
+matplotlib>=3.5  # server.graph_renderer imports this at module load (topomap rendering)
+# OpenAI SDK — used by server/llm_gateway.py (CGU gateway + compare tooling).
+# The live OCR/VLM path posts via `requests` and does NOT require this package.
+openai>=1.0.0
+# EasyOCR is only needed when OCR_BACKEND=easyocr (pulls torch — large download).
 easyocr>=1.7.0
 pytest==8.0.2
 pytest-asyncio==0.23.5

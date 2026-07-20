@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">shopping</string>
+    <string name="app_name">智慧購物助理</string>
     <string name="paddleocr_api_url">https://z0pey9paq3vfo6g3.aistudio-app.com/ocr</string>
 </resources>

@@ -1,4 +1,4 @@
-"""VLM client: send (image + prompt) to Gemini (default) or Ollama, parse structured response."""
+"""VLM client: send (image + prompt) to OpenAI (default, gpt-4o-mini), Gemini, or Ollama; parse structured response."""
 from __future__ import annotations
 
 import base64

@@ -87,7 +87,7 @@ CGU_BASE_URL = os.environ.get("CGU_BASE_URL", "https://air.cgu.edu.tw/cgullmapi/
 # running VLM_BACKEND=openai against the gateway needs only CGU_API_KEY in .env.
 # Setting OPENAI_API_KEY/OPENAI_BASE_URL explicitly still targets real OpenAI.
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") or CGU_API_KEY
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or (CGU_BASE_URL if CGU_API_KEY else "https://api.openai.com/v1")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2-vision")
@@ -127,6 +127,13 @@ OCR_ENABLED = os.environ.get("OCR_ENABLED", "1") != "0"
 OCR_LANGUAGES = os.environ.get("OCR_LANGUAGES", "en,ch_tra").split(",")
 OCR_MIN_CONFIDENCE = float(os.environ.get("OCR_MIN_CONFIDENCE", "0.3"))
 OCR_MAX_RESULTS = int(os.environ.get("OCR_MAX_RESULTS", "15"))
+# OCR backend: "openai" (gpt-4o-mini vision via /chat/completions, default) or
+# "easyocr" (local EasyOCR engine). The OpenAI backend reuses OPENAI_API_KEY /
+# OPENAI_BASE_URL so OCR and VLM share one key and both run on gpt-4o-mini.
+OCR_BACKEND = os.environ.get("OCR_BACKEND", "openai").strip().lower()
+# OCR model — defaults to the VLM model so both default to gpt-4o-mini; override
+# with OPENAI_OCR_MODEL if you want OCR on a different OpenAI model.
+OPENAI_OCR_MODEL = os.environ.get("OPENAI_OCR_MODEL", OPENAI_MODEL)
 
 # Timeouts
 VLM_TIMEOUT_S = int(os.environ.get("VLM_TIMEOUT_S", "120"))

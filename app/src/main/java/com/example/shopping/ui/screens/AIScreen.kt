@@ -36,7 +36,7 @@ fun AIScreen(
     budgetTotal: Int = 0
 ) {
     val context = LocalContext.current
-    val groqApiKey = BuildConfig.GROQ_API_KEY
+    val openAiApiKey = BuildConfig.OPENAI_API_KEY
 
     val scope = rememberCoroutineScope()
     var inputText by remember { mutableStateOf("") }
@@ -82,7 +82,7 @@ fun AIScreen(
                         color = TextPrimary
                     )
                     Text(
-                        "Powered by Groq",
+                        "Powered by OpenAI gpt-4o-mini",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextDisabled
                     )
@@ -187,14 +187,21 @@ fun AIScreen(
                                     messages.add(GroqMessage(role = "user", content = userMsg))
 
                                     val response = groqApi.getCompletion(
-                                        apiKey = "Bearer $groqApiKey",
+                                        apiKey = "Bearer $openAiApiKey",
                                         request = GroqRequest(messages = messages)
                                     )
                                     val aiMsg = response.choices[0].message.content
                                     chatHistory = chatHistory + (userMsg to aiMsg)
                                 } catch (e: Exception) {
-                                    val errorMsg = e.localizedMessage ?: "發生錯誤"
-                                    chatHistory = chatHistory + (userMsg to "錯誤: $errorMsg")
+                                    android.util.Log.e("AIScreen", "Chat completion failed", e)
+                                    val friendly = when (e) {
+                                        is java.net.UnknownHostException,
+                                        is java.net.ConnectException,
+                                        is java.net.SocketTimeoutException,
+                                        is java.io.IOException -> "連線失敗，請檢查網路連線後再試。"
+                                        else -> "抱歉，暫時無法回應，請稍後再試。"
+                                    }
+                                    chatHistory = chatHistory + (userMsg to friendly)
                                 } finally {
                                     isLoading = false
                                 }

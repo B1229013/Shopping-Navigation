@@ -27,12 +27,12 @@ from server.graph_renderer import (
 )
 from server.config import (
     OLLAMA_URL, OLLAMA_MODEL,
-    PERCEPTION_ENABLED, OCR_ENABLED, OCR_LANGUAGES,
+    PERCEPTION_ENABLED, OCR_ENABLED, OCR_BACKEND, OCR_LANGUAGES,
     OCR_MIN_CONFIDENCE, OCR_MAX_RESULTS, ARRIVED_MIN_DETECTION_SCORE,
     GOAL_CROP_VERIFY, GENERIC_INDOOR_OBJECTS, ensure_output_dir,
 )
 from server.goal_decomposer import decompose_goal
-from server.ocr import OCR
+from server.ocr import OCR, OpenAIOCR
 from server.models import (
     AnswerRequest,
     ErrorResponse,
@@ -135,9 +135,13 @@ def get_ocr() -> Optional[OCR]:
         return None
     if _ocr is None:
         try:
-            o = OCR(languages=OCR_LANGUAGES)
+            if OCR_BACKEND == "openai":
+                o = OpenAIOCR(languages=OCR_LANGUAGES)
+            else:
+                o = OCR(languages=OCR_LANGUAGES)
             o.load()
             _ocr = o
+            log.info("OCR backend: %s", OCR_BACKEND)
         except Exception as e:
             log.warning("OCR unavailable: %s", e)
             _ocr_failed = True
@@ -254,9 +258,9 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
             max_results=OCR_MAX_RESULTS,
         )
         if easyocr_results:
-            log.info("EasyOCR found %d text regions", len(easyocr_results))
+            log.info("OCR (%s) found %d text regions", OCR_BACKEND, len(easyocr_results))
     t_ocr = time.time()
-    log.info("⏱ EasyOCR: %.1fs", t_ocr - t_resize)
+    log.info("⏱ OCR (%s): %.1fs", OCR_BACKEND, t_ocr - t_resize)
 
     if has_grounding:
         # ══ 模式 A：GroundingDINO + (EasyOCR) + 單階段 VLM ══
@@ -306,7 +310,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
 
     else:
         # ══ 模式 B/C：兩階段 VLM（可搭配 EasyOCR）══
-        mode_label = "two-stage VLM + EasyOCR" if easyocr_results else "two-stage VLM only"
+        mode_label = f"two-stage VLM + OCR({OCR_BACKEND})" if easyocr_results else "two-stage VLM only"
         log.info("[session %s] Using %s", session_id, mode_label)
 
         nid = s.topomap.add_node(
@@ -757,11 +761,11 @@ def _check_vlm_and_warm():
 
 @app.post("/ocr")
 async def ocr_extract(image: UploadFile = File(...)):
-    """Run the existing EasyOCR engine on one uploaded image and return its text."""
+    """Run the configured OCR engine (OCR_BACKEND) on one image and return its text."""
     engine = get_ocr()
     if engine is None:
         raise HTTPException(status_code=503, detail={"error": "ocr_unavailable",
-                            "detail": "EasyOCR disabled or failed to load"})
+                            "detail": "OCR disabled or failed to load"})
     import tempfile
     data = await image.read()
     tmp = None
@@ -774,7 +778,7 @@ async def ocr_extract(image: UploadFile = File(...)):
         if tmp and os.path.exists(tmp):
             os.remove(tmp)
     return {
-        "engine": "easyocr",
+        "engine": OCR_BACKEND,
         "languages": OCR_LANGUAGES,
         "text": " ".join(r.text for r in results),
         "regions": [

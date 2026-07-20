@@ -1,0 +1,212 @@
+import Foundation
+
+// ── Request / Response models (mirrors backend/server + Android NavigationApi.kt) ──
+
+struct StartSessionRequest: Codable {
+    let goal: String
+}
+
+struct StartSessionResponse: Codable {
+    let sessionId: String
+    let guidance: String
+    let action: String
+    let goalObjects: [String]
+}
+
+struct TurnResponse: Codable {
+    let action: String   // "ARRIVED", "MOVE", "ASK"
+    let guidance: String
+    let question: String?
+    let nodeId: Int
+    let annotatedPhotoUrl: String?
+}
+
+struct AnswerRequest: Codable {
+    let answer: String
+}
+
+struct ConfirmArrivalRequest: Codable {
+    let kind: String   // "confirmed", "false_positive", "wrong_instance"
+}
+
+struct SessionState: Codable {
+    let id: String
+    let goal: String
+    let goalObjects: [String]
+    let pendingQuestion: String?
+    let arrived: Bool
+    let lastNodeId: Int?
+    let goalNode: Int?
+    let createdAt: String
+}
+
+struct MapNode: Codable {
+    let id: Int
+    let photo: String
+    let detected: [String]
+    let summary: String
+    let timestamp: String
+}
+
+struct MapEdge: Codable {
+    let from: Int
+    let to: Int
+    let action: String
+}
+
+struct MapResponse: Codable {
+    let nodes: [MapNode]
+    let edges: [MapEdge]
+    let currentNode: Int?
+    let goalNode: Int?
+}
+
+struct HealthResponse: Codable {
+    let status: String
+}
+
+struct StatusResponse: Codable {
+    let status: String
+}
+
+struct SensorTestLap: Codable {
+    let lapNumber: Int
+    let x: Double
+    let y: Double
+    let timestamp: Double
+    let distanceFromOrigin: Double
+    let distanceFromPreviousLap: Double
+}
+
+struct SensorTestRecord: Codable {
+    let points: [PathPoint]
+    let laps: [SensorTestLap]
+    let recordedAt: Double
+}
+
+struct SensorTestUploadResponse: Codable {
+    let testId: String
+    let status: String
+}
+
+final class NavigationAPI {
+    static let shared = NavigationAPI()
+
+    private var baseURL: URL? {
+        // Runtime override (editable in Settings) takes priority over the Info.plist
+        // default, so switching networks/environments never requires a rebuild.
+        var raw = UserDefaults.standard.string(forKey: "navigationBackendURL") ?? AppConfig.navigationBackendURL
+        guard !raw.isEmpty else { return nil }
+        if raw.hasSuffix("/") { raw.removeLast() }
+        return URL(string: raw)
+    }
+
+    private let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return decoder
+    }()
+
+    private let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        return encoder
+    }()
+
+    private func request(path: String, method: String) throws -> URLRequest {
+        guard let baseURL else { throw NavigationAPIError.missingBackendURL }
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = method
+        request.timeoutInterval = 30
+        return request
+    }
+
+    private func send<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw NavigationAPIError.serverError(body)
+        }
+        return try decoder.decode(T.self, from: data)
+    }
+
+    func startSession(goal: String) async throws -> StartSessionResponse {
+        var request = try request(path: "session", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(StartSessionRequest(goal: goal))
+        return try await send(request)
+    }
+
+    func uploadPhoto(sessionId: String, imageData: Data) async throws -> TurnResponse {
+        var request = try request(path: "session/\(sessionId)/photo", method: "POST")
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 300
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"photo\"; filename=\"photo.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        return try await send(request)
+    }
+
+    func postAnswer(sessionId: String, answer: String) async throws -> TurnResponse {
+        var request = try request(path: "session/\(sessionId)/answer", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(AnswerRequest(answer: answer))
+        return try await send(request)
+    }
+
+    func confirmArrival(sessionId: String, kind: String) async throws -> TurnResponse {
+        var request = try request(path: "session/\(sessionId)/confirm", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(ConfirmArrivalRequest(kind: kind))
+        return try await send(request)
+    }
+
+    func getSession(sessionId: String) async throws -> SessionState {
+        let request = try request(path: "session/\(sessionId)", method: "GET")
+        return try await send(request)
+    }
+
+    func getMap(sessionId: String) async throws -> MapResponse {
+        let request = try request(path: "session/\(sessionId)/map?format=json", method: "GET")
+        return try await send(request)
+    }
+
+    /// Stores the on-device PDR sensor map next to this session's VLM output on the
+    /// backend machine, purely so it can be inspected — not read back or used by
+    /// the VLM navigation logic.
+    func uploadSensorMap(sessionId: String, snapshot: TopologicalMapSnapshot) async throws {
+        var request = try request(path: "session/\(sessionId)/sensor-map", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(snapshot)
+        let _: StatusResponse = try await send(request)
+    }
+
+    /// Uploads a standalone PDR sensor-accuracy test (SensorTestView.swift) — no
+    /// navigation session involved. Backend stores the raw path + laps and renders
+    /// a PNG plot; returns the test_id used to fetch that plot back.
+    func uploadSensorTest(points: [PathPoint], laps: [SensorTestLap]) async throws -> String {
+        var request = try request(path: "sensor-test", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = SensorTestRecord(points: points, laps: laps, recordedAt: Date().timeIntervalSince1970 * 1000)
+        request.httpBody = try encoder.encode(body)
+        let response: SensorTestUploadResponse = try await send(request)
+        return response.testId
+    }
+
+    func health() async throws -> HealthResponse {
+        let request = try request(path: "health", method: "GET")
+        return try await send(request)
+    }
+
+    enum NavigationAPIError: Error {
+        case missingBackendURL
+        case serverError(String)
+    }
+}

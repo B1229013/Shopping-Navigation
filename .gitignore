@@ -1,0 +1,19 @@
+# 本地機密設定
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+.swiftpm/
+
+# CocoaPods / Carthage（若之後採用）
+Pods/
+Carthage/Build/

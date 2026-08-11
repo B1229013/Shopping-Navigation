@@ -535,16 +535,6 @@ def test_render_png_handles_terminal_facing_marker_without_crashing():
     assert isinstance(png_bytes, bytes) and len(png_bytes) > 0
 
 
-def test_render_png_backbone_mode_hides_objects_but_keeps_photo_nodes():
-    topo = TopoGraphV2()
-    p1 = topo.add_photo_node("photo0.jpg")
-    p2 = topo.add_photo_node("photo1.jpg")
-    topo.add_walkway_edge(p1, p2, direction="直走")
-    topo.build_subgraph_from_detections(p1, [{"label": "A", "box": [0, 0, 10, 10]}], 800, 600)
-    png_bytes = topo.render_png(mode="backbone")
-    assert isinstance(png_bytes, bytes) and len(png_bytes) > 0
-
-
 def test_render_png_returns_nonempty_bytes_even_for_empty_graph():
     topo = TopoGraphV2()
     png_bytes = topo.render_png()
@@ -593,11 +583,14 @@ def test_object_layout_follows_grid_cell_column_order():
 
 
 def test_object_layout_follows_grid_cell_row_order():
-    """同理，row（上/中/下）也要反映在離照片節點的遠近上。
+    """同理，row（上/中/下）也要反映在離照片節點的遠近上——但方向要
+    跟原照片的上下關係一致，不能顛倒。
 
-    （第十一輪把「同一欄內由近到遠」的堆疊方向從沿走道側邊改成沿走道
-    反方向——對應使用者要求的「順時針轉 90 度」——所以這裡改成用
-    `-row_axis` 方向投影，數值越大代表離照片節點越遠。）"""
+    （第十八輪把堆疊方向改成順著拍攝方向（+row_axis）之後，第十九輪
+    修正了一個上下顛倒的 bug：堆疊統一往同一個方向延伸時，「下排最
+    靠近照片節點、上排疊最遠」才會讓畫出來的上下關係跟原照片一致
+    ——上排離照片節點最遠，所以這裡驗證 top_one 的 depth_dist 最大、
+    bottom_one 最小。）"""
     topo = TopoGraphV2()
     p = topo.add_photo_node("photo0.jpg")
     dets = [
@@ -612,13 +605,13 @@ def test_object_layout_follows_grid_cell_row_order():
     import math
     px, py = pos[p]
     h = heading.get(p, 0.0)
-    depth_axis = (-math.sin(math.radians(h)), -math.cos(math.radians(h)))  # -row_axis
+    depth_axis = (math.sin(math.radians(h)), math.cos(math.radians(h)))  # +row_axis（拍攝方向）
 
     def depth_dist(oid):
         ox, oy = pos[oid]
         return (ox - px) * depth_axis[0] + (oy - py) * depth_axis[1]
 
-    assert depth_dist(by_label["top_one"]) < depth_dist(by_label["middle_one"]) < depth_dist(by_label["bottom_one"])
+    assert depth_dist(by_label["bottom_one"]) < depth_dist(by_label["middle_one"]) < depth_dist(by_label["top_one"])
 
 
 def test_walkway_arrow_shrink_never_consumes_whole_edge():
@@ -700,9 +693,9 @@ def test_grid_cell_color_matches_row_col_from_grid_row_col():
 
 
 def test_walkway_edges_do_not_cross_unrelated_node_boxes_when_path_folds_back():
-    """對應使用者回報：路線折返時，有些走道邊的箭頭會被剛好卡在路徑
-    中間的無關節點方塊擋住看不見。驗證每條走道邊沿線段取樣後，不會
-    有任何『不屬於這條邊兩端所屬群』的節點方塊擋在中間。"""
+    """對應使用者回報：路線折返時，有些走道邊會被剛好卡在路徑中間的
+    無關節點方塊擋住。第十四輪把要求改回「整條線（不只箭頭）都不能被
+    無關節點蓋住」，這裡檢查完整線段，不只是靠近終點的箭頭區域。"""
     topo = TopoGraphV2()
     ids = [topo.add_photo_node(f"p{i}.jpg") for i in range(6)]
     directions = [
@@ -801,3 +794,170 @@ def test_object_cluster_width_stays_bounded_as_object_count_grows():
         f"物件群寬度隨物件數量大幅增加（6 個時 {width_6:.2f}，18 個時 {width_18:.2f}），"
         "疑似退化成沿走道方向一路排開的舊行為"
     )
+
+
+# ── 第十三輪：走道邊直線可被蓋住、箭頭不可被蓋住；轉彎邊要能分辨 ──────
+
+def test_resolve_edge_node_crossings_pushes_nodes_blocking_middle_of_line_too():
+    """對應使用者第十四輪的要求：走道邊的直線部分也不能被無關節點蓋住
+    （不是只保護箭頭端）。驗證擋在直線正中間的無關節點一樣會被推開，
+    不會被放過。"""
+    topo = TopoGraphV2()
+
+    # 節點 100 卡在 1→2 連線的正中間：應該被推開
+    pos_mid = {1: (0.0, 0.0), 2: (0.0, 10.0), 100: (0.0, 5.0)}
+    sizes = {1: (1.0, 1.0), 2: (1.0, 1.0), 100: (1.0, 1.0)}
+    cluster_members = {1: [1], 2: [2], 100: [100]}
+    moved_mid = topo._resolve_edge_node_crossings(pos_mid, sizes, cluster_members, [(1, 2)])
+    assert moved_mid is True
+    assert pos_mid[100] != (0.0, 5.0)
+
+    # 節點 100 卡在靠近終點：一樣應該被推開
+    pos_tip = {1: (0.0, 0.0), 2: (0.0, 10.0), 100: (0.0, 9.5)}
+    moved_tip = topo._resolve_edge_node_crossings(pos_tip, sizes, cluster_members, [(1, 2)])
+    assert moved_tip is True
+    assert pos_tip[100] != (0.0, 9.5)
+
+
+def test_render_png_succeeds_with_turn_edges_and_terminal_marker():
+    """對應使用者要求：走道邊如果這一步有轉彎，要能跟直走的邊區分開來
+    （改用不同顏色＋轉彎標籤）。這裡至少確保混合了直走／右轉／終點朝向
+    標記的場景畫得出來、不會噴例外，圖例的轉彎邊判斷邏輯（has_turn_edge）
+    也確實依資料正確觸發。"""
+    topo = TopoGraphV2()
+    ids = [topo.add_photo_node(f"p{i}.jpg") for i in range(3)]
+    topo.add_walkway_edge(ids[0], ids[1], direction="請直走。")
+    topo.add_walkway_edge(ids[1], ids[2], direction="請右轉，然後繼續走。")
+    topo.set_terminal_facing(ids[2])
+    for pid in ids:
+        topo.build_subgraph_from_detections(pid, [{"label": "door", "box": [0, 0, 40, 40]}], 800, 600)
+
+    has_turn_edge = any(
+        u != v and d.get("etype") == ETYPE_WALKWAY and TopoGraphV2._parse_turn_degrees(d.get("direction", "") or "")
+        for u, v, d in topo.graph.edges(data=True)
+    )
+    assert has_turn_edge is True
+
+    png_bytes = topo.render_png()
+    assert png_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_walkway_arrow_connects_to_photo_node_box_not_whole_cluster():
+    """對應使用者回報：第四種邊（走道邊）沒有跟照片節點相連，而是跟
+    整個群（照片＋它掛的物件節點）相連——這偏離了走道邊的定義：走道邊
+    代表照片節點跟照片節點之間的走道，箭頭理應連到照片節點本身。
+
+    上一輪把縮排量改成看「整個群」的範圍，雖然解決了箭頭穿過物件群的
+    視覺問題，卻讓箭頭常常在離照片節點還很遠的地方就停住，等於連到
+    物件群的邊界而不是照片節點。這裡驗證縮排量只看照片節點自己的
+    方塊，不會因為掛了很多／很大的物件節點就被拉遠——不管掛多少物件，
+    縮排量都應該只等於照片節點自己方塊的投影半寬（加上固定的緩衝）。"""
+    topo = TopoGraphV2()
+    a = topo.add_photo_node("a.jpg")
+    b = topo.add_photo_node("b.jpg")
+    topo.add_walkway_edge(a, b, direction="請直走 5 公尺。")
+    # b 掛一堆又大又深的物件（同一欄堆很深），確保「整個群」的範圍
+    # 遠比 b 自己的照片方塊大上很多
+    dets = [{"label": f"very long cabinet bookshelf item {i}", "box": [400, 275, 500, 325]}
+            for i in range(6)]
+    topo.build_subgraph_from_detections(b, dets, 900, 600)
+
+    pos, sizes, heading = topo._layout_positions()
+    x0, y0 = pos[a]
+    x1, y1 = pos[b]
+    seg_len = math.hypot(x1 - x0, y1 - y0)
+    dx, dy = (x1 - x0) / seg_len, (y1 - y0) / seg_len
+
+    pt_per_data_unit = topo._INCH_PER_DATA_UNIT * 72.0
+
+    def box_shrink_pt(node_id, ddx, ddy):
+        w, h = sizes[node_id]
+        return ((w / 2.0) * abs(ddx) + (h / 2.0) * abs(ddy)) * pt_per_data_unit + 2.0
+
+    expected_shrink_b = box_shrink_pt(b, -dx, -dy)
+
+    # 更直接的驗證：物件群整體的範圍（用物件節點本身的座標算）要遠比
+    # b 自己方塊的縮排量大，證明這個情境真的會讓「整個群」版本的縮排
+    # 跟「只看照片節點」版本的縮排產生巨大落差，確保這個測試情境有
+    # 意義（不是隨便測不會出錯的東西）。
+    object_ids = topo.all_object_nodes()
+    px, py = pos[b]
+    max_object_reach = max(
+        abs((pos[oid][0] - px) * (-dx) + (pos[oid][1] - py) * (-dy)) for oid in object_ids
+    )
+    assert max_object_reach * pt_per_data_unit > expected_shrink_b * 3, (
+        "這個測試情境裡物件群的範圍不夠大，沒辦法有效區分「只縮排照片"
+        "節點」跟「縮排整個群」這兩種行為的差異"
+    )
+
+    # 直接檢查 render_png 的原始碼裡沒有「整個群」的縮排邏輯——確保
+    # 沒有不小心又改回去用 cluster 範圍縮排（那樣會讓箭頭連不到照片
+    # 節點本身，見上面的說明）。
+    import inspect
+    src = inspect.getsource(TopoGraphV2.render_png)
+    assert "_cluster_shrink_pt" not in src, "render_png 又用回「整個群」的縮排邏輯了，箭頭會連不到照片節點本身"
+
+
+def test_walkway_arrows_stay_visible_across_real_layout():
+    """對應使用者回報「照片跟照片之間的邊沒有成功相連」。用一個接近
+    真實情境的多節點、多物件場景（含折返）驗證：每條走道邊只縮排照片
+    節點自己的方塊之後，剩下的可見長度都要是正的，不能被縮排吃光。"""
+    topo = TopoGraphV2()
+    ids = [topo.add_photo_node(f"p{i}.jpg") for i in range(6)]
+    directions = [
+        "請繼續沿著走廊直走 5 公尺。",
+        "請向右轉，然後繼續走 3 公尺。",
+        "請繼續沿著走廊直走 4 公尺。",
+        "請轉身，然後沿著走廊返回 3 公尺，並拍另一張照片。",
+        "請轉身，然後沿著走廊返回 3 公尺，並拍另一張照片。",
+    ]
+    for i, direction in enumerate(directions):
+        topo.add_walkway_edge(ids[i], ids[i + 1], direction=direction)
+
+    long_labels = [
+        "cabinet bookshelf shelf unit", "desktop computer water dispenser stand",
+        "fire extinguisher box", "bulletin board notice board", "trash bin", "door frame",
+    ]
+    for pid in ids:
+        dets = [{"label": lbl, "box": [j * 60, 200 + j * 5, j * 60 + 120, 260 + j * 5]}
+                for j, lbl in enumerate(long_labels)]
+        topo.build_subgraph_from_detections(pid, dets, 1200, 800)
+
+    pos, sizes, heading = topo._layout_positions()
+    pt_per_data_unit = topo._INCH_PER_DATA_UNIT * 72.0
+
+    def box_shrink_pt(node_id, ddx, ddy):
+        w, h = sizes[node_id]
+        return ((w / 2.0) * abs(ddx) + (h / 2.0) * abs(ddy)) * pt_per_data_unit + 2.0
+
+    walkway_edges = [(u, v) for u, v, d in topo.graph.edges(data=True)
+                      if d.get("etype") == ETYPE_WALKWAY and u != v]
+    for u, v in walkway_edges:
+        x0, y0 = pos[u]
+        x1, y1 = pos[v]
+        seg_len = math.hypot(x1 - x0, y1 - y0)
+        seg_pt = seg_len * pt_per_data_unit
+        dx, dy = (x1 - x0) / seg_len, (y1 - y0) / seg_len
+        shrink_a = box_shrink_pt(u, dx, dy)
+        shrink_b = box_shrink_pt(v, dx, dy)
+        visible = seg_pt - shrink_a - shrink_b
+        assert visible > 0, (
+            f"走道邊 {u}->{v} 的可見長度變成 {visible:.1f}pt（<=0），"
+            "邊會被縮排吃光、看起來像沒有連起來"
+        )
+
+
+def test_walkway_arrow_zorder_is_below_node_boxes_so_nodes_never_get_covered():
+    """對應使用者要求：不要讓節點被箭頭遮擋。驗證 render_png 裡走道邊
+    （含轉彎起點的拍攝方向小箭頭、路徑終點的拍照方向標記）用的 zorder
+    確實比節點方塊低，這樣不管箭頭的路徑上有沒有經過節點，節點方塊都
+    會畫在箭頭上面、內容不會被蓋住。"""
+    import inspect
+    render_src = inspect.getsource(TopoGraphV2.render_png)
+    assert "_WALKWAY_ZORDER = 2.5" in render_src
+    # 節點文字（render_png 裡直接呼叫 ax.text）用的 zorder 要比走道邊高，
+    # 箭頭才會被壓在節點下面。
+    assert "zorder=4" in render_src
+    # 節點方塊本身的 zorder 定義在 _draw_node_box 裡。
+    box_src = inspect.getsource(TopoGraphV2._draw_node_box)
+    assert "zorder=3" in box_src

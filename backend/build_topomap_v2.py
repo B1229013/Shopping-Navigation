@@ -245,22 +245,18 @@ def main() -> None:
 
     saved_path = topo.save_for_place(output_root)
     png_path = saved_path.with_suffix(".png")
-    png_path.write_bytes(topo.render_png(mode="full"))
-    overview_path = saved_path.parent / "topomap_overview.png"
-    overview_path.write_bytes(topo.render_png(mode="backbone"))
+    png_path.write_bytes(topo.render_png())
 
     # 同時在輸入資料夾底下留一份，方便直接對照這次導航的輸出
     debug_dir = input_dir / "topomap_v2"
     debug_dir.mkdir(exist_ok=True)
     topo.save(debug_dir / "topomap.json")
-    (debug_dir / "topomap.png").write_bytes(topo.render_png(mode="full"))
-    (debug_dir / "topomap_overview.png").write_bytes(topo.render_png(mode="backbone"))
+    (debug_dir / "topomap.png").write_bytes(topo.render_png())
 
     print("\n════════════════════════════════════════")
     print(f"完成！場所「{args.place}」的拓樸地圖已更新：")
     print(f"  - {saved_path}")
-    print(f"  - {png_path}（完整版：含物件與所有邊）")
-    print(f"  - {overview_path}（總覽版：只看路線走向，適合先看這張）")
+    print(f"  - {png_path}")
     print(f"  - 節點數：{topo.graph.number_of_nodes()}"
           f"（照片 {len(topo.all_photo_nodes())} / 物件 {len(topo.all_object_nodes())}）")
     print(f"  - 邊數：{topo.graph.number_of_edges()}")

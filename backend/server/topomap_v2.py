@@ -942,7 +942,8 @@ class TopoGraphV2:
     _COLOR_OBJECT_EDGE = "#B08B3A"
     _COLOR_VIRTUAL = "#D9D9D9"     # 灰色 — 虛假照片節點
     _COLOR_VIRTUAL_EDGE = "#7A7A7A"
-    _COLOR_WALKWAY = "#E76F51"     # 珊瑚橘 — 走道邊（主幹）
+    _COLOR_WALKWAY = "#E76F51"     # 珊瑚橘 — 走道邊（直走，沒有轉彎）
+    _COLOR_WALKWAY_TURN = "#4C6EF5"  # 靛藍 — 走道邊（這一步有轉彎，方向跟拍照點相對位置容易對不起來，特別標示）
     _COLOR_ADJACENT = "#2A9D8F"    # 青綠 — 相鄰物件邊
     _COLOR_SAME_OBJECT = "#6A4C93"  # 紫色 — 跨照片同物件邊
     _COLOR_CURRENT = "#E63946"     # 紅色 — 使用者目前位置徽章
@@ -1066,17 +1067,31 @@ class TopoGraphV2:
         #        欄與欄之間並排（三欄寬度固定，不會因為物件數量變多而
         #        越排越寬）；row 0/1/2（上/中/下）決定同一欄內由近到遠
         #        的堆疊順序——同一欄如果有好幾個物件，是往「遠離照片」
-        #        的方向一個疊一個往外掛。
+        #        的方向一個疊一個往外掛，下排（row=2）最靠近照片節點，
+        #        上排（row=0）疊最遠。
         #
         #        欄的左右位置沿著「走道側邊」（perp_axis）展開，堆疊的
-        #        遠近沿著「走道反方向」（-row_axis，也就是背對前進方向）
-        #        展開——這是刻意把整體排列方式繞照片節點順時針轉 90 度
-        #        （對應使用者回報：九宮格上方要對齊圖片上方，原本的排法
-        #        欄跟列的方向對調了，轉 90 度後欄變成沿著走道側邊左右
-        #        展開、列變成沿著背對前進的方向由近到遠堆疊，跟照片本身
-        #        「左右對應畫面左右、上下對應由近到遠」的直覺一致）。
-        #        用「背對前進方向」而不是「朝向前進方向」堆疊，是為了
-        #        不要讓物件群一路往下一個照片節點的方向擴張過去。
+        #        遠近沿著「拍攝方向」（+row_axis，也就是照片節點的朝向、
+        #        跟走道前進方向同一個值）展開——物件是照片裡拍到的東西，
+        #        實際擺放位置理應在鏡頭前方，不是鏡頭後方，所以改成往
+        #        「跟拍攝方向同向」的地方掛，比較接近物件實際的擺放位置。
+        #        （第十二輪原本用 -row_axis／背對拍攝方向，是為了避免
+        #        物件群一路往下一個照片節點的方向擴張過去；改成正方向
+        #        後，如果跟下一個節點距離太近，交給既有的全域防重疊
+        #        （`_resolve_cluster_overlaps` / `_resolve_edge_node_crossings`）
+        #        處理，不需要犧牲「貼近實際擺放位置」這個更重要的目標。）
+        #
+        #        「下排最靠近、上排疊最遠」這個順序是刻意跟堆疊方向反過來
+        #        配的：堆疊統一往同一個方向（+row_axis）延伸出去，如果
+        #        還是「上排最靠近、下排疊最遠」（沿用改方向之前的順序），
+        #        整串疊出去之後，上排的物件反而會落在畫面上比較靠近照片
+        #        的那一端、下排落在比較遠的那一端——因為堆疊只往一個方向
+        #        延伸，「離照片節點的遠近」自動就會對應到畫面上的某個
+        #        方向，順序沒有跟著改方向一起翻過來的話，畫出來的上下
+        #        關係就會是顛倒的（這正是這一輪要修正的問題）。改成
+        #        「下排最靠近」之後，上排會落在堆疊延伸出去最遠的一端，
+        #        跟畫面上「離照片節點越遠＝原照片裡越上面」的方向一致，
+        #        堆疊出來的九宮格上下關係才會跟原照片相符，不會顛倒。
         #
         #        真實資料裡物件九成都落在同一列（中），如果同一列的物件
         #        用並排方式展開會排成一條很長的直線，所以固定三欄、
@@ -1113,7 +1128,20 @@ class TopoGraphV2:
                 row, col = grid_row_col(o.get("grid_cell", "center"))
                 lanes[col].append((row, o))
             for c in range(3):
-                lanes[c].sort(key=lambda item: (item[0], item[1]["id"]))  # 同一欄先依row(上→中→下)排，再依偵測順序
+                # 同一欄先依 row 排，越先排到的物件離照片節點越近（見下面
+                # 步驟 4，cum 是累加距離，排第一個的 cum 最小）。
+                #
+                # 這裡刻意由「下→中→上」排（row 由大到小），不是單純的
+                # 「上→中→下」：因為堆疊方向這一輪改成順著拍攝方向
+                # （+row_axis，見步驟 4 的說明），如果還是「上排最先＝
+                # 上排離照片節點最近」，整串疊起來之後，上排反而會落在
+                # 堆疊的近端、下排落在遠端——堆疊往同一個方向延伸時，
+                # 畫面上看起來就是上下顛倒的（下排的物件看起來在上面，
+                # 上排的物件看起來在下面）。改成「下排最先＝下排離照片
+                # 節點最近」，下排會落在堆疊的近端、上排落在遠端，堆疊
+                # 延伸出去後，上排的物件才會真的落在畫面上比較「上面」
+                # 的位置，跟原照片的上下關係一致。
+                lanes[c].sort(key=lambda item: (-item[0], item[1]["id"]))
 
             ph = heading.get(pnode, 0.0)
             lane_width = [
@@ -1185,19 +1213,21 @@ class TopoGraphV2:
 
         # ── 4. 物件節點的絕對座標：吊掛方向依該照片節點的「走道朝向」
         #        旋轉——欄的左右位置沿走道側邊（perp_axis）展開，同一欄
-        #        內由近到遠的堆疊沿「背對前進方向」（-row_axis）展開。
-        #        這樣不管路線怎麼轉彎，物件群看起來都像貼著走道側邊排列，
-        #        且不會往下一個照片節點的方向延伸過去。實際的堆疊深度
-        #        跟欄位置已經在步驟 2 用同一個 heading 算好了，這裡只要
-        #        把相對座標轉成絕對座標即可。──
+        #        內由近到遠的堆疊沿「拍攝方向」（+row_axis，跟走道前進
+        #        方向同一個值）展開，比較貼近物件在真實空間裡的擺放
+        #        位置（物件是鏡頭拍到的東西，理應在鏡頭前方）。實際的
+        #        堆疊深度跟欄位置已經在步驟 2 用同一個 heading 算好了，
+        #        這裡只要把相對座標轉成絕對座標即可。物件群因此可能會
+        #        跟路徑上的下一個節點比較靠近，交給步驟 5 的全域防重疊
+        #        處理，不會真的疊在一起。──
         for pnode in photo_nodes:
             px, py = pos[pnode]
             h = math.radians(heading.get(pnode, 0.0))
-            row_axis = (math.sin(h), math.cos(h))       # 沿走道前進方向
+            row_axis = (math.sin(h), math.cos(h))       # 沿走道前進方向（＝拍攝方向）
             perp_axis = (math.cos(h), -math.sin(h))     # 走道側邊（固定選一側，讓同一張圖裡方向一致）
             for oid, depth_offset, lane_offset in obj_rel_layout.get(pnode, []):
-                ox = px - row_axis[0] * depth_offset + perp_axis[0] * lane_offset
-                oy = py - row_axis[1] * depth_offset + perp_axis[1] * lane_offset
+                ox = px + row_axis[0] * depth_offset + perp_axis[0] * lane_offset
+                oy = py + row_axis[1] * depth_offset + perp_axis[1] * lane_offset
                 pos[oid] = (ox, oy)
 
         # ── 5. 全域防重疊：路線折返時，樹狀結構上不相鄰的兩個節點群
@@ -1298,13 +1328,12 @@ class TopoGraphV2:
         `_resolve_cluster_overlaps` 只檢查群跟群整塊有沒有重疊，但路線
         折返、繞回附近時，常常是兩個在路徑上離得很遠的照片節點，投影到
         2D 座標後剛好排在同一直線附近——某張照片（或它的物件）並沒有跟
-        邊的兩端「整塊重疊」，卻剛好卡在邊的路徑正中間，把箭頭擋住看
-        不見（畫圖時邊會被畫在方塊後面的部分蓋掉，肉眼看起來就像箭頭
-        消失了）。這種情況前面的重疊檢查抓不到，這裡另外處理。
+        邊的兩端「整塊重疊」，卻剛好卡在邊的路徑正中間，這裡另外處理。
 
-        做法：對每條走道邊，沿線段取樣，檢查有沒有落進某個不屬於這條
-        邊兩端節點所屬群的節點方塊裡；有的話，把「擋路的那個節點所屬
-        的整個群」沿著「垂直於這條邊」的方向推開，直到不再擋路為止。
+        做法：對每條走道邊，沿整條線段取樣，檢查有沒有落進某個不屬於
+        這條邊兩端節點所屬群的節點方塊裡；有的話，把「擋路的那個節點
+        所屬的整個群」沿著「垂直於這條邊」的方向推開，直到不再擋路
+        為止。
 
         Returns:
             這一輪有沒有真的移動過任何節點（呼叫端用來判斷還要不要
@@ -1486,21 +1515,8 @@ class TopoGraphV2:
         )
         ax.add_patch(box)
 
-    def render_png(self, mode: str = "full") -> bytes:
-        """把拓樸地圖畫成 PNG。
-
-        節點是依文字內容自動算出剛好包住文字的方塊（見 `_label_box_size`），
-        彼此間距也是依方塊實際大小算的，所以文字不會被截斷、也不會跟
-        鄰居重疊。使用者目前位置改用該照片節點右上角的一顆小紅星徽章
-        標示，而不是蓋在節點正中央的大星星（避免遮住文字）。
-
-        Args:
-            mode: "full"（預設）畫出照片＋物件＋所有邊；
-                  "backbone" 只畫照片節點與走道邊，適合先看整體路線走向，
-                  細節（物件、跨照片關聯）太多時可以先看這張再看 full 版。
-        """
-    def render_png(self, mode: str = "full") -> bytes:
-        """把拓樸地圖畫成 PNG。
+    def render_png(self) -> bytes:
+        """把拓樸地圖畫成 PNG（照片＋物件＋所有邊，唯一一種畫法）。
 
         節點是依文字內容自動算出剛好包住文字的方塊（見 `_label_box_size`），
         彼此間距也是依方塊實際大小算的，所以文字不會被截斷、也不會跟
@@ -1509,10 +1525,13 @@ class TopoGraphV2:
         的比例不會因為圖的大小不同而跑掉。使用者目前位置改用該照片節點
         右上角的一顆小紅星徽章標示，而不是蓋在節點正中央的大星星。
 
-        Args:
-            mode: "full"（預設）畫出照片＋物件＋所有邊；
-                  "backbone" 只畫照片節點與走道邊，適合先看整體路線走向，
-                  細節（物件、跨照片關聯）太多時可以先看這張再看 full 版。
+        以前這裡還有一個 `mode="backbone"`，只畫照片節點跟走道邊、不畫
+        物件，用來先看整體路線走向。評估後拿掉了：它畫的東西完全是
+        `render_png()` 的子集，沒有任何獨有資訊，只是省略細節的簡化版；
+        系統實際運作（定位、導航）只需要 `topomap.json` 這份圖資料本身，
+        PNG 只是給人看的視覺化，不是任何程式邏輯的輸入，「總覽版」純粹
+        是人工除錯時的方便功能，不是系統運作必要的東西，所以拿掉了，
+        改成只有一種畫法，程式碼也少一層 `mode` 分支要維護。
         """
         if self.graph.number_of_nodes() == 0:
             fig, ax = plt.subplots(figsize=(6, 3))
@@ -1529,14 +1548,16 @@ class TopoGraphV2:
         object_nodes = self.all_object_nodes()
         virtual_nodes = [n for n in photo_nodes if self.graph.nodes[n].get("is_virtual")]
         real_photo_nodes = [n for n in photo_nodes if n not in virtual_nodes]
-        show_objects = mode != "backbone"
         has_facing_marker = any(
             u == v and d.get("etype") == ETYPE_WALKWAY for u, v, d in self.graph.edges(data=True)
         )
+        has_turn_edge = any(
+            u != v and d.get("etype") == ETYPE_WALKWAY and self._parse_turn_degrees(d.get("direction", "") or "")
+            for u, v, d in self.graph.edges(data=True)
+        )
 
-        # 只用「這個模式實際會畫出來」的節點計算畫布範圍：backbone 模式
-        # 不畫物件，範圍就只依照片節點算，圖不會留一堆沒東西的空白。
-        visible_ids = photo_nodes if not show_objects else list(pos.keys())
+        # 畫布範圍依「這張圖實際會畫出來」的所有節點（照片＋物件）計算。
+        visible_ids = list(pos.keys())
         x_min = min(pos[n][0] - sizes[n][0] / 2 for n in visible_ids)
         x_max = max(pos[n][0] + sizes[n][0] / 2 for n in visible_ids)
         y_min = min(pos[n][1] - sizes[n][1] / 2 for n in visible_ids)
@@ -1545,7 +1566,8 @@ class TopoGraphV2:
         data_w = max(x_max - x_min + pad * 2, 1.0)
         data_h = max(y_max - y_min + pad * 2, 1.0)
 
-        legend_count = 2 + (1 if virtual_nodes else 0) + (3 if show_objects else 0) + 1 + (1 if has_facing_marker else 0)  # +1 是目前位置
+        legend_count = (2 + (1 if virtual_nodes else 0) + 3 + 1
+                        + (1 if has_facing_marker else 0) + (1 if has_turn_edge else 0))  # +1 是目前位置
         legend_ncol = min(legend_count, 3)
         legend_rows = math.ceil(legend_count / legend_ncol)
 
@@ -1555,9 +1577,8 @@ class TopoGraphV2:
                            # 畫在標題正下方、圖的正上方，不會蓋到節點
                            # ——之前是疊在圖的左上角，小圖時會蓋住節點
         # 九宮格色卡（3x3 色塊＋上中下/左中右標籤）：畫在圖例橫條下方、
-        # 主圖上方，只在 full 模式且真的有物件節點時才保留這塊高度
-        # （backbone 模式沒畫物件，色卡也用不到）。
-        show_grid_legend = show_objects and bool(object_nodes)
+        # 主圖上方，只在真的有物件節點時才保留這塊高度。
+        show_grid_legend = bool(object_nodes)
         grid_legend_in = 1.28 if show_grid_legend else 0.0
         MIN_FIG_W = 8.6    # 圖例橫排最少需要的寬度，圖本身內容較窄時也要保留這麼寬，
                            # 否則圖例文字會被截斷（畫布不夠寬，legend 換行/裁切）
@@ -1579,15 +1600,15 @@ class TopoGraphV2:
         ax.set_xlim(x_min - pad, x_max + pad)
         ax.set_ylim(y_min - pad, y_max + pad)
 
-        # ── 邊（先畫邊、再畫節點方塊蓋在上面，邊看起來才像連到節點邊緣）──
+        # ── 邊（先畫「非走道」的邊，讓節點方塊蓋在上面，邊看起來才像
+        #    連到節點邊緣）──
         #
         #    adjacent/same_object 這兩種邊在資料裡是「雙向各存一條」（方便
         #    沿任一方向查詢鄰居），但畫圖時同一對節點只需要畫一條線／一條
         #    弧就好，兩條方向相反的邊如果都畫出來，會變成兩條分開的弧線
         #    （尤其是 same_object 這種有弧度的線，方向相反時弧會往兩邊彎，
         #    疊在一起看起來像一對眼睛）。這裡統一在畫之前先依「無序節點
-        #    對」去重，只保留一條。walkway 邊現在本來就只單向存一條，不用
-        #    去重，但共用同一個函式也不會出錯。
+        #    對」去重，只保留一條。
         def _dedup_unordered_pairs(pairs):
             seen = set()
             result = []
@@ -1599,97 +1620,44 @@ class TopoGraphV2:
                 result.append((u, v))
             return result
 
-        # walkway 邊現在是單向邊，方向代表「起點那張照片的拍照方向」，
-        # 所以畫的時候要真的帶箭頭，不能再用無方向的線段。
-        #
-        # 這裡改成自己一條一條畫（不用 nx.draw_networkx_edges 內建的箭頭），
-        # 原因是：nx 的箭頭縮排是假設「圓形節點、固定 node_size」去算的，
-        # 但我們的節點是「依文字大小算出來的矩形方塊」，大小差異很大
-        # （例如 "P17（未走訪）" 比 "P1" 寬很多），用同一個固定縮排量，
-        # 箭頭常常還沒畫出方塊就被蓋住了（畫的順序是先畫邊、後畫方塊，
-        # 方塊會蓋住還留在方塊範圍內的箭頭）。改成依每個方塊在邊的方向上
-        # 「投影」出來的實際半寬/半高，換算成 matplotlib 的 points 單位，
-        # 個別設定 shrinkA/shrinkB，確保箭頭一定停在方塊外面看得到。
-        #
-        # 自我迴圈（起點=終點，代表『路徑終點的拍照方向』，見
-        # set_terminal_facing()）不能直接丟給 networkx 畫（會變成貼著節點
-        # 的小圓圈，不好辨識），另外用一小段延伸出去的箭頭表示。
-        walkway_edges = [
-            (u, v) for u, v, d in self.graph.edges(data=True) if d.get("etype") == ETYPE_WALKWAY and u != v
-        ]
-        facing_markers = [
-            u for u, v, d in self.graph.edges(data=True) if d.get("etype") == ETYPE_WALKWAY and u == v
-        ]
-        pt_per_data_unit = self._INCH_PER_DATA_UNIT * 72.0
+        # contains 邊依「目標物件的九宮格位置」上色（而不是統一灰色），
+        # 顏色跟物件節點外框用同一套 grid_cell_color()：色相＝左中右、
+        # 深淺＝上中下，讓邊本身也能傳達物件在照片裡的相對位置，
+        # 跟物件節點的排版位置互相印證。同一種顏色的邊一起畫（效能較好，
+        # 也讓 matplotlib 圖層順序穩定）。
+        contains_edges_by_color: Dict[str, List[Tuple[int, int]]] = {}
+        for u, v, d in self.graph.edges(data=True):
+            if not is_contains_etype(d.get("etype", "")):
+                continue
+            cell = self.graph.nodes[v].get("grid_cell", "center")
+            contains_edges_by_color.setdefault(grid_cell_color(cell), []).append((u, v))
+        for color, edgelist in contains_edges_by_color.items():
+            nx.draw_networkx_edges(self.graph, pos, edgelist=edgelist, ax=ax,
+                                    edge_color=color, style="dotted", width=1.1, alpha=0.8, arrows=False)
 
-        def _box_shrink_pt(node_id, dx: float, dy: float) -> float:
-            """節點方塊沿 (dx,dy) 方向的投影半寬（換算成 points），用來當
-            箭頭在這個節點這一端要縮排多少，才不會被方塊蓋住。"""
-            w, h = sizes[node_id]
-            half_extent = (w / 2.0) * abs(dx) + (h / 2.0) * abs(dy)
-            return half_extent * pt_per_data_unit + 2.0  # 多留 2pt 緩衝，貼著邊緣看起來才乾淨
+        adjacent_edges = _dedup_unordered_pairs(
+            (u, v) for u, v, d in self.graph.edges(data=True) if d.get("etype") == ETYPE_ADJACENT
+        )
+        if adjacent_edges:
+            nx.draw_networkx_edges(self.graph, pos, edgelist=adjacent_edges, ax=ax,
+                                    edge_color=self._COLOR_ADJACENT, width=1.0, alpha=0.7, arrows=False)
 
-        for u, v in walkway_edges:
-            x0, y0 = pos[u]
-            x1, y1 = pos[v]
-            seg_len = math.hypot(x1 - x0, y1 - y0) or 1.0
-            dx, dy = (x1 - x0) / seg_len, (y1 - y0) / seg_len
-            ax.annotate(
-                "", xy=(x1, y1), xytext=(x0, y0),
-                arrowprops=dict(
-                    arrowstyle="-|>", color=self._COLOR_WALKWAY, lw=2.6,
-                    shrinkA=_box_shrink_pt(u, dx, dy), shrinkB=_box_shrink_pt(v, dx, dy),
-                    mutation_scale=16,
-                ),
-                zorder=3.5,
-            )
-        for node_id in facing_markers:
-            x, y = pos[node_id]
-            rad = math.radians(heading.get(node_id, 0.0))
-            dx, dy = math.sin(rad), math.cos(rad)
-            stub_len = 1.3
-            ax.annotate(
-                "", xy=(x + dx * stub_len, y + dy * stub_len), xytext=(x, y),
-                arrowprops=dict(
-                    arrowstyle="-|>", color=self._COLOR_WALKWAY, lw=2.2,
-                    shrinkA=_box_shrink_pt(node_id, dx, dy), shrinkB=0,
-                    mutation_scale=14,
-                ),
-                zorder=4,
-            )
-
-        if show_objects:
-            # contains 邊依「目標物件的九宮格位置」上色（而不是統一灰色），
-            # 顏色跟物件節點外框用同一套 grid_cell_color()：色相＝左中右、
-            # 深淺＝上中下，讓邊本身也能傳達物件在照片裡的相對位置，
-            # 跟物件節點的排版位置互相印證。同一種顏色的邊一起畫（效能較好，
-            # 也讓 matplotlib 圖層順序穩定）。
-            contains_edges_by_color: Dict[str, List[Tuple[int, int]]] = {}
-            for u, v, d in self.graph.edges(data=True):
-                if not is_contains_etype(d.get("etype", "")):
-                    continue
-                cell = self.graph.nodes[v].get("grid_cell", "center")
-                contains_edges_by_color.setdefault(grid_cell_color(cell), []).append((u, v))
-            for color, edgelist in contains_edges_by_color.items():
-                nx.draw_networkx_edges(self.graph, pos, edgelist=edgelist, ax=ax,
-                                        edge_color=color, style="dotted", width=1.1, alpha=0.8, arrows=False)
-
-            adjacent_edges = _dedup_unordered_pairs(
-                (u, v) for u, v, d in self.graph.edges(data=True) if d.get("etype") == ETYPE_ADJACENT
-            )
-            if adjacent_edges:
-                nx.draw_networkx_edges(self.graph, pos, edgelist=adjacent_edges, ax=ax,
-                                        edge_color=self._COLOR_ADJACENT, width=1.0, alpha=0.7, arrows=False)
-
-            same_object_edges = _dedup_unordered_pairs(
-                (u, v) for u, v, d in self.graph.edges(data=True) if d.get("etype") == ETYPE_SAME_OBJECT
-            )
-            if same_object_edges:
-                nx.draw_networkx_edges(self.graph, pos, edgelist=same_object_edges, ax=ax,
-                                        edge_color=self._COLOR_SAME_OBJECT, style="dashed", width=1.0, alpha=0.5,
-                                        connectionstyle="arc3,rad=0.25", arrows=True, arrowstyle="-")
+        same_object_edges = _dedup_unordered_pairs(
+            (u, v) for u, v, d in self.graph.edges(data=True) if d.get("etype") == ETYPE_SAME_OBJECT
+        )
+        if same_object_edges:
+            nx.draw_networkx_edges(self.graph, pos, edgelist=same_object_edges, ax=ax,
+                                    edge_color=self._COLOR_SAME_OBJECT, style="dashed", width=1.0, alpha=0.5,
+                                    connectionstyle="arc3,rad=0.25", arrows=True, arrowstyle="-")
 
         # ── 節點方塊（依文字大小畫，不用固定大小的圓點/方塊）──
+        #
+        #    刻意排在走道邊之前畫：走道邊（下面）縮排要留多少，需要知道
+        #    每個照片節點「連同它自己掛的所有物件節點」實際佔了多大範圍
+        #    ——先把節點都畫出來、位置都定案，縮排的計算才有完整的資訊
+        #    可以用（雖然縮排計算只需要 pos/sizes 數值、不需要真的等圖
+        #    畫出來，但把「先決定所有節點在哪裡，再畫箭頭」的邏輯順序
+        #    對應到程式碼順序，比較不容易漏算）。
         for n in real_photo_nodes:
             x, y = pos[n]
             w, h = sizes[n]
@@ -1702,18 +1670,119 @@ class TopoGraphV2:
             self._draw_node_box(ax, x, y, w, h, face=self._COLOR_VIRTUAL, edge=self._COLOR_VIRTUAL_EDGE, dashed=True)
             ax.text(x, y, self._photo_label(n), ha="center", va="center",
                     fontsize=self._PHOTO_FONT, color=self._COLOR_PHOTO, zorder=4)
-        if show_objects:
-            for n in object_nodes:
-                x, y = pos[n]
-                w, h = sizes[n]
-                cell = self.graph.nodes[n].get("grid_cell", "center")
-                tag_color = grid_cell_color(cell)
-                # 外框改用九宮格顏色（比原本固定的暖金色外框更粗），跟 contains
-                # 邊、九宮格色卡用同一套色彩對照，讓使用者不用查資料就能從
-                # 顏色直接判斷這個物件在原始照片裡偏左/中/右、偏上/中/下。
-                self._draw_node_box(ax, x, y, w, h, face=self._COLOR_OBJECT, edge=tag_color, linewidth=2.4)
-                ax.text(x, y, self.graph.nodes[n].get("label", ""), ha="center", va="center",
-                        fontsize=self._OBJECT_FONT, color=self._COLOR_OBJECT_TEXT, zorder=4)
+        for n in object_nodes:
+            x, y = pos[n]
+            w, h = sizes[n]
+            cell = self.graph.nodes[n].get("grid_cell", "center")
+            tag_color = grid_cell_color(cell)
+            # 外框改用九宮格顏色（比原本固定的暖金色外框更粗），跟 contains
+            # 邊、九宮格色卡用同一套色彩對照，讓使用者不用查資料就能從
+            # 顏色直接判斷這個物件在原始照片裡偏左/中/右、偏上/中/下。
+            self._draw_node_box(ax, x, y, w, h, face=self._COLOR_OBJECT, edge=tag_color, linewidth=2.4)
+            ax.text(x, y, self.graph.nodes[n].get("label", ""), ha="center", va="center",
+                    fontsize=self._OBJECT_FONT, color=self._COLOR_OBJECT_TEXT, zorder=4)
+
+        # ── 走道邊（第一種邊）：等所有節點都畫完才畫。
+        #
+        #    這一輪的重點：走道邊代表「照片節點跟照片節點之間的走道」，
+        #    箭頭的起訖點依定義就是要連到照片節點本身，不是連到某個
+        #    物件節點或整個群的外緣。上一輪把縮排量改成看「整個群」
+        #    （照片＋它掛的物件節點）的範圍，雖然解決了箭頭穿過物件群
+        #    的視覺問題，但也讓箭頭常常在離照片節點還很遠的地方就停住
+        #    ——箭頭連到的是物件群的邊界，不是照片節點，偏離了走道邊
+        #    「連接照片節點」的定義。改回**縮排只看照片節點自己的
+        #    方塊**，箭頭一定會畫到緊貼照片節點的方塊邊緣才停，確保
+        #    邊真正連到的是照片節點本身。
+        #
+        #    照片節點自己的物件群仍然可能出現在箭頭路徑附近（第十八輪
+        #    把物件群改成往「拍攝方向」——也就是跟走道前進方向同側
+        #    ——堆疊之後，比較容易跟「下一個」節點的方向重疊），這不
+        #    影響「邊連到照片節點」這件事——箭頭的終點依然是照片節點
+        #    的方塊邊緣，只是路徑中段可能會經過自己這一群的某個物件
+        #    附近。這裡改成**走道邊的 zorder 比節點方塊低**（見
+        #    `_draw_single_arrow` 的 `zorder=2.5`），節點方塊畫在箭頭
+        #    上面，箭頭經過任何節點（不管是自己這一群的物件，還是理論
+        #    上殘餘的個案）時會被該節點的方塊蓋住一小段，節點本身永遠
+        #    完整看得到、不會被箭頭線條蓋到內容——這是這一輪的重點：
+        #    「不遮擋節點」優先於「箭頭本身處處可見」，箭頭被自己的
+        #    物件蓋住一小段是可以接受的，跟終點的連接處（緊貼照片節點
+        #    方塊邊緣）並不會被蓋到，因為物件群跟照片節點之間本來就
+        #    留有間距（見步驟 2 的 `row_margin`），這一小段間距通常就
+        #    足夠讓箭頭終點附近保持淨空。
+        #
+        #    路徑上「非相鄰」的第三個群恰好擋在路徑中間的情況（折返時
+        #    偶爾發生），另外交給 `_resolve_edge_node_crossings` 在排版
+        #    階段把擋路的群推開處理（見 `_layout_positions`）——這個
+        #    處理跟 zorder 沒有關係，是真的把節點挪開，避免無關的節點
+        #    群整個卡在路徑中間看起來很奇怪（不只是視覺上被蓋住的問題）。
+        walkway_edges = [
+            (u, v) for u, v, d in self.graph.edges(data=True) if d.get("etype") == ETYPE_WALKWAY and u != v
+        ]
+        facing_markers = [
+            u for u, v, d in self.graph.edges(data=True) if d.get("etype") == ETYPE_WALKWAY and u == v
+        ]
+        pt_per_data_unit = self._INCH_PER_DATA_UNIT * 72.0
+
+        def _box_shrink_pt(node_id, dx: float, dy: float) -> float:
+            """照片節點自己方塊沿 (dx,dy) 方向的投影半寬（points），用來
+            當箭頭在這一端要縮排多少——縮到照片節點自己的方塊邊緣，
+            確保箭頭真的連到照片節點本身（第四種邊的定義），不是連到
+            某個物件節點或整個群的外緣。"""
+            w, h = sizes[node_id]
+            half_extent = (w / 2.0) * abs(dx) + (h / 2.0) * abs(dy)
+            return half_extent * pt_per_data_unit + 2.0  # 多留 2pt 緩衝，貼著邊緣看起來才乾淨
+
+        def _draw_single_arrow(x0, y0, x1, y1, shrinkA, shrinkB, *, color, lw, mutation_scale, zorder) -> None:
+            ax.annotate(
+                "", xy=(x1, y1), xytext=(x0, y0),
+                arrowprops=dict(arrowstyle="-|>", color=color, lw=lw,
+                                 shrinkA=shrinkA, shrinkB=shrinkB, mutation_scale=mutation_scale),
+                zorder=zorder,
+            )
+
+        # 節點方塊的 zorder 是 3（見下面畫節點的段落），這裡用比它低的
+        # 2.5，確保箭頭經過任何節點時會被該節點的方塊蓋住，節點本身
+        # 不會被箭頭線條蓋到內容。
+        _WALKWAY_ZORDER = 2.5
+
+        for u, v in walkway_edges:
+            x0, y0 = pos[u]
+            x1, y1 = pos[v]
+            seg_len = math.hypot(x1 - x0, y1 - y0) or 1.0
+            dx, dy = (x1 - x0) / seg_len, (y1 - y0) / seg_len
+            text = self._walkway_edge_data(u, v).get("direction", "") or ""
+            turn = self._parse_turn_degrees(text)
+            color = self._COLOR_WALKWAY_TURN if turn != 0.0 else self._COLOR_WALKWAY
+            _draw_single_arrow(
+                x0, y0, x1, y1,
+                _box_shrink_pt(u, dx, dy), _box_shrink_pt(v, dx, dy),
+                color=color, lw=2.6, mutation_scale=16, zorder=_WALKWAY_ZORDER,
+            )
+            if turn != 0.0:
+                # 這一步「有轉彎」：走道邊本身（上面畫的）代表轉彎之後、
+                # 走到下一張照片的方向，不等於起點這張照片實際拍攝的
+                # 方向。額外在起點旁邊畫一小段拍攝方向指示（跟路徑終點
+                # 的拍照方向標記同一種畫法），明確標出「這裡的照片實際
+                # 是面向哪個方向拍的」，跟移動方向的箭頭區分開來。
+                fh = math.radians(heading.get(u, 0.0))
+                fdx, fdy = math.sin(fh), math.cos(fh)
+                stub_len = 1.1
+                _draw_single_arrow(
+                    x0, y0, x0 + fdx * stub_len, y0 + fdy * stub_len,
+                    _box_shrink_pt(u, fdx, fdy), 0.0,
+                    color=self._COLOR_WALKWAY_TURN, lw=1.6, mutation_scale=11, zorder=_WALKWAY_ZORDER,
+                )
+
+        for node_id in facing_markers:
+            x, y = pos[node_id]
+            rad = math.radians(heading.get(node_id, 0.0))
+            dx, dy = math.sin(rad), math.cos(rad)
+            stub_len = 1.3
+            _draw_single_arrow(
+                x, y, x + dx * stub_len, y + dy * stub_len,
+                _box_shrink_pt(node_id, dx, dy), 0.0,
+                color=self._COLOR_WALKWAY, lw=2.2, mutation_scale=14, zorder=_WALKWAY_ZORDER,
+            )
 
         # ── 使用者目前位置：畫在該照片節點右上角的小星星徽章，
         #    不蓋住節點本身的文字（舊版是蓋在正中央的巨大星星）──
@@ -1725,8 +1794,12 @@ class TopoGraphV2:
 
         legend_handles = [
             mpatches.Patch(color=self._COLOR_PHOTO, label="照片節點"),
-            mpatches.Patch(color=self._COLOR_WALKWAY, label="走道邊（箭頭＝拍照方向）"),
+            mpatches.Patch(color=self._COLOR_WALKWAY, label="走道邊·直走（箭頭＝拍照方向）"),
         ]
+        if has_turn_edge:
+            legend_handles.append(
+                mpatches.Patch(color=self._COLOR_WALKWAY_TURN, label="走道邊·這步有轉彎（起點旁短箭頭＝實際拍攝方向）")
+            )
         if virtual_nodes:
             legend_handles.append(mpatches.Patch(color=self._COLOR_VIRTUAL, label="虛假照片節點（未走訪）"))
         if has_facing_marker:
@@ -1734,13 +1807,12 @@ class TopoGraphV2:
                 plt.Line2D([0], [0], color=self._COLOR_WALKWAY, lw=2.2, marker=">",
                            markersize=6, label="路徑終點的拍照方向")
             )
-        if show_objects:
-            legend_handles += [
-                mpatches.Patch(facecolor=self._COLOR_OBJECT, edgecolor=self._COLOR_OBJECT_EDGE,
-                                label="物件節點（外框顏色＝九宮格位置，見下方色卡）"),
-                mpatches.Patch(color=self._COLOR_ADJACENT, label="相鄰物件邊"),
-                mpatches.Patch(color=self._COLOR_SAME_OBJECT, label="跨照片同物件邊"),
-            ]
+        legend_handles += [
+            mpatches.Patch(facecolor=self._COLOR_OBJECT, edgecolor=self._COLOR_OBJECT_EDGE,
+                            label="物件節點（外框顏色＝九宮格位置，見下方色卡）"),
+            mpatches.Patch(color=self._COLOR_ADJACENT, label="相鄰物件邊"),
+            mpatches.Patch(color=self._COLOR_SAME_OBJECT, label="跨照片同物件邊"),
+        ]
         legend_handles.append(
             plt.Line2D([0], [0], marker="*", color="w", markerfacecolor=self._COLOR_CURRENT,
                        markeredgecolor="white", markersize=13, label="使用者目前位置（右上角星號）")
@@ -1750,8 +1822,7 @@ class TopoGraphV2:
         fig.legend(handles=legend_handles, loc="upper center", ncol=legend_ncol,
                    fontsize=7.3, framealpha=0.95,
                    bbox_to_anchor=(0.5, 1.0 - title_in / fig_h))
-        title_suffix = "（路線總覽）" if mode == "backbone" else ""
-        fig.suptitle(f"拓樸地圖：{self.place_name or '(未命名場所)'}{title_suffix}",
+        fig.suptitle(f"拓樸地圖：{self.place_name or '(未命名場所)'}",
                      fontsize=12, y=1.0 - (title_in * 0.35) / fig_h)
 
         # ── 九宮格色卡：畫在圖例橫條下方、主圖上方的獨立橫幅裡，用 3x3

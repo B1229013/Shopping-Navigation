@@ -961,3 +961,87 @@ def test_walkway_arrow_zorder_is_below_node_boxes_so_nodes_never_get_covered():
     # 節點方塊本身的 zorder 定義在 _draw_node_box 裡。
     box_src = inspect.getsource(TopoGraphV2._draw_node_box)
     assert "zorder=3" in box_src
+
+
+# ── 第二十輪：角度復原、縮短照片節點間距 ──────────────────────────
+
+def test_turn_angle_is_restored_even_when_anti_overlap_would_distort_it():
+    """對應使用者回報：P10 看起來不是 90 度右轉。確認資料本身是對的
+    （direction 文字寫「請向右轉」，_parse_turn_degrees 應該解析成 90
+    度），且死算推位算出來的角度也是精準的 90 度；驗證即使路線後面接著
+    折返（觸發全域防重疊），這個沒有真正衝突的父子節點角度，最後畫出來
+    還是要維持原本死算推位算出來的角度，不能被防重疊的推擠帶歪。"""
+    topo = TopoGraphV2()
+    ids = [topo.add_photo_node(f"p{i}.jpg") for i in range(7)]
+    directions = [
+        "請沿著走廊直走，然後拍另一張照片。",
+        "請沿著走廊直走，然後拍另一張照片。",
+        "請向右轉，然後沿著走廊繼續走，然後拍另一張照片。",
+        "請繼續沿著走廊直走，然後拍另一張照片。",
+        "請轉身，然後沿著走廊返回，並拍另一張照片。",
+        "請轉身，然後沿著走廊返回，並拍另一張照片。",
+    ]
+    for i, direction in enumerate(directions):
+        topo.add_walkway_edge(ids[i], ids[i + 1], direction=direction)
+
+    long_labels = [
+        "cabinet bookshelf shelf unit", "desktop computer water dispenser stand",
+        "fire extinguisher box", "bulletin board notice board", "trash bin", "door frame",
+    ]
+    for pid in ids:
+        dets = [{"label": lbl, "box": [j * 60, 200 + j * 5, j * 60 + 120, 260 + j * 5]}
+                for j, lbl in enumerate(long_labels)]
+        topo.build_subgraph_from_detections(pid, dets, 1200, 800)
+
+    raw_xy, heading, parent_of = topo._dead_reckon_tree()
+    pos, sizes, heading2 = topo._layout_positions()
+
+    # 找出「請向右轉」那一步對應的父子節點（ids[2] -> ids[3]）
+    p, n = ids[2], ids[3]
+
+    def angle(a, b):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        return math.degrees(math.atan2(dx, dy))
+
+    raw_angle = angle(raw_xy[p], raw_xy[n])
+    final_angle = angle(pos[p], pos[n])
+    assert abs(raw_angle - 90.0) < 1e-6, f"死算推位本身角度就不是 90 度：{raw_angle}"
+    assert abs(final_angle - raw_angle) < 1e-6, (
+        f"最終畫出來的角度（{final_angle:.2f}°）跟死算推位算出來的角度"
+        f"（{raw_angle:.2f}°）不一致，疑似被全域防重疊的推擠帶歪了"
+    )
+
+
+def test_photo_node_spacing_is_tighter_with_reduced_min_gap_multiplier():
+    """對應使用者要求：在不造成節點被遮擋的情況下縮短照片節點之間的
+    間距。驗證新的間距（min_gap 倍率 1.0）確實比舊的（2.2）短，同時
+    仍然維持沒有任何節點重疊。"""
+    topo = TopoGraphV2()
+    ids = [topo.add_photo_node(f"p{i}.jpg") for i in range(4)]
+    for i in range(3):
+        topo.add_walkway_edge(ids[i], ids[i + 1], direction="請繼續沿著走廊直走。")
+    # 掛很多物件、讓物件群的範圍夠大，確保 min_dist（受 min_gap 倍率
+    # 影響）才是限制間距的關鍵因素，不是死算推位本身的距離（沒寫明確
+    # 距離時，死算推位的預設步長很短，物件群一多很容易被 min_dist 蓋過）
+    dets = [{"label": f"very long cabinet bookshelf item {i}", "box": [400, 275, 500, 325]}
+            for i in range(6)]
+    for pid in ids:
+        topo.build_subgraph_from_detections(pid, dets, 900, 600)
+
+    pos, sizes, heading = topo._layout_positions()
+
+    import itertools
+    def overlap(a, b):
+        ax, ay = pos[a]; aw, ah = sizes[a]
+        bx, by = pos[b]; bw, bh = sizes[b]
+        return abs(ax - bx) < (aw + bw) / 2.0 - 1e-6 and abs(ay - by) < (ah + bh) / 2.0 - 1e-6
+
+    nodes = list(pos.keys())
+    assert not any(overlap(a, b) for a, b in itertools.combinations(nodes, 2))
+
+    # 跟用舊倍率（2.2）算出來的間距比較，確認真的變短了
+    pos_loose, _, _ = topo._layout_positions(min_gap=0.45 * 2.2)
+    dist_tight = math.hypot(pos[ids[1]][0] - pos[ids[0]][0], pos[ids[1]][1] - pos[ids[0]][1])
+    dist_loose = math.hypot(pos_loose[ids[1]][0] - pos_loose[ids[0]][0],
+                             pos_loose[ids[1]][1] - pos_loose[ids[0]][1])
+    assert dist_tight < dist_loose

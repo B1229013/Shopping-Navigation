@@ -1105,7 +1105,9 @@ class TopoGraphV2:
         row_margin = 0.22  # 同一欄內，物件與物件之間的額外間距
         obj_rel_layout: Dict[int, List[Tuple[int, float, float]]] = {}  # photo_id -> [(obj_id, depth_offset, lane_offset)]
         cluster_half_width: Dict[int, float] = {}
-        cluster_reach: Dict[int, float] = {}  # 用來估計整個物件群「最遠可能延伸多少」，給步驟 3 抓安全間距用
+        cluster_reach: Dict[int, float] = {}  # 用來估計整個物件群「最遠可能延伸多少」，給步驟 3 抓安全間距用（保守的圓形估計，只在有轉彎、無法用方向性數值時當備案）
+        cluster_forward_reach: Dict[int, float] = {}  # 物件群沿「自己拍攝方向」最遠伸到多遠——因為物件都往拍攝方向堆疊，這個方向才會有東西
+        photo_row_axis_extent: Dict[int, float] = {}  # 照片節點自己的方塊沿自己 row_axis（拍攝方向）的半寬——物件群往拍攝方向延伸，反方向（背對拍攝方向）理論上不會有任何物件，只有照片節點自己的方塊要留空間
 
         def _row_axis_extent(heading_deg: float, box_w: float, box_h: float) -> float:
             """box 投影到 row_axis（沿走道前進/反方向）之後的半寬，用來算
@@ -1178,6 +1180,8 @@ class TopoGraphV2:
             obj_rel_layout[pnode] = rel_positions
             cluster_half_width[pnode] = total_w / 2.0
             cluster_reach[pnode] = max(total_w / 2.0, max_lane_depth)
+            cluster_forward_reach[pnode] = max(base_extent, max_lane_depth)
+            photo_row_axis_extent[pnode] = base_extent
 
         def _extent(node_id: int) -> float:
             return max(sizes[node_id][0] / 2.0, cluster_reach.get(node_id, 0.0))
@@ -1185,7 +1189,34 @@ class TopoGraphV2:
         # ── 3. 把死算推位算出來的「原始位置」依樹狀結構（父節點→子節點）
         #        重新量距離：方向（角度）完全保留死算推位算出來的轉折，
         #        但距離會拉長到至少「兩邊節點方塊/物件群的安全間距」，
-        #        避免距離抓得太短時兩個節點疊在一起。──
+        #        避免距離抓得太短時兩個節點疊在一起。
+        #
+        #        安全間距這裡改成盡量用「方向性」的數值，不是不管方向
+        #        一律套用同一個保守的圓形範圍——物件都是往「自己的拍攝
+        #        方向」堆疊，某個方向可能因為疊了很多物件而伸得很遠
+        #        （見 `cluster_forward_reach`），但反方向（背對拍攝方向）
+        #        理論上完全不會有物件，只需要留照片節點自己方塊的空間
+        #        （見 `photo_row_axis_extent`）。如果還是不分方向、兩端
+        #        都套用「物件群可能伸多遠」的保守估計，會導致「子節點
+        #        自己那側其實沒有物件」也被迫留出一大段空間，把兩個
+        #        照片節點的距離拉得比實際需要的長很多（對應使用者回報：
+        #        P16、P17 之間的間距明顯偏長——P17 自己剛好有 6 個物件
+        #        疊在同一欄，`cluster_reach` 因此很大，但那些物件是往
+        #        P17 的拍攝方向、也就是遠離 P16 的方向延伸，並不會佔用
+        #        P16、P17 之間的空間，用不分方向的保守估計去抓間距是
+        #        不必要的浪費）。
+        #
+        #        只有在這條邊「沒有轉彎」（父節點跟子節點的拍攝方向
+        #        相同）時才套用方向性的估計：這種情況下，父節點→子節點
+        #        的直線方向剛好就是父節點自己的拍攝方向，父節點的物件群
+        #        往同一個方向延伸，`cluster_forward_reach` 量的正是這個
+        #        方向上的實際距離，是準確的；子節點的方塊背對這個方向
+        #        （物件都往另一邊、也就是繼續往前的方向延伸），只需要
+        #        自己方塊的半寬。如果這條邊「有轉彎」，父節點的物件群
+        #        实際延伸方向跟這條邊的方向不一致（物件是照父節點自己的
+        #        拍攝方向堆疊，不是照這條邊轉彎後的新方向），方向性估計
+        #        不準，這種情況下退回原本不分方向的保守估計（`_extent`），
+        #        避免低估間距造成重疊。──
         for n in photo_nodes:
             if n not in raw_xy:
                 # 沒被走道邊連到（理論上少見，例如只有單張照片）：退回原點
@@ -1207,7 +1238,15 @@ class TopoGraphV2:
             rx, ry = raw_xy[n][0] - raw_xy.get(p, (0.0, 0.0))[0], raw_xy[n][1] - raw_xy.get(p, (0.0, 0.0))[1]
             raw_dist = math.hypot(rx, ry) or 1.0
             ux, uy = rx / raw_dist, ry / raw_dist
-            min_dist = _extent(p) + min_gap * 2.2 + _extent(n)
+
+            no_turn_here = abs(((heading.get(n, 0.0) - heading.get(p, 0.0) + 180.0) % 360.0) - 180.0) < 1e-6
+            if no_turn_here:
+                p_reach = cluster_forward_reach.get(p, _extent(p))
+                n_reach = photo_row_axis_extent.get(n, _extent(n))
+            else:
+                p_reach = _extent(p)
+                n_reach = _extent(n)
+            min_dist = p_reach + min_gap * 1.0 + n_reach
             actual_dist = max(raw_dist, min_dist)
             pos[n] = (px + ux * actual_dist, py + uy * actual_dist)
 
@@ -1246,11 +1285,143 @@ class TopoGraphV2:
                           if d.get("etype") == ETYPE_WALKWAY and u != v]
         # 兩種問題交替修正幾輪：「群跟群整塊重疊」跟「走道邊被無關節點擋住」
         # 有可能互相牽動（修好一個，可能讓另一個重新出現），所以不是各修
-        # 一次就結束，而是反覆跑到兩邊都穩定為止。
-        for _ in range(6):
+        # 一次就結束，而是反覆跑到兩邊都穩定為止。這一輪把預設間距縮短
+        # 之後，節點彼此擠得更緊，兩種修正機制有時會卡進「你推過去、我
+        # 推回來」的無限循環（防重疊把某個群拉回來，剛好又把它推回走道
+        # 邊的路徑上，兩邊各自的修正都沒錯，只是彼此的目標互相牴觸）——
+        # 這裡加一個循環偵測：把每輪修正完的座標四捨五入後當成一個「狀態
+        # 指紋」，如果同一個指紋重複出現，代表卡進循環了，之後的走道邊
+        # 穿越修正改用加大的推擠幅度（每偵測到一次循環就再加大），直到
+        # 真的被推到不會再跟防重疊的拉力打架的地方為止。
+        crossing_margin = 0.3
+        seen_signatures: set = set()
+        for _ in range(30):
             self._resolve_cluster_overlaps(pos, sizes, cluster_members)
-            if not self._resolve_edge_node_crossings(pos, sizes, cluster_members, walkway_pairs):
+            moved = self._resolve_edge_node_crossings(
+                pos, sizes, cluster_members, walkway_pairs, margin=crossing_margin
+            )
+            if not moved:
                 break
+            signature = tuple(sorted((k, round(v[0], 2), round(v[1], 2)) for k, v in pos.items()))
+            if signature in seen_signatures:
+                crossing_margin *= 1.8  # 陷入循環，加大推擠幅度試著跳出
+            seen_signatures.add(signature)
+
+        # ── 6. 角度復原：第 5 步的全域防重疊，有時候會為了解開路線折返
+        #        造成的衝突，連帶把「根本沒有衝突」的父子節點對之間的
+        #        角度也一起推歪（距離不變，方向跑掉）——死算推位算出來
+        #        的轉折角度其實是對的（例如資料寫「請向右轉」，死算推位
+        #        算出來就是精準的 90 度），被防重疊的推擠影響後，畫出來
+        #        會變成不是 90 度，容易讓人誤會轉彎角度算錯了。
+        #
+        #        這裡嘗試把每個節點跟它父節點之間的角度修正回死算推位的
+        #        原始角度（距離維持防重疊調整後的值，不縮短，只調整
+        #        方向），但**只有修正後重新檢查、確定不會造成任何新的
+        #        重疊或走道邊穿越時才會真的套用**，不然維持原樣——寧可
+        #        角度不夠精準，也不要為了修角度又把好不容易解開的重疊
+        #        問題找回來。修正一個節點時，會把它「以自己為根的整個
+        #        子樹」（子樹裡所有照片節點，連同它們各自的物件群）一起
+        #        剛體平移，子樹內部的相對排列不會被打亂。
+        children_of: Dict[int, List[int]] = {}
+        for child, parent in parent_of.items():
+            if child in pos and parent in pos:
+                children_of.setdefault(parent, []).append(child)
+
+        def _subtree_photo_nodes(start: int) -> List[int]:
+            result = [start]
+            stack = [start]
+            while stack:
+                cur = stack.pop()
+                for ch in children_of.get(cur, []):
+                    result.append(ch)
+                    stack.append(ch)
+            return result
+
+        def _has_overlap() -> bool:
+            items = list(pos.keys())
+            for i in range(len(items)):
+                ax, ay = pos[items[i]]
+                aw, ah = sizes[items[i]]
+                for j in range(i + 1, len(items)):
+                    bx, by = pos[items[j]]
+                    bw, bh = sizes[items[j]]
+                    if abs(ax - bx) < (aw + bw) / 2.0 - 1e-6 and abs(ay - by) < (ah + bh) / 2.0 - 1e-6:
+                        return True
+            return False
+
+        def _has_crossing() -> bool:
+            node_owner: Dict[int, int] = {}
+            for owner, members in cluster_members.items():
+                for m in members:
+                    node_owner[m] = owner
+            for u, v in walkway_pairs:
+                if u not in pos or v not in pos:
+                    continue
+                owner_u, owner_v = node_owner.get(u, u), node_owner.get(v, v)
+                x0, y0 = pos[u]
+                x1, y1 = pos[v]
+                seg_len = math.hypot(x1 - x0, y1 - y0)
+                if seg_len < 1e-6:
+                    continue
+                for node_id in pos:
+                    owner = node_owner.get(node_id, node_id)
+                    if owner in (owner_u, owner_v):
+                        continue
+                    bx, by = pos[node_id]
+                    bw, bh = sizes[node_id]
+                    for i in range(41):
+                        t = i / 40.0
+                        x, y = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
+                        if abs(x - bx) <= bw / 2.0 and abs(y - by) <= bh / 2.0:
+                            return True
+            return False
+
+        for n in order:
+            if n == root:
+                continue
+            p = parent_of.get(n)
+            if p is None or p not in pos or n not in raw_xy or p not in raw_xy:
+                continue
+            rx, ry = raw_xy[n][0] - raw_xy[p][0], raw_xy[n][1] - raw_xy[p][1]
+            raw_len = math.hypot(rx, ry)
+            if raw_len < 1e-9:
+                continue
+            target_ux, target_uy = rx / raw_len, ry / raw_len
+
+            px, py = pos[p]
+            cx, cy = pos[n]
+            cur_len = math.hypot(cx - px, cy - py)
+            if cur_len < 1e-9:
+                continue
+
+            full_new_x, full_new_y = px + target_ux * cur_len, py + target_uy * cur_len
+            full_dx, full_dy = full_new_x - cx, full_new_y - cy
+            if abs(full_dx) < 1e-6 and abs(full_dy) < 1e-6:
+                continue  # 角度本來就沒被扭曲，不用修
+
+            subtree_members = [
+                m for sp in _subtree_photo_nodes(n) for m in cluster_members.get(sp, [sp])
+            ]
+            backup = {m: pos[m] for m in subtree_members if m in pos}
+
+            # 先試完全修正（角度百分之百對齊死算推位），空間不夠、會重新
+            # 造成重疊或穿越的話，改試比較小幅度的修正（75%／50%／25%，
+            # 相當於朝目標角度轉一部分而不是轉到底），取「能安全套用的
+            # 最大幅度」——比起「完全修正失敗就整個放棄、維持原本被
+            # 防重疊推歪的角度」，能修正多少算多少，通常還是比完全不修
+            # 更接近死算推位算出來的真實角度。
+            applied = False
+            for frac in (1.0, 0.75, 0.5, 0.25):
+                dx, dy = full_dx * frac, full_dy * frac
+                for m in subtree_members:
+                    if m in pos:
+                        pos[m] = (backup[m][0] + dx, backup[m][1] + dy)
+                if not (_has_overlap() or _has_crossing()):
+                    applied = True
+                    break
+            if not applied:
+                for m, old_xy in backup.items():
+                    pos[m] = old_xy  # 連 25% 的修正都不安全，放棄這次修正，維持原樣
 
         return pos, sizes, heading
 
@@ -1335,6 +1506,14 @@ class TopoGraphV2:
         所屬的整個群」沿著「垂直於這條邊」的方向推開，直到不再擋路
         為止。
 
+        同一個群如果有好幾個物件（例如同一欄堆疊很深）都擋在路徑上，
+        一次算出「能同時清掉這幾個擋路物件」的推擠量（取這幾個物件
+        各自需要的推擠量的最大值），一次推完，不是逐一物件各推一點點
+        ——群裡的物件是沿著自己這欄的方向排成一長串，這條走道邊如果跟
+        這欄的方向不平行，逐一小幅推擠容易變成「推開了這個物件，換下
+        一個物件又擋到」，跟 `_resolve_cluster_overlaps` 互相拉扯陷入
+        來回震盪、永遠收斂不了。
+
         Returns:
             這一輪有沒有真的移動過任何節點（呼叫端用來判斷還要不要
             再跑一輪跟 `_resolve_cluster_overlaps` 交替修正）。
@@ -1358,6 +1537,9 @@ class TopoGraphV2:
             ux, uy = (x1 - x0) / seg_len, (y1 - y0) / seg_len
             perp = (-uy, ux)
 
+            # 先把「擋路的物件」依所屬的群分組，同一群一次算出足以清掉
+            # 所有擋路物件的推擠量，而不是逐一物件各自推一次。
+            hits_by_owner: Dict[int, List[int]] = {}
             for node_id in list(pos.keys()):
                 owner = node_to_cluster.get(node_id, node_id)
                 if owner in (owner_u, owner_v):
@@ -1371,15 +1553,31 @@ class TopoGraphV2:
                     if abs(x - bx) <= bw / 2.0 and abs(y - by) <= bh / 2.0:
                         hit = True
                         break
-                if not hit:
-                    continue
+                if hit:
+                    hits_by_owner.setdefault(owner, []).append(node_id)
 
+            for owner, hit_nodes in hits_by_owner.items():
                 moved_any = True
-                shift = max(bw, bh) / 2.0 + margin
-                side = (bx - x0) * perp[0] + (by - y0) * perp[1]
+                # 這裡刻意用「這個群的所有成員」（不是只有這一輪偵測到
+                # 擋路的那幾個）去算需要的清空距離：同一群裡不同物件的
+                # 方塊大小不一樣，隨著群被推來推去，不同輪換不同物件
+                # 剛好卡在線上，如果每次只看「這一輪擋路的是誰」來決定
+                # 推多遠，可能推開了小的、換大的卡上去，永遠都在跟
+                # `_resolve_cluster_overlaps` 拉扯收斂不了；改成一次用
+                # 全部成員裡最寬的算清空距離，一次推到位。
+                all_members = cluster_members.get(owner, hit_nodes)
+                shift = max(
+                    (sizes[m][0] / 2.0) * abs(perp[0]) + (sizes[m][1] / 2.0) * abs(perp[1])
+                    for m in all_members if m in sizes
+                ) + margin
+                # 用「這個群裡所有擋路物件的平均位置」判斷該往哪一側推，
+                # 比只看單一物件更能代表整個群相對於這條邊的位置。
+                avg_bx = sum(pos[nid][0] for nid in hit_nodes) / len(hit_nodes)
+                avg_by = sum(pos[nid][1] for nid in hit_nodes) / len(hit_nodes)
+                side = (avg_bx - x0) * perp[0] + (avg_by - y0) * perp[1]
                 direction = 1.0 if side >= 0 else -1.0
                 dx, dy = perp[0] * shift * direction, perp[1] * shift * direction
-                for m in cluster_members.get(owner, [node_id]):
+                for m in cluster_members.get(owner, hit_nodes):
                     pos[m] = (pos[m][0] + dx, pos[m][1] + dy)
 
         return moved_any
@@ -1477,15 +1675,26 @@ class TopoGraphV2:
                 visited.add(nb)
                 queue.append(nb)
 
-        # 沒被走道邊連到主要分量的節點（理論上少見）：依序排在最後已知
-        # 節點旁邊，至少保證每個節點都拿得到座標。
+        # 沒被走道邊連到主要分量的節點（理論上少見，例如外部呼叫端接了一個
+        # 沒有走道邊的獨立節點進來）：擺到整張地圖版面「外面」，跟所有已經
+        # 排好的節點、物件群保持足夠安全距離，不要疊在主圖上面——早期版本
+        # 只是貼著起點（root）挪一點點小偏移，起點旁邊本來就有自己的物件群
+        # 展開，這個小偏移量完全不夠，會直接疊到主路徑的節點/物件上，嚴重
+        # 影響可讀性。改成算出目前所有節點座標的邊界框，把這些節點排在
+        # 邊界框下方留一大段安全間距的地方，橫向排開一列，保證落在先前
+        # 完全沒有東西的空白區域。
         leftover = [n for n in photo_nodes if n not in visited]
         if leftover:
             anchor = root if root in xy else next(iter(xy), root)
-            ax_, ay_ = xy.get(anchor, (0.0, 0.0))
             ah = heading.get(anchor, 0.0)
+            all_x = [p[0] for p in xy.values()]
+            all_y = [p[1] for p in xy.values()]
+            margin = self._DEFAULT_STEP_UNITS * 4  # 留夠寬，蓋過物件群可能展開的範圍
+            base_x = min(all_x)
+            base_y = min(all_y) - margin
+            spacing = self._DEFAULT_STEP_UNITS * 5  # 節點之間也要留夠物件群的空間，避免互相重疊
             for i, n in enumerate(leftover):
-                xy[n] = (ax_ + (i + 1) * self._DEFAULT_STEP_UNITS, ay_)
+                xy[n] = (base_x + i * spacing, base_y)
                 heading[n] = ah
                 parent_of[n] = anchor
         return xy, heading, parent_of

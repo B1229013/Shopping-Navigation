@@ -1,0 +1,126 @@
+{
+  "query_object_count": 3,
+  "warning": null,
+  "candidates": [
+    {
+      "photo_id": 74,
+      "photo_rank": 15,
+      "photo_label": "P15",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\14.jpg",
+      "photo_file": "14.jpg",
+      "region": null,
+      "score": 0.5,
+      "node_coverage": 1.0,
+      "query_coverage": 1.0,
+      "structure_consistency": 0.5,
+      "matched_count": 1,
+      "query_object_count": 3,
+      "node_object_count": 3,
+      "matches": [
+        {
+          "query_object_id": 95,
+          "query_label": "sign",
+          "node_object_id": 77,
+          "node_label": "sign",
+          "pair_score": 2.1735294117647057
+        }
+      ]
+    },
+    {
+      "photo_id": 38,
+      "photo_rank": 7,
+      "photo_label": "P7",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\6.jpg",
+      "photo_file": "6.jpg",
+      "region": null,
+      "score": 0.2675,
+      "node_coverage": 0.4465,
+      "query_coverage": 0.6672,
+      "structure_consistency": 0.5,
+      "matched_count": 1,
+      "query_object_count": 3,
+      "node_object_count": 3,
+      "matches": [
+        {
+          "query_object_id": 95,
+          "query_label": "sign",
+          "node_object_id": 41,
+          "node_label": "door",
+          "pair_score": 1.3499999999999999
+        }
+      ]
+    },
+    {
+      "photo_id": 64,
+      "photo_rank": 13,
+      "photo_label": "P13",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\12.jpg",
+      "photo_file": "12.jpg",
+      "region": null,
+      "score": 0.2208,
+      "node_coverage": 0.4416,
+      "query_coverage": 0.4416,
+      "structure_consistency": 0.5,
+      "matched_count": 1,
+      "query_object_count": 3,
+      "node_object_count": 2,
+      "matches": [
+        {
+          "query_object_id": 95,
+          "query_label": "sign",
+          "node_object_id": 66,
+          "node_label": "sign",
+          "pair_score": 0.8935294117647059
+        }
+      ]
+    },
+    {
+      "photo_id": 67,
+      "photo_rank": 14,
+      "photo_label": "P14",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\13.jpg",
+      "photo_file": "13.jpg",
+      "region": null,
+      "score": 0.1728,
+      "node_coverage": 0.2695,
+      "query_coverage": 0.4811,
+      "structure_consistency": 0.5,
+      "matched_count": 1,
+      "query_object_count": 3,
+      "node_object_count": 6,
+      "matches": [
+        {
+          "query_object_id": 95,
+          "query_label": "sign",
+          "node_object_id": 73,
+          "node_label": "sign",
+          "pair_score": 0.9735294117647059
+        }
+      ]
+    },
+    {
+      "photo_id": 48,
+      "photo_rank": 9,
+      "photo_label": "P9",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\8.jpg",
+      "photo_file": "8.jpg",
+      "region": null,
+      "score": 0.161,
+      "node_coverage": 0.242,
+      "query_coverage": 0.4811,
+      "structure_consistency": 0.5,
+      "matched_count": 1,
+      "query_object_count": 3,
+      "node_object_count": 4,
+      "matches": [
+        {
+          "query_object_id": 95,
+          "query_label": "sign",
+          "node_object_id": 52,
+          "node_label": "directional sign",
+          "pair_score": 0.9735294117647059
+        }
+      ]
+    }
+  ]
+}

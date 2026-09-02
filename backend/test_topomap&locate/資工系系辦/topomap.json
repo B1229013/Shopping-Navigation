@@ -1,0 +1,3302 @@
+{
+  "place_name": "資工系系辦",
+  "created_at": "2026-08-31T04:49:07.999970",
+  "updated_at": "2026-08-31T04:49:08.018964",
+  "next_id": 92,
+  "current_position": 83,
+  "position_history": [
+    0,
+    8,
+    15,
+    21,
+    27,
+    32,
+    38,
+    42,
+    48,
+    53,
+    57,
+    61,
+    64,
+    67,
+    74,
+    78,
+    83
+  ],
+  "nodes": [
+    {
+      "id": 0,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\0.jpg",
+      "photo_file": "0.jpg",
+      "timestamp": "2026-07-20T05:19:27.300340",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 1,
+      "ntype": "object",
+      "label": "glass door",
+      "label_norm": "glass door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 0,
+      "grid_cell": "left"
+    },
+    {
+      "id": 2,
+      "ntype": "object",
+      "label": "bulletin board",
+      "label_norm": "bulletin board",
+      "box": [
+        102.6,
+        606.4,
+        353.4,
+        993.6
+      ],
+      "score": 0.85,
+      "position": "left middle, far",
+      "ocr_text": "4F",
+      "role": "標示牌",
+      "photo_id": 0,
+      "grid_cell": "left"
+    },
+    {
+      "id": 3,
+      "ntype": "object",
+      "label": "table",
+      "label_norm": "table",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 0,
+      "grid_cell": "center"
+    },
+    {
+      "id": 4,
+      "ntype": "object",
+      "label": "trophies",
+      "label_norm": "trophies",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 0,
+      "grid_cell": "center"
+    },
+    {
+      "id": 5,
+      "ntype": "object",
+      "label": "plants",
+      "label_norm": "plants",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 0,
+      "grid_cell": "center"
+    },
+    {
+      "id": 6,
+      "ntype": "object",
+      "label": "lockers",
+      "label_norm": "lockers",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 0,
+      "grid_cell": "right"
+    },
+    {
+      "id": 7,
+      "ntype": "object",
+      "label": "sofa",
+      "label_norm": "sofa",
+      "box": [
+        846.6,
+        606.4,
+        1097.4,
+        993.6
+      ],
+      "score": 0.85,
+      "position": "right middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 0,
+      "grid_cell": "right"
+    },
+    {
+      "id": 8,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\1.jpg",
+      "photo_file": "1.jpg",
+      "timestamp": "2026-07-20T05:20:08.815902",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 9,
+      "ntype": "object",
+      "label": "bulletin board",
+      "label_norm": "bulletin board",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 8,
+      "grid_cell": "left"
+    },
+    {
+      "id": 10,
+      "ntype": "object",
+      "label": "table",
+      "label_norm": "table",
+      "box": [
+        360.00000000000006,
+        480.00000000000006,
+        840.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "center middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 8,
+      "grid_cell": "center"
+    },
+    {
+      "id": 11,
+      "ntype": "object",
+      "label": "plant",
+      "label_norm": "plant",
+      "box": [
+        360.00000000000006,
+        480.00000000000006,
+        840.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "center middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 8,
+      "grid_cell": "center"
+    },
+    {
+      "id": 12,
+      "ntype": "object",
+      "label": "couch",
+      "label_norm": "couch",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 8,
+      "grid_cell": "right"
+    },
+    {
+      "id": 13,
+      "ntype": "object",
+      "label": "cabinet",
+      "label_norm": "cabinet",
+      "box": [
+        846.6,
+        606.4,
+        1097.4,
+        993.6
+      ],
+      "score": 0.9,
+      "position": "right middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 8,
+      "grid_cell": "right"
+    },
+    {
+      "id": 14,
+      "ntype": "object",
+      "label": "posters",
+      "label_norm": "posters",
+      "box": [
+        846.6,
+        136.79999999999998,
+        1097.4,
+        471.2
+      ],
+      "score": 0.8,
+      "position": "right top, far",
+      "ocr_text": "2017",
+      "role": "標示牌",
+      "photo_id": 8,
+      "grid_cell": "top_right"
+    },
+    {
+      "id": 15,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\2.jpg",
+      "photo_file": "2.jpg",
+      "timestamp": "2026-07-20T05:20:57.001946",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 16,
+      "ntype": "object",
+      "label": "cabinet",
+      "label_norm": "cabinet",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "20",
+      "role": "標示牌",
+      "photo_id": 15,
+      "grid_cell": "left"
+    },
+    {
+      "id": 17,
+      "ntype": "object",
+      "label": "refrigerator",
+      "label_norm": "refrigerator",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 15,
+      "grid_cell": "left"
+    },
+    {
+      "id": 18,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.9,
+      "position": "center middle, far",
+      "ocr_text": "Inns",
+      "role": "標示牌",
+      "photo_id": 15,
+      "grid_cell": "center"
+    },
+    {
+      "id": 19,
+      "ntype": "object",
+      "label": "fire extinguisher",
+      "label_norm": "fire extinguisher",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 15,
+      "grid_cell": "center"
+    },
+    {
+      "id": 20,
+      "ntype": "object",
+      "label": "trash bin",
+      "label_norm": "trash bin",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 15,
+      "grid_cell": "center"
+    },
+    {
+      "id": 21,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\3.jpg",
+      "photo_file": "3.jpg",
+      "timestamp": "2026-07-20T05:21:31.426855",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 22,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 21,
+      "grid_cell": "left"
+    },
+    {
+      "id": 23,
+      "ntype": "object",
+      "label": "fire extinguisher",
+      "label_norm": "fire extinguisher",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 21,
+      "grid_cell": "left"
+    },
+    {
+      "id": 24,
+      "ntype": "object",
+      "label": "bucket",
+      "label_norm": "bucket",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.8,
+      "position": "right middle, near",
+      "ocr_text": "InnoServe",
+      "role": "標示牌",
+      "photo_id": 21,
+      "grid_cell": "right"
+    },
+    {
+      "id": 25,
+      "ntype": "object",
+      "label": "cabinet",
+      "label_norm": "cabinet",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 21,
+      "grid_cell": "right"
+    },
+    {
+      "id": 26,
+      "ntype": "object",
+      "label": "coffee machine",
+      "label_norm": "coffee machine",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.8,
+      "position": "right middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 21,
+      "grid_cell": "right"
+    },
+    {
+      "id": 27,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\4.jpg",
+      "photo_file": "4.jpg",
+      "timestamp": "2026-07-20T05:22:13.352904",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 28,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "消防栓",
+      "role": "標示牌",
+      "photo_id": 27,
+      "grid_cell": "left"
+    },
+    {
+      "id": 29,
+      "ntype": "object",
+      "label": "fire extinguisher",
+      "label_norm": "fire extinguisher",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 27,
+      "grid_cell": "left"
+    },
+    {
+      "id": 30,
+      "ntype": "object",
+      "label": "ceiling light",
+      "label_norm": "ceiling light",
+      "box": [
+        360.00000000000006,
+        32.0,
+        840.0,
+        576.0
+      ],
+      "score": 0.9,
+      "position": "center top, near",
+      "ocr_text": "黃崇活 教授",
+      "role": "標示牌",
+      "photo_id": 27,
+      "grid_cell": "top_center"
+    },
+    {
+      "id": 31,
+      "ntype": "object",
+      "label": "trash bin",
+      "label_norm": "trash bin",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.8,
+      "position": "right middle, near",
+      "ocr_text": "EXIT",
+      "role": "標示牌",
+      "photo_id": 27,
+      "grid_cell": "right"
+    },
+    {
+      "id": 32,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\5.jpg",
+      "photo_file": "5.jpg",
+      "timestamp": "2026-07-20T05:23:53.607459",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 33,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "李偉",
+      "role": "標示牌",
+      "photo_id": 32,
+      "grid_cell": "left"
+    },
+    {
+      "id": 34,
+      "ntype": "object",
+      "label": "trash bin",
+      "label_norm": "trash bin",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 32,
+      "grid_cell": "left"
+    },
+    {
+      "id": 35,
+      "ntype": "object",
+      "label": "trash bin",
+      "label_norm": "trash bin",
+      "box": [
+        360.00000000000006,
+        480.00000000000006,
+        840.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "center middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 32,
+      "grid_cell": "center"
+    },
+    {
+      "id": 36,
+      "ntype": "object",
+      "label": "trash bin",
+      "label_norm": "trash bin",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 32,
+      "grid_cell": "right"
+    },
+    {
+      "id": 37,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 32,
+      "grid_cell": "right"
+    },
+    {
+      "id": 38,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\6.jpg",
+      "photo_file": "6.jpg",
+      "timestamp": "2026-07-20T05:24:41.272833",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 39,
+      "ntype": "object",
+      "label": "trash bin",
+      "label_norm": "trash bin",
+      "box": [
+        24.0,
+        1024.0,
+        432.0,
+        1568.0
+      ],
+      "score": 0.8,
+      "position": "left bottom, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 38,
+      "grid_cell": "bottom_left"
+    },
+    {
+      "id": 40,
+      "ntype": "object",
+      "label": "trash bin",
+      "label_norm": "trash bin",
+      "box": [
+        454.8,
+        1128.8,
+        745.2,
+        1463.2
+      ],
+      "score": 0.8,
+      "position": "center bottom, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 38,
+      "grid_cell": "bottom_center"
+    },
+    {
+      "id": 41,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "會議室",
+      "role": "標示牌",
+      "photo_id": 38,
+      "grid_cell": "right"
+    },
+    {
+      "id": 42,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\7.jpg",
+      "photo_file": "7.jpg",
+      "timestamp": "2026-07-20T05:26:03.950997",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 43,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 42,
+      "grid_cell": "left"
+    },
+    {
+      "id": 44,
+      "ntype": "object",
+      "label": "trash bin",
+      "label_norm": "trash bin",
+      "box": [
+        24.0,
+        1024.0,
+        432.0,
+        1568.0
+      ],
+      "score": 0.8,
+      "position": "left bottom, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 42,
+      "grid_cell": "bottom_left"
+    },
+    {
+      "id": 45,
+      "ntype": "object",
+      "label": "trash bin",
+      "label_norm": "trash bin",
+      "box": [
+        102.6,
+        606.4,
+        353.4,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "left middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 42,
+      "grid_cell": "left"
+    },
+    {
+      "id": 46,
+      "ntype": "object",
+      "label": "trash bin",
+      "label_norm": "trash bin",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 42,
+      "grid_cell": "center"
+    },
+    {
+      "id": 47,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "404",
+      "role": "標示牌",
+      "photo_id": 42,
+      "grid_cell": "right"
+    },
+    {
+      "id": 48,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\8.jpg",
+      "photo_file": "8.jpg",
+      "timestamp": "2026-07-20T05:26:45.696918",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 49,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 48,
+      "grid_cell": "left"
+    },
+    {
+      "id": 50,
+      "ntype": "object",
+      "label": "trash can",
+      "label_norm": "trash can",
+      "box": [
+        24.0,
+        1024.0,
+        432.0,
+        1568.0
+      ],
+      "score": 0.9,
+      "position": "left bottom, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 48,
+      "grid_cell": "bottom_left"
+    },
+    {
+      "id": 51,
+      "ntype": "object",
+      "label": "trash can",
+      "label_norm": "trash can",
+      "box": [
+        768.0,
+        1024.0,
+        1176.0,
+        1568.0
+      ],
+      "score": 0.9,
+      "position": "right bottom, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 48,
+      "grid_cell": "bottom_right"
+    },
+    {
+      "id": 52,
+      "ntype": "object",
+      "label": "directional sign",
+      "label_norm": "sign",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.8,
+      "position": "right middle, near",
+      "ocr_text": "出口",
+      "role": "標示牌",
+      "photo_id": 48,
+      "grid_cell": "right"
+    },
+    {
+      "id": 53,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\9.jpg",
+      "photo_file": "9.jpg",
+      "timestamp": "2026-07-20T05:27:43.546619",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 54,
+      "ntype": "object",
+      "label": "refrigerator",
+      "label_norm": "refrigerator",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 53,
+      "grid_cell": "left"
+    },
+    {
+      "id": 55,
+      "ntype": "object",
+      "label": "fire extinguisher",
+      "label_norm": "fire extinguisher",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.8,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 53,
+      "grid_cell": "left"
+    },
+    {
+      "id": 56,
+      "ntype": "object",
+      "label": "cabinets",
+      "label_norm": "cabinets",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "EXIT",
+      "role": "標示牌",
+      "photo_id": 53,
+      "grid_cell": "right"
+    },
+    {
+      "id": 57,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\10.jpg",
+      "photo_file": "10.jpg",
+      "timestamp": "2026-07-20T05:28:44.525486",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 58,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.8,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 57,
+      "grid_cell": "left"
+    },
+    {
+      "id": 59,
+      "ntype": "object",
+      "label": "ceiling light",
+      "label_norm": "ceiling light",
+      "box": [
+        360.00000000000006,
+        32.0,
+        840.0,
+        576.0
+      ],
+      "score": 0.9,
+      "position": "center top, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 57,
+      "grid_cell": "top_center"
+    },
+    {
+      "id": 60,
+      "ntype": "object",
+      "label": "cabinet",
+      "label_norm": "cabinet",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "2023",
+      "role": "標示牌",
+      "photo_id": 57,
+      "grid_cell": "right"
+    },
+    {
+      "id": 61,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\11.jpg",
+      "photo_file": "11.jpg",
+      "timestamp": "2026-07-20T05:29:43.932167",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 62,
+      "ntype": "object",
+      "label": "corridor",
+      "label_norm": "corridor",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.9,
+      "position": "center middle, far",
+      "ocr_text": "出口",
+      "role": "標示牌",
+      "photo_id": 61,
+      "grid_cell": "center"
+    },
+    {
+      "id": 63,
+      "ntype": "object",
+      "label": "cabinet",
+      "label_norm": "cabinet",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 61,
+      "grid_cell": "right"
+    },
+    {
+      "id": 64,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\12.jpg",
+      "photo_file": "12.jpg",
+      "timestamp": "2026-07-20T05:32:03.852979",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 65,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 64,
+      "grid_cell": "left"
+    },
+    {
+      "id": 66,
+      "ntype": "object",
+      "label": "sign",
+      "label_norm": "sign",
+      "box": [
+        24.0,
+        32.0,
+        432.0,
+        576.0
+      ],
+      "score": 0.9,
+      "position": "left top, near",
+      "ocr_text": "李秀青 副教授",
+      "role": "標示牌",
+      "photo_id": 64,
+      "grid_cell": "top_left"
+    },
+    {
+      "id": 67,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\13.jpg",
+      "photo_file": "13.jpg",
+      "timestamp": "2026-07-20T05:33:27.094768",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 68,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 67,
+      "grid_cell": "left"
+    },
+    {
+      "id": 69,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        102.6,
+        606.4,
+        353.4,
+        993.6
+      ],
+      "score": 0.9,
+      "position": "left middle, far",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 67,
+      "grid_cell": "left"
+    },
+    {
+      "id": 70,
+      "ntype": "object",
+      "label": "sign",
+      "label_norm": "sign",
+      "box": [
+        24.0,
+        32.0,
+        432.0,
+        576.0
+      ],
+      "score": 0.8,
+      "position": "left top, near",
+      "ocr_text": "李季霖 副教授",
+      "role": "標示牌",
+      "photo_id": 67,
+      "grid_cell": "top_left"
+    },
+    {
+      "id": 71,
+      "ntype": "object",
+      "label": "fire extinguisher",
+      "label_norm": "fire extinguisher",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.7,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 67,
+      "grid_cell": "center"
+    },
+    {
+      "id": 72,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        846.6,
+        606.4,
+        1097.4,
+        993.6
+      ],
+      "score": 0.9,
+      "position": "right middle, far",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 67,
+      "grid_cell": "right"
+    },
+    {
+      "id": 73,
+      "ntype": "object",
+      "label": "sign",
+      "label_norm": "sign",
+      "box": [
+        846.6,
+        606.4,
+        1097.4,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "right middle, far",
+      "ocr_text": "",
+      "role": "標示牌",
+      "photo_id": 67,
+      "grid_cell": "right"
+    },
+    {
+      "id": 74,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\14.jpg",
+      "photo_file": "14.jpg",
+      "timestamp": "2026-07-20T05:34:03.318764",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 75,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 74,
+      "grid_cell": "left"
+    },
+    {
+      "id": 76,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 74,
+      "grid_cell": "right"
+    },
+    {
+      "id": 77,
+      "ntype": "object",
+      "label": "sign",
+      "label_norm": "sign",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.8,
+      "position": "right middle, near",
+      "ocr_text": "會議室",
+      "role": "標示牌",
+      "photo_id": 74,
+      "grid_cell": "right"
+    },
+    {
+      "id": 78,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\15.jpg",
+      "photo_file": "15.jpg",
+      "timestamp": "2026-07-20T05:36:27.120227",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 79,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "left middle, near",
+      "ocr_text": "林仲志教授",
+      "role": "標示牌",
+      "photo_id": 78,
+      "grid_cell": "left"
+    },
+    {
+      "id": 80,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        360.00000000000006,
+        480.00000000000006,
+        840.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "center middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 78,
+      "grid_cell": "center"
+    },
+    {
+      "id": 81,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "right middle, near",
+      "ocr_text": "",
+      "role": "環境",
+      "photo_id": 78,
+      "grid_cell": "right"
+    },
+    {
+      "id": 82,
+      "ntype": "object",
+      "label": "cabinet",
+      "label_norm": "cabinet",
+      "box": [
+        846.6,
+        606.4,
+        1097.4,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "right middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 78,
+      "grid_cell": "right"
+    },
+    {
+      "id": 83,
+      "ntype": "photo",
+      "photo_path": "D:\\university\\projects\\APPNAV-main\\backend\\output\\sessions\\47f03011\\photo\\16.jpg",
+      "photo_file": "16.jpg",
+      "timestamp": "2026-07-20T05:37:33.995350",
+      "sensor_data": {},
+      "region": null,
+      "is_virtual": false,
+      "note": ""
+    },
+    {
+      "id": 84,
+      "ntype": "object",
+      "label": "door",
+      "label_norm": "door",
+      "box": [
+        102.6,
+        606.4,
+        353.4,
+        993.6
+      ],
+      "score": 0.9,
+      "position": "left middle, far",
+      "ocr_text": "EXIT",
+      "role": "標示牌",
+      "photo_id": 83,
+      "grid_cell": "left"
+    },
+    {
+      "id": 85,
+      "ntype": "object",
+      "label": "sofa",
+      "label_norm": "sofa",
+      "box": [
+        360.00000000000006,
+        480.00000000000006,
+        840.0,
+        1120.0
+      ],
+      "score": 0.9,
+      "position": "center middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 83,
+      "grid_cell": "center"
+    },
+    {
+      "id": 86,
+      "ntype": "object",
+      "label": "desk",
+      "label_norm": "desk",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 83,
+      "grid_cell": "center"
+    },
+    {
+      "id": 87,
+      "ntype": "object",
+      "label": "computer",
+      "label_norm": "computer",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.7,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 83,
+      "grid_cell": "center"
+    },
+    {
+      "id": 88,
+      "ntype": "object",
+      "label": "chair",
+      "label_norm": "chair",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 83,
+      "grid_cell": "center"
+    },
+    {
+      "id": 89,
+      "ntype": "object",
+      "label": "filing cabinet",
+      "label_norm": "filing cabinet",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.9,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 83,
+      "grid_cell": "center"
+    },
+    {
+      "id": 90,
+      "ntype": "object",
+      "label": "trophies",
+      "label_norm": "trophies",
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "score": 0.8,
+      "position": "center middle, far",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 83,
+      "grid_cell": "center"
+    },
+    {
+      "id": 91,
+      "ntype": "object",
+      "label": "table",
+      "label_norm": "table",
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "score": 0.8,
+      "position": "right middle, near",
+      "ocr_text": "",
+      "role": "商品",
+      "photo_id": 83,
+      "grid_cell": "right"
+    }
+  ],
+  "edges": [
+    {
+      "from": 0,
+      "to": 1,
+      "key": "contains_1",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 0,
+      "to": 2,
+      "key": "contains_2",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 6.23,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 0,
+      "to": 3,
+      "key": "contains_3",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 0,
+      "to": 4,
+      "key": "contains_4",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 0,
+      "to": 5,
+      "key": "contains_5",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 0,
+      "to": 6,
+      "key": "contains_6",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 0,
+      "to": 7,
+      "key": "contains_7",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 6.23,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 0,
+      "to": 8,
+      "key": "walkway_0_8",
+      "etype": "walkway",
+      "direction": "請沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 1,
+      "to": 2,
+      "key": "adjacent_1_2",
+      "etype": "adjacent",
+      "relation": "glass door 在 bulletin board 的左側"
+    },
+    {
+      "from": 2,
+      "to": 1,
+      "key": "adjacent_2_1",
+      "etype": "adjacent",
+      "relation": "glass door 在 bulletin board 的左側"
+    },
+    {
+      "from": 2,
+      "to": 3,
+      "key": "adjacent_2_3",
+      "etype": "adjacent",
+      "relation": "bulletin board 在 table 的左側"
+    },
+    {
+      "from": 3,
+      "to": 2,
+      "key": "adjacent_3_2",
+      "etype": "adjacent",
+      "relation": "bulletin board 在 table 的左側"
+    },
+    {
+      "from": 3,
+      "to": 4,
+      "key": "adjacent_3_4",
+      "etype": "adjacent",
+      "relation": "table 在 trophies 的左側"
+    },
+    {
+      "from": 4,
+      "to": 3,
+      "key": "adjacent_4_3",
+      "etype": "adjacent",
+      "relation": "table 在 trophies 的左側"
+    },
+    {
+      "from": 4,
+      "to": 5,
+      "key": "adjacent_4_5",
+      "etype": "adjacent",
+      "relation": "trophies 在 plants 的左側"
+    },
+    {
+      "from": 5,
+      "to": 4,
+      "key": "adjacent_5_4",
+      "etype": "adjacent",
+      "relation": "trophies 在 plants 的左側"
+    },
+    {
+      "from": 5,
+      "to": 6,
+      "key": "adjacent_5_6",
+      "etype": "adjacent",
+      "relation": "plants 在 lockers 的左側"
+    },
+    {
+      "from": 6,
+      "to": 5,
+      "key": "adjacent_6_5",
+      "etype": "adjacent",
+      "relation": "plants 在 lockers 的左側"
+    },
+    {
+      "from": 6,
+      "to": 7,
+      "key": "adjacent_6_7",
+      "etype": "adjacent",
+      "relation": "lockers 在 sofa 的左側"
+    },
+    {
+      "from": 7,
+      "to": 6,
+      "key": "adjacent_7_6",
+      "etype": "adjacent",
+      "relation": "lockers 在 sofa 的左側"
+    },
+    {
+      "from": 8,
+      "to": 9,
+      "key": "contains_9",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 8,
+      "to": 10,
+      "key": "contains_10",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 3.5,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 8,
+      "to": 11,
+      "key": "contains_11",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 3.5,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 8,
+      "to": 12,
+      "key": "contains_12",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 8,
+      "to": 13,
+      "key": "contains_13",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 6.23,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 8,
+      "to": 14,
+      "key": "contains_14",
+      "etype": "contains_top_right",
+      "grid_cell": "top_right",
+      "distance_m": 6.7,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 8,
+      "to": 15,
+      "key": "walkway_8_15",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 9,
+      "to": 10,
+      "key": "adjacent_9_10",
+      "etype": "adjacent",
+      "relation": "bulletin board 在 table 的左側"
+    },
+    {
+      "from": 10,
+      "to": 9,
+      "key": "adjacent_10_9",
+      "etype": "adjacent",
+      "relation": "bulletin board 在 table 的左側"
+    },
+    {
+      "from": 10,
+      "to": 11,
+      "key": "adjacent_10_11",
+      "etype": "adjacent",
+      "relation": "table 在 plant 的左側"
+    },
+    {
+      "from": 11,
+      "to": 10,
+      "key": "adjacent_11_10",
+      "etype": "adjacent",
+      "relation": "table 在 plant 的左側"
+    },
+    {
+      "from": 11,
+      "to": 12,
+      "key": "adjacent_11_12",
+      "etype": "adjacent",
+      "relation": "plant 在 couch 的左側"
+    },
+    {
+      "from": 12,
+      "to": 11,
+      "key": "adjacent_12_11",
+      "etype": "adjacent",
+      "relation": "plant 在 couch 的左側"
+    },
+    {
+      "from": 12,
+      "to": 13,
+      "key": "adjacent_12_13",
+      "etype": "adjacent",
+      "relation": "couch 在 cabinet 的左側"
+    },
+    {
+      "from": 13,
+      "to": 12,
+      "key": "adjacent_13_12",
+      "etype": "adjacent",
+      "relation": "couch 在 cabinet 的左側"
+    },
+    {
+      "from": 13,
+      "to": 14,
+      "key": "adjacent_13_14",
+      "etype": "adjacent",
+      "relation": "cabinet 在 posters 的左側"
+    },
+    {
+      "from": 14,
+      "to": 13,
+      "key": "adjacent_14_13",
+      "etype": "adjacent",
+      "relation": "cabinet 在 posters 的左側"
+    },
+    {
+      "from": 15,
+      "to": 16,
+      "key": "contains_16",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 15,
+      "to": 17,
+      "key": "contains_17",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 15,
+      "to": 18,
+      "key": "contains_18",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 15,
+      "to": 19,
+      "key": "contains_19",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 15,
+      "to": 20,
+      "key": "contains_20",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 15,
+      "to": 21,
+      "key": "walkway_15_21",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 16,
+      "to": 17,
+      "key": "adjacent_16_17",
+      "etype": "adjacent",
+      "relation": "cabinet 在 refrigerator 的左側"
+    },
+    {
+      "from": 17,
+      "to": 16,
+      "key": "adjacent_17_16",
+      "etype": "adjacent",
+      "relation": "cabinet 在 refrigerator 的左側"
+    },
+    {
+      "from": 17,
+      "to": 18,
+      "key": "adjacent_17_18",
+      "etype": "adjacent",
+      "relation": "refrigerator 在 door 的左側"
+    },
+    {
+      "from": 18,
+      "to": 17,
+      "key": "adjacent_18_17",
+      "etype": "adjacent",
+      "relation": "refrigerator 在 door 的左側"
+    },
+    {
+      "from": 18,
+      "to": 19,
+      "key": "adjacent_18_19",
+      "etype": "adjacent",
+      "relation": "door 在 fire extinguisher 的左側"
+    },
+    {
+      "from": 19,
+      "to": 18,
+      "key": "adjacent_19_18",
+      "etype": "adjacent",
+      "relation": "door 在 fire extinguisher 的左側"
+    },
+    {
+      "from": 19,
+      "to": 20,
+      "key": "adjacent_19_20",
+      "etype": "adjacent",
+      "relation": "fire extinguisher 在 trash bin 的左側"
+    },
+    {
+      "from": 20,
+      "to": 19,
+      "key": "adjacent_20_19",
+      "etype": "adjacent",
+      "relation": "fire extinguisher 在 trash bin 的左側"
+    },
+    {
+      "from": 21,
+      "to": 22,
+      "key": "contains_22",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 21,
+      "to": 23,
+      "key": "contains_23",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 21,
+      "to": 24,
+      "key": "contains_24",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 21,
+      "to": 25,
+      "key": "contains_25",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 21,
+      "to": 26,
+      "key": "contains_26",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 21,
+      "to": 27,
+      "key": "walkway_21_27",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 22,
+      "to": 23,
+      "key": "adjacent_22_23",
+      "etype": "adjacent",
+      "relation": "door 在 fire extinguisher 的左側"
+    },
+    {
+      "from": 23,
+      "to": 22,
+      "key": "adjacent_23_22",
+      "etype": "adjacent",
+      "relation": "door 在 fire extinguisher 的左側"
+    },
+    {
+      "from": 23,
+      "to": 24,
+      "key": "adjacent_23_24",
+      "etype": "adjacent",
+      "relation": "fire extinguisher 在 bucket 的左側"
+    },
+    {
+      "from": 23,
+      "to": 29,
+      "key": "same_23_29",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 24,
+      "to": 23,
+      "key": "adjacent_24_23",
+      "etype": "adjacent",
+      "relation": "fire extinguisher 在 bucket 的左側"
+    },
+    {
+      "from": 24,
+      "to": 25,
+      "key": "adjacent_24_25",
+      "etype": "adjacent",
+      "relation": "bucket 在 cabinet 的左側"
+    },
+    {
+      "from": 25,
+      "to": 24,
+      "key": "adjacent_25_24",
+      "etype": "adjacent",
+      "relation": "bucket 在 cabinet 的左側"
+    },
+    {
+      "from": 25,
+      "to": 26,
+      "key": "adjacent_25_26",
+      "etype": "adjacent",
+      "relation": "cabinet 在 coffee machine 的左側"
+    },
+    {
+      "from": 26,
+      "to": 25,
+      "key": "adjacent_26_25",
+      "etype": "adjacent",
+      "relation": "cabinet 在 coffee machine 的左側"
+    },
+    {
+      "from": 27,
+      "to": 28,
+      "key": "contains_28",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 27,
+      "to": 29,
+      "key": "contains_29",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 27,
+      "to": 30,
+      "key": "contains_30",
+      "etype": "contains_top_center",
+      "grid_cell": "top_center",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 27,
+      "to": 31,
+      "key": "contains_31",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 27,
+      "to": 32,
+      "key": "walkway_27_32",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 28,
+      "to": 29,
+      "key": "adjacent_28_29",
+      "etype": "adjacent",
+      "relation": "door 在 fire extinguisher 的左側"
+    },
+    {
+      "from": 28,
+      "to": 33,
+      "key": "same_28_33",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 29,
+      "to": 28,
+      "key": "adjacent_29_28",
+      "etype": "adjacent",
+      "relation": "door 在 fire extinguisher 的左側"
+    },
+    {
+      "from": 29,
+      "to": 30,
+      "key": "adjacent_29_30",
+      "etype": "adjacent",
+      "relation": "fire extinguisher 在 ceiling light 的左側"
+    },
+    {
+      "from": 29,
+      "to": 23,
+      "key": "same_29_23",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 30,
+      "to": 29,
+      "key": "adjacent_30_29",
+      "etype": "adjacent",
+      "relation": "fire extinguisher 在 ceiling light 的左側"
+    },
+    {
+      "from": 30,
+      "to": 31,
+      "key": "adjacent_30_31",
+      "etype": "adjacent",
+      "relation": "ceiling light 在 trash bin 的左側"
+    },
+    {
+      "from": 31,
+      "to": 30,
+      "key": "adjacent_31_30",
+      "etype": "adjacent",
+      "relation": "ceiling light 在 trash bin 的左側"
+    },
+    {
+      "from": 31,
+      "to": 36,
+      "key": "same_31_36",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 32,
+      "to": 33,
+      "key": "contains_33",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 32,
+      "to": 34,
+      "key": "contains_34",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 32,
+      "to": 35,
+      "key": "contains_35",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 3.5,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 32,
+      "to": 36,
+      "key": "contains_36",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 32,
+      "to": 37,
+      "key": "contains_37",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 32,
+      "to": 38,
+      "key": "walkway_32_38",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 33,
+      "to": 34,
+      "key": "adjacent_33_34",
+      "etype": "adjacent",
+      "relation": "door 在 trash bin 的左側"
+    },
+    {
+      "from": 33,
+      "to": 28,
+      "key": "same_33_28",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 34,
+      "to": 33,
+      "key": "adjacent_34_33",
+      "etype": "adjacent",
+      "relation": "door 在 trash bin 的左側"
+    },
+    {
+      "from": 34,
+      "to": 35,
+      "key": "adjacent_34_35",
+      "etype": "adjacent",
+      "relation": "trash bin 在 trash bin 的左側"
+    },
+    {
+      "from": 35,
+      "to": 34,
+      "key": "adjacent_35_34",
+      "etype": "adjacent",
+      "relation": "trash bin 在 trash bin 的左側"
+    },
+    {
+      "from": 35,
+      "to": 36,
+      "key": "adjacent_35_36",
+      "etype": "adjacent",
+      "relation": "trash bin 在 trash bin 的左側"
+    },
+    {
+      "from": 36,
+      "to": 35,
+      "key": "adjacent_36_35",
+      "etype": "adjacent",
+      "relation": "trash bin 在 trash bin 的左側"
+    },
+    {
+      "from": 36,
+      "to": 37,
+      "key": "adjacent_36_37",
+      "etype": "adjacent",
+      "relation": "trash bin 在 door 的左側"
+    },
+    {
+      "from": 36,
+      "to": 31,
+      "key": "same_36_31",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 37,
+      "to": 36,
+      "key": "adjacent_37_36",
+      "etype": "adjacent",
+      "relation": "trash bin 在 door 的左側"
+    },
+    {
+      "from": 38,
+      "to": 39,
+      "key": "contains_39",
+      "etype": "contains_bottom_left",
+      "grid_cell": "bottom_left",
+      "distance_m": 4.12,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 38,
+      "to": 40,
+      "key": "contains_40",
+      "etype": "contains_bottom_center",
+      "grid_cell": "bottom_center",
+      "distance_m": 6.23,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 38,
+      "to": 41,
+      "key": "contains_41",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 38,
+      "to": 42,
+      "key": "walkway_38_42",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 39,
+      "to": 40,
+      "key": "adjacent_39_40",
+      "etype": "adjacent",
+      "relation": "trash bin 在 trash bin 的左側"
+    },
+    {
+      "from": 39,
+      "to": 44,
+      "key": "same_39_44",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 40,
+      "to": 39,
+      "key": "adjacent_40_39",
+      "etype": "adjacent",
+      "relation": "trash bin 在 trash bin 的左側"
+    },
+    {
+      "from": 40,
+      "to": 41,
+      "key": "adjacent_40_41",
+      "etype": "adjacent",
+      "relation": "trash bin 在 door 的左側"
+    },
+    {
+      "from": 41,
+      "to": 40,
+      "key": "adjacent_41_40",
+      "etype": "adjacent",
+      "relation": "trash bin 在 door 的左側"
+    },
+    {
+      "from": 41,
+      "to": 47,
+      "key": "same_41_47",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 42,
+      "to": 43,
+      "key": "contains_43",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 42,
+      "to": 44,
+      "key": "contains_44",
+      "etype": "contains_bottom_left",
+      "grid_cell": "bottom_left",
+      "distance_m": 4.12,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 42,
+      "to": 45,
+      "key": "contains_45",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 6.23,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 42,
+      "to": 46,
+      "key": "contains_46",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 42,
+      "to": 47,
+      "key": "contains_47",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 42,
+      "to": 48,
+      "key": "walkway_42_48",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 43,
+      "to": 44,
+      "key": "adjacent_43_44",
+      "etype": "adjacent",
+      "relation": "door 在 trash bin 的左側"
+    },
+    {
+      "from": 44,
+      "to": 43,
+      "key": "adjacent_44_43",
+      "etype": "adjacent",
+      "relation": "door 在 trash bin 的左側"
+    },
+    {
+      "from": 44,
+      "to": 45,
+      "key": "adjacent_44_45",
+      "etype": "adjacent",
+      "relation": "trash bin 在 trash bin 的左側"
+    },
+    {
+      "from": 44,
+      "to": 39,
+      "key": "same_44_39",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 45,
+      "to": 44,
+      "key": "adjacent_45_44",
+      "etype": "adjacent",
+      "relation": "trash bin 在 trash bin 的左側"
+    },
+    {
+      "from": 45,
+      "to": 46,
+      "key": "adjacent_45_46",
+      "etype": "adjacent",
+      "relation": "trash bin 在 trash bin 的左側"
+    },
+    {
+      "from": 46,
+      "to": 45,
+      "key": "adjacent_46_45",
+      "etype": "adjacent",
+      "relation": "trash bin 在 trash bin 的左側"
+    },
+    {
+      "from": 46,
+      "to": 47,
+      "key": "adjacent_46_47",
+      "etype": "adjacent",
+      "relation": "trash bin 在 door 的左側"
+    },
+    {
+      "from": 47,
+      "to": 46,
+      "key": "adjacent_47_46",
+      "etype": "adjacent",
+      "relation": "trash bin 在 door 的左側"
+    },
+    {
+      "from": 47,
+      "to": 41,
+      "key": "same_47_41",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 48,
+      "to": 49,
+      "key": "contains_49",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 48,
+      "to": 50,
+      "key": "contains_50",
+      "etype": "contains_bottom_left",
+      "grid_cell": "bottom_left",
+      "distance_m": 4.12,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 48,
+      "to": 51,
+      "key": "contains_51",
+      "etype": "contains_bottom_right",
+      "grid_cell": "bottom_right",
+      "distance_m": 4.12,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 48,
+      "to": 52,
+      "key": "contains_52",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 48,
+      "to": 53,
+      "key": "walkway_48_53",
+      "etype": "walkway",
+      "direction": "請向右轉，然後沿著走廊繼續走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 49,
+      "to": 50,
+      "key": "adjacent_49_50",
+      "etype": "adjacent",
+      "relation": "door 在 trash can 的左側"
+    },
+    {
+      "from": 50,
+      "to": 49,
+      "key": "adjacent_50_49",
+      "etype": "adjacent",
+      "relation": "door 在 trash can 的左側"
+    },
+    {
+      "from": 50,
+      "to": 51,
+      "key": "adjacent_50_51",
+      "etype": "adjacent",
+      "relation": "trash can 在 trash can 的左側"
+    },
+    {
+      "from": 51,
+      "to": 50,
+      "key": "adjacent_51_50",
+      "etype": "adjacent",
+      "relation": "trash can 在 trash can 的左側"
+    },
+    {
+      "from": 51,
+      "to": 52,
+      "key": "adjacent_51_52",
+      "etype": "adjacent",
+      "relation": "trash can 在 directional sign 的左側"
+    },
+    {
+      "from": 52,
+      "to": 51,
+      "key": "adjacent_52_51",
+      "etype": "adjacent",
+      "relation": "trash can 在 directional sign 的左側"
+    },
+    {
+      "from": 53,
+      "to": 54,
+      "key": "contains_54",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 53,
+      "to": 55,
+      "key": "contains_55",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 53,
+      "to": 56,
+      "key": "contains_56",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 53,
+      "to": 57,
+      "key": "walkway_53_57",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 54,
+      "to": 55,
+      "key": "adjacent_54_55",
+      "etype": "adjacent",
+      "relation": "refrigerator 在 fire extinguisher 的左側"
+    },
+    {
+      "from": 55,
+      "to": 54,
+      "key": "adjacent_55_54",
+      "etype": "adjacent",
+      "relation": "refrigerator 在 fire extinguisher 的左側"
+    },
+    {
+      "from": 55,
+      "to": 56,
+      "key": "adjacent_55_56",
+      "etype": "adjacent",
+      "relation": "fire extinguisher 在 cabinets 的左側"
+    },
+    {
+      "from": 56,
+      "to": 55,
+      "key": "adjacent_56_55",
+      "etype": "adjacent",
+      "relation": "fire extinguisher 在 cabinets 的左側"
+    },
+    {
+      "from": 57,
+      "to": 58,
+      "key": "contains_58",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 57,
+      "to": 59,
+      "key": "contains_59",
+      "etype": "contains_top_center",
+      "grid_cell": "top_center",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 57,
+      "to": 60,
+      "key": "contains_60",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 57,
+      "to": 61,
+      "key": "walkway_57_61",
+      "etype": "walkway",
+      "direction": "請轉身，然後沿著走廊返回，並拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 58,
+      "to": 59,
+      "key": "adjacent_58_59",
+      "etype": "adjacent",
+      "relation": "door 在 ceiling light 的左側"
+    },
+    {
+      "from": 59,
+      "to": 58,
+      "key": "adjacent_59_58",
+      "etype": "adjacent",
+      "relation": "door 在 ceiling light 的左側"
+    },
+    {
+      "from": 59,
+      "to": 60,
+      "key": "adjacent_59_60",
+      "etype": "adjacent",
+      "relation": "ceiling light 在 cabinet 的左側"
+    },
+    {
+      "from": 60,
+      "to": 59,
+      "key": "adjacent_60_59",
+      "etype": "adjacent",
+      "relation": "ceiling light 在 cabinet 的左側"
+    },
+    {
+      "from": 60,
+      "to": 63,
+      "key": "same_60_63",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 61,
+      "to": 62,
+      "key": "contains_62",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 61,
+      "to": 63,
+      "key": "contains_63",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 61,
+      "to": 64,
+      "key": "walkway_61_64",
+      "etype": "walkway",
+      "direction": "請轉身，然後沿著走廊返回，並拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 62,
+      "to": 63,
+      "key": "adjacent_62_63",
+      "etype": "adjacent",
+      "relation": "corridor 在 cabinet 的左側"
+    },
+    {
+      "from": 63,
+      "to": 62,
+      "key": "adjacent_63_62",
+      "etype": "adjacent",
+      "relation": "corridor 在 cabinet 的左側"
+    },
+    {
+      "from": 63,
+      "to": 60,
+      "key": "same_63_60",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 64,
+      "to": 65,
+      "key": "contains_65",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 64,
+      "to": 66,
+      "key": "contains_66",
+      "etype": "contains_top_left",
+      "grid_cell": "top_left",
+      "distance_m": 4.12,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 64,
+      "to": 67,
+      "key": "walkway_64_67",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 65,
+      "to": 66,
+      "key": "adjacent_65_66",
+      "etype": "adjacent",
+      "relation": "door 在 sign 的左側"
+    },
+    {
+      "from": 66,
+      "to": 65,
+      "key": "adjacent_66_65",
+      "etype": "adjacent",
+      "relation": "door 在 sign 的左側"
+    },
+    {
+      "from": 66,
+      "to": 70,
+      "key": "same_66_70",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 67,
+      "to": 68,
+      "key": "contains_68",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 67,
+      "to": 69,
+      "key": "contains_69",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 6.23,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 67,
+      "to": 70,
+      "key": "contains_70",
+      "etype": "contains_top_left",
+      "grid_cell": "top_left",
+      "distance_m": 4.12,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 67,
+      "to": 71,
+      "key": "contains_71",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 67,
+      "to": 72,
+      "key": "contains_72",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 6.23,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 67,
+      "to": 73,
+      "key": "contains_73",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 6.23,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 67,
+      "to": 74,
+      "key": "walkway_67_74",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 68,
+      "to": 69,
+      "key": "adjacent_68_69",
+      "etype": "adjacent",
+      "relation": "door 在 door 的左側"
+    },
+    {
+      "from": 69,
+      "to": 68,
+      "key": "adjacent_69_68",
+      "etype": "adjacent",
+      "relation": "door 在 door 的左側"
+    },
+    {
+      "from": 69,
+      "to": 70,
+      "key": "adjacent_69_70",
+      "etype": "adjacent",
+      "relation": "door 在 sign 的左側"
+    },
+    {
+      "from": 70,
+      "to": 69,
+      "key": "adjacent_70_69",
+      "etype": "adjacent",
+      "relation": "door 在 sign 的左側"
+    },
+    {
+      "from": 70,
+      "to": 71,
+      "key": "adjacent_70_71",
+      "etype": "adjacent",
+      "relation": "sign 在 fire extinguisher 的左側"
+    },
+    {
+      "from": 70,
+      "to": 66,
+      "key": "same_70_66",
+      "etype": "same_object",
+      "confidence": 0.6153846153846154,
+      "method": "label+position"
+    },
+    {
+      "from": 71,
+      "to": 70,
+      "key": "adjacent_71_70",
+      "etype": "adjacent",
+      "relation": "sign 在 fire extinguisher 的左側"
+    },
+    {
+      "from": 71,
+      "to": 72,
+      "key": "adjacent_71_72",
+      "etype": "adjacent",
+      "relation": "fire extinguisher 在 door 的左側"
+    },
+    {
+      "from": 72,
+      "to": 71,
+      "key": "adjacent_72_71",
+      "etype": "adjacent",
+      "relation": "fire extinguisher 在 door 的左側"
+    },
+    {
+      "from": 72,
+      "to": 73,
+      "key": "adjacent_72_73",
+      "etype": "adjacent",
+      "relation": "door 在 sign 的左側"
+    },
+    {
+      "from": 73,
+      "to": 72,
+      "key": "adjacent_73_72",
+      "etype": "adjacent",
+      "relation": "door 在 sign 的左側"
+    },
+    {
+      "from": 74,
+      "to": 75,
+      "key": "contains_75",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 74,
+      "to": 76,
+      "key": "contains_76",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 74,
+      "to": 77,
+      "key": "contains_77",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 74,
+      "to": 78,
+      "key": "walkway_74_78",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 75,
+      "to": 76,
+      "key": "adjacent_75_76",
+      "etype": "adjacent",
+      "relation": "door 在 door 的左側"
+    },
+    {
+      "from": 76,
+      "to": 75,
+      "key": "adjacent_76_75",
+      "etype": "adjacent",
+      "relation": "door 在 door 的左側"
+    },
+    {
+      "from": 76,
+      "to": 77,
+      "key": "adjacent_76_77",
+      "etype": "adjacent",
+      "relation": "door 在 sign 的左側"
+    },
+    {
+      "from": 77,
+      "to": 76,
+      "key": "adjacent_77_76",
+      "etype": "adjacent",
+      "relation": "door 在 sign 的左側"
+    },
+    {
+      "from": 78,
+      "to": 79,
+      "key": "contains_79",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 78,
+      "to": 80,
+      "key": "contains_80",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 3.5,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 78,
+      "to": 81,
+      "key": "contains_81",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 78,
+      "to": 82,
+      "key": "contains_82",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 6.23,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 78,
+      "to": 83,
+      "key": "walkway_78_83",
+      "etype": "walkway",
+      "direction": "請繼續沿著走廊直走，然後拍另一張照片。",
+      "distance_m": null
+    },
+    {
+      "from": 79,
+      "to": 80,
+      "key": "adjacent_79_80",
+      "etype": "adjacent",
+      "relation": "door 在 door 的左側"
+    },
+    {
+      "from": 80,
+      "to": 79,
+      "key": "adjacent_80_79",
+      "etype": "adjacent",
+      "relation": "door 在 door 的左側"
+    },
+    {
+      "from": 80,
+      "to": 81,
+      "key": "adjacent_80_81",
+      "etype": "adjacent",
+      "relation": "door 在 door 的左側"
+    },
+    {
+      "from": 81,
+      "to": 80,
+      "key": "adjacent_81_80",
+      "etype": "adjacent",
+      "relation": "door 在 door 的左側"
+    },
+    {
+      "from": 81,
+      "to": 82,
+      "key": "adjacent_81_82",
+      "etype": "adjacent",
+      "relation": "door 在 cabinet 的左側"
+    },
+    {
+      "from": 82,
+      "to": 81,
+      "key": "adjacent_82_81",
+      "etype": "adjacent",
+      "relation": "door 在 cabinet 的左側"
+    },
+    {
+      "from": 83,
+      "to": 84,
+      "key": "contains_84",
+      "etype": "contains_left",
+      "grid_cell": "left",
+      "distance_m": 6.23,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 83,
+      "to": 85,
+      "key": "contains_85",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 3.5,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 83,
+      "to": 86,
+      "key": "contains_86",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 83,
+      "to": 87,
+      "key": "contains_87",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 83,
+      "to": 88,
+      "key": "contains_88",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 83,
+      "to": 89,
+      "key": "contains_89",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 83,
+      "to": 90,
+      "key": "contains_90",
+      "etype": "contains_center",
+      "grid_cell": "center",
+      "distance_m": 5.79,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 83,
+      "to": 91,
+      "key": "contains_91",
+      "etype": "contains_right",
+      "grid_cell": "right",
+      "distance_m": 3.8,
+      "distance_source": "estimated"
+    },
+    {
+      "from": 83,
+      "to": 83,
+      "key": "facing_83",
+      "etype": "walkway",
+      "direction": "",
+      "distance_m": 0.0
+    },
+    {
+      "from": 84,
+      "to": 85,
+      "key": "adjacent_84_85",
+      "etype": "adjacent",
+      "relation": "door 在 sofa 的左側"
+    },
+    {
+      "from": 85,
+      "to": 84,
+      "key": "adjacent_85_84",
+      "etype": "adjacent",
+      "relation": "door 在 sofa 的左側"
+    },
+    {
+      "from": 85,
+      "to": 86,
+      "key": "adjacent_85_86",
+      "etype": "adjacent",
+      "relation": "sofa 在 desk 的左側"
+    },
+    {
+      "from": 86,
+      "to": 85,
+      "key": "adjacent_86_85",
+      "etype": "adjacent",
+      "relation": "sofa 在 desk 的左側"
+    },
+    {
+      "from": 86,
+      "to": 87,
+      "key": "adjacent_86_87",
+      "etype": "adjacent",
+      "relation": "desk 在 computer 的左側"
+    },
+    {
+      "from": 87,
+      "to": 86,
+      "key": "adjacent_87_86",
+      "etype": "adjacent",
+      "relation": "desk 在 computer 的左側"
+    },
+    {
+      "from": 87,
+      "to": 88,
+      "key": "adjacent_87_88",
+      "etype": "adjacent",
+      "relation": "computer 在 chair 的左側"
+    },
+    {
+      "from": 88,
+      "to": 87,
+      "key": "adjacent_88_87",
+      "etype": "adjacent",
+      "relation": "computer 在 chair 的左側"
+    },
+    {
+      "from": 88,
+      "to": 89,
+      "key": "adjacent_88_89",
+      "etype": "adjacent",
+      "relation": "chair 在 filing cabinet 的左側"
+    },
+    {
+      "from": 89,
+      "to": 88,
+      "key": "adjacent_89_88",
+      "etype": "adjacent",
+      "relation": "chair 在 filing cabinet 的左側"
+    },
+    {
+      "from": 89,
+      "to": 90,
+      "key": "adjacent_89_90",
+      "etype": "adjacent",
+      "relation": "filing cabinet 在 trophies 的左側"
+    },
+    {
+      "from": 90,
+      "to": 89,
+      "key": "adjacent_90_89",
+      "etype": "adjacent",
+      "relation": "filing cabinet 在 trophies 的左側"
+    },
+    {
+      "from": 90,
+      "to": 91,
+      "key": "adjacent_90_91",
+      "etype": "adjacent",
+      "relation": "trophies 在 table 的左側"
+    },
+    {
+      "from": 91,
+      "to": 90,
+      "key": "adjacent_91_90",
+      "etype": "adjacent",
+      "relation": "trophies 在 table 的左側"
+    }
+  ]
+}

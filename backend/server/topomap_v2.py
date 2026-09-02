@@ -188,6 +188,98 @@ def _bbox_center_x(box: List[float]) -> float:
     return (box[0] + box[2]) / 2.0
 
 
+def _ocr_bbox_center(ocr_item: dict) -> Optional[tuple]:
+    """算一筆 OCR 結果的中心點座標，相容兩種常見格式：四點多邊形
+    [[x,y],[x,y],[x,y],[x,y]]（VLM/EasyOCR 常見格式），或簡單矩形
+    [x1,y1,x2,y2]。抓不到座標就回傳 None。
+    """
+    bbox = ocr_item.get("bbox")
+    if not bbox:
+        return None
+    try:
+        if isinstance(bbox[0], (list, tuple)):
+            xs = [p[0] for p in bbox]
+            ys = [p[1] for p in bbox]
+            return sum(xs) / len(xs), sum(ys) / len(ys)
+        if len(bbox) == 4:
+            return (bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0
+    except (TypeError, IndexError, ZeroDivisionError):
+        pass
+    return None
+
+
+def _associate_ocr_with_detections(detections: List[dict], ocr_items: List[dict]) -> None:
+    """把 `ocr_items`（獨立的 OCR 結果清單）關聯到最近的物件，寫進該
+    物件字典的 "nameplate_text" 欄位（原地修改 `detections`）。
+
+    這一步是必要的：下面 `build_subgraph_from_detections()` 讀取物件
+    的 OCR 文字，只看 `det.get("nameplate_text") or det.get("ocr_text")`
+    ——也就是說物件字典本身必須先帶著這個欄位，光是把 `ocr_items` 傳
+    進函式參數並不會自動幫忙關聯（這個參數過去一直是「接了但沒用」的
+    狀態）。物件本身如果已經帶著 "nameplate_text"／"ocr_text"（例如
+    某些 VLM 輸出格式本來就會直接把文字寫在物件自己身上），不會被
+    覆蓋；每筆 OCR 只會關聯給距離最近的一個物件，避免同一段文字被
+    好幾個物件借用，稀釋掉判斷力。
+
+    距離「打平手」時（VLM 模式常見：好幾個不同物件共用同一個粗略模板
+    框，中心點完全一樣），不是隨便選排最前面那個，而是優先選標籤本身
+    比較像是「會承載文字」的物件（招牌、告示牌類），其次才照原本順序
+    ——同樣是打平手，一段文字關聯到「sign」會比關聯到「door」更合理。
+    """
+    if not ocr_items or not detections:
+        return
+
+    text_bearing_keywords = (
+        "sign", "board", "plaque", "notice", "menu", "poster",
+        "directional", "招牌", "標示", "告示",
+    )
+
+    det_centers = []
+    for d in detections:
+        box = d.get("box")
+        if box and len(box) == 4:
+            det_centers.append(((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0))
+        else:
+            det_centers.append(None)
+
+    for ocr_item in ocr_items:
+        text = str(ocr_item.get("text", "")).strip()
+        if not text:
+            continue
+        ocr_center = _ocr_bbox_center(ocr_item)
+        if ocr_center is None:
+            continue
+
+        # 先找出「距離最近」的最小距離值，再從所有打平手的候選裡，
+        # 依「標籤是否像招牌／告示牌」優先排序，選出最終要關聯的物件。
+        best_dist = None
+        for center in det_centers:
+            if center is None:
+                continue
+            dist = (center[0] - ocr_center[0]) ** 2 + (center[1] - ocr_center[1]) ** 2
+            if best_dist is None or dist < best_dist:
+                best_dist = dist
+        if best_dist is None:
+            continue
+
+        tied_indices = [
+            i for i, center in enumerate(det_centers)
+            if center is not None
+            and (center[0] - ocr_center[0]) ** 2 + (center[1] - ocr_center[1]) ** 2 == best_dist
+        ]
+        best_idx = min(
+            tied_indices,
+            key=lambda i: (
+                0 if any(kw in detections[i].get("label", "").lower() for kw in text_bearing_keywords) else 1,
+                i,
+            ),
+        )
+
+        det = detections[best_idx]
+        if not (det.get("nameplate_text") or det.get("ocr_text")):
+            det["nameplate_text"] = text
+
+
 def _bbox_iou(box_a: List[float], box_b: List[float]) -> float:
     """計算兩個 [x1,y1,x2,y2] 框的 IoU，用於同張照片內物件去重／關聯。"""
     if not box_a or not box_b:
@@ -599,6 +691,11 @@ class TopoGraphV2:
             依左至右排序後的物件節點 id 清單（方便呼叫端做跨照片關聯）。
         """
         ocr_items = ocr_items or []
+        # 把獨立的 OCR 結果關聯到最近的物件（見 _associate_ocr_with_detections()
+        # 說明）——修正之前「ocr_items 接了但沒真的用來關聯」的問題。
+        # 原地修改 detections 裡每個字典（補上 nameplate_text），不影響
+        # 呼叫端傳進來的原始物件參照以外的任何東西。
+        _associate_ocr_with_detections(detections, ocr_items)
 
         # 依 bbox 中心 x 座標由左至右排序，符合筆記「最好照著左至右排」的要求
         sorted_dets = sorted(detections, key=lambda d: _bbox_center_x(d.get("box", [])))

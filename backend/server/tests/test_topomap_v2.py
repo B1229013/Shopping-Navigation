@@ -1045,3 +1045,134 @@ def test_photo_node_spacing_is_tighter_with_reduced_min_gap_multiplier():
     dist_loose = math.hypot(pos_loose[ids[1]][0] - pos_loose[ids[0]][0],
                              pos_loose[ids[1]][1] - pos_loose[ids[0]][1])
     assert dist_tight < dist_loose
+
+
+# ── 找不到路徑的節點（leftover）排版：擺到版面外，不能疊到主圖 ──────
+
+def test_leftover_node_without_walkway_is_placed_outside_main_map_bounds():
+    """沒有走道邊連到主要分量的照片節點（例如外部呼叫端接了一個獨立
+    節點進來，locate_v2.py 的除錯圖就是這樣用），排版時應該被擺到整張
+    地圖版面外、留足夠安全距離的空白區域，不能疊到主路徑或任何物件群
+    上——早期版本只是貼著起點挪一點點小偏移，起點旁邊本來就有自己的
+    物件群展開，小偏移量完全不夠，會直接疊到主路徑的節點/物件上。
+    """
+    topo = TopoGraphV2("測試場所")
+    ids = [topo.add_photo_node(f"p{i}.jpg") for i in range(3)]
+    for i in range(2):
+        topo.add_walkway_edge(ids[i], ids[i + 1], direction="請繼續直走。")
+    for pid in ids:
+        topo.build_subgraph_from_detections(
+            pid, [{"label": "desk", "box": [100, 100, 300, 300]}], 900, 600,
+        )
+
+    # 完全沒有走道邊連接的獨立節點（模擬 locate_v2.py 除錯圖的查詢節點）
+    leftover = topo.add_photo_node("lonely.jpg")
+    topo.build_subgraph_from_detections(
+        leftover, [{"label": "sofa", "box": [100, 100, 300, 300]}], 900, 600,
+    )
+
+    pos, sizes, _heading = topo._layout_positions()
+
+    # 算出「除了 leftover 以外」所有節點的邊界框
+    other_ids = [n for n in pos if n != leftover]
+    xs_min = min(pos[n][0] - sizes[n][0] / 2 for n in other_ids)
+    xs_max = max(pos[n][0] + sizes[n][0] / 2 for n in other_ids)
+    ys_min = min(pos[n][1] - sizes[n][1] / 2 for n in other_ids)
+    ys_max = max(pos[n][1] + sizes[n][1] / 2 for n in other_ids)
+
+    lx, ly = pos[leftover]
+    lw, lh = sizes[leftover]
+    leftover_box = (lx - lw / 2, lx + lw / 2, ly - lh / 2, ly + lh / 2)
+
+    # leftover 的方塊跟「其餘所有節點的邊界框」不能有任何重疊
+    no_overlap = (
+        leftover_box[1] < xs_min or leftover_box[0] > xs_max
+        or leftover_box[3] < ys_min or leftover_box[2] > ys_max
+    )
+    assert no_overlap, (
+        f"leftover 節點的方塊 {leftover_box} 跟主圖邊界框 "
+        f"x=({xs_min},{xs_max}) y=({ys_min},{ys_max}) 有重疊"
+    )
+
+
+# ── OCR 關聯到最近物件（build_subgraph_from_detections 的 ocr_items）──
+
+def test_ocr_items_are_associated_to_nearest_object_by_position():
+    """`ocr_items` 這個參數過去接了但完全沒被使用——物件要有 OCR 文字，
+    必須是物件字典本身就帶著 "nameplate_text"，光傳一份獨立的 OCR
+    清單進來不會自動關聯。這個測試驗證關聯邏輯真的有生效：一筆 OCR
+    結果的座標離哪個物件最近，就該被寫進那個物件的 ocr_text。
+    """
+    topo = TopoGraphV2("測試場所")
+    p = topo.add_photo_node("p.jpg")
+    detections = [
+        {"label": "cabinet", "box": [0, 0, 100, 100], "score": 0.9},
+        {"label": "sign", "box": [500, 500, 600, 600], "score": 0.8},
+    ]
+    ocr_items = [
+        {"text": "乳製品區", "bbox": [[510, 510], [590, 510], [590, 590], [510, 590]]},
+    ]
+    object_ids = topo.build_subgraph_from_detections(p, detections, 900, 600, ocr_items=ocr_items)
+
+    objs = {topo.graph.nodes[oid]["label"]: topo.graph.nodes[oid] for oid in object_ids}
+    assert objs["sign"]["ocr_text"] == "乳製品區"
+    assert objs["cabinet"]["ocr_text"] == ""
+
+
+def test_structural_object_with_associated_ocr_is_classified_as_sign_not_structure():
+    """一扇門本身會被 `classify_role()` 判定成環境結構物，但如果透過
+    `ocr_items` 關聯到了 OCR 文字（例如貼著房間名稱的門牌），角色應該
+    變成「標示牌」，不是「環境結構物」——`classify_role()` 判斷角色時，
+    有沒有 OCR 文字的優先順序比標籤本身的關鍵字更高。
+    """
+    topo = TopoGraphV2("測試場所")
+    p = topo.add_photo_node("p.jpg")
+    detections = [
+        {"label": "door", "box": [0, 0, 100, 100], "score": 0.9},
+    ]
+    ocr_items = [
+        {"text": "會議室", "bbox": [[10, 10], [90, 10], [90, 90], [10, 90]]},
+    ]
+    object_ids = topo.build_subgraph_from_detections(p, detections, 900, 600, ocr_items=ocr_items)
+
+    door_obj = topo.graph.nodes[object_ids[0]]
+    assert door_obj["ocr_text"] == "會議室"
+    assert door_obj["role"] == ROLE_SIGN
+
+
+def test_ocr_association_does_not_overwrite_existing_nameplate_text():
+    """物件字典自己本來就帶著 "nameplate_text"（例如某些 VLM 輸出格式
+    本來就會直接把文字寫在物件自己身上）時，不該被 `ocr_items` 的關聯
+    結果覆蓋掉。
+    """
+    topo = TopoGraphV2("測試場所")
+    p = topo.add_photo_node("p.jpg")
+    detections = [
+        {"label": "sign", "box": [0, 0, 100, 100], "score": 0.9, "nameplate_text": "原本的文字"},
+    ]
+    ocr_items = [
+        {"text": "不該蓋過去的文字", "bbox": [[10, 10], [90, 10], [90, 90], [10, 90]]},
+    ]
+    object_ids = topo.build_subgraph_from_detections(p, detections, 900, 600, ocr_items=ocr_items)
+    assert topo.graph.nodes[object_ids[0]]["ocr_text"] == "原本的文字"
+
+
+def test_ocr_association_ties_prefer_sign_like_labels():
+    """VLM 模式常見：好幾個不同物件共用完全相同的座標（粗略模板框）。
+    這種情況下 OCR 文字距離「打平手」，不該隨便選排最前面那個，而是
+    優先關聯給標籤本身比較像招牌／告示牌的物件。
+    """
+    topo = TopoGraphV2("測試場所")
+    p = topo.add_photo_node("p.jpg")
+    same_box = [100, 100, 200, 200]
+    detections = [
+        {"label": "door", "box": same_box, "score": 0.9},
+        {"label": "sign", "box": same_box, "score": 0.8},
+    ]
+    ocr_items = [
+        {"text": "會議室", "bbox": [[100, 100], [200, 100], [200, 200], [100, 200]]},
+    ]
+    object_ids = topo.build_subgraph_from_detections(p, detections, 900, 600, ocr_items=ocr_items)
+    objs = {topo.graph.nodes[oid]["label"]: topo.graph.nodes[oid] for oid in object_ids}
+    assert objs["sign"]["ocr_text"] == "會議室"
+    assert objs["door"]["ocr_text"] == ""

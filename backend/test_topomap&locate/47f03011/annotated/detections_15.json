@@ -1,0 +1,103 @@
+{
+  "node_id": 15,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "door_1",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "left middle, near"
+    },
+    {
+      "id": "door_2",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        360.00000000000006,
+        480.00000000000006,
+        840.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "center middle, near"
+    },
+    {
+      "id": "door_3",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "context": "在cabinet上",
+      "position": "right middle, near"
+    },
+    {
+      "id": "cabinet",
+      "label": "cabinet",
+      "score": 0.8,
+      "box": [
+        846.6,
+        606.4,
+        1097.4,
+        993.6
+      ],
+      "position": "right middle, far"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "林仲志教授",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          24.0,
+          480.00000000000006
+        ],
+        [
+          432.0,
+          480.00000000000006
+        ],
+        [
+          432.0,
+          1120.0
+        ],
+        [
+          24.0,
+          1120.0
+        ]
+      ]
+    },
+    {
+      "text": "15",
+      "confidence": 0.8,
+      "bbox": [
+        [
+          24.0,
+          480.00000000000006
+        ],
+        [
+          432.0,
+          480.00000000000006
+        ],
+        [
+          432.0,
+          1120.0
+        ],
+        [
+          24.0,
+          1120.0
+        ]
+      ]
+    }
+  ]
+}

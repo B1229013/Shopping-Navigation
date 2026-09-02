@@ -1,0 +1,114 @@
+{
+  "node_id": 3,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "door",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "position": "left middle, near"
+    },
+    {
+      "id": "fire extinguisher",
+      "label": "fire extinguisher",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "position": "left middle, near"
+    },
+    {
+      "id": "bucket",
+      "label": "bucket",
+      "score": 0.8,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "context": "在cabinet上",
+      "position": "right middle, near"
+    },
+    {
+      "id": "cabinet",
+      "label": "cabinet",
+      "score": 0.9,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "position": "right middle, near"
+    },
+    {
+      "id": "coffee machine",
+      "label": "coffee machine",
+      "score": 0.8,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "context": "在cabinet上",
+      "position": "right middle, near"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "InnoServe",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          768.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          1120.0
+        ],
+        [
+          768.0,
+          1120.0
+        ]
+      ]
+    },
+    {
+      "text": "Award's",
+      "confidence": 0.8,
+      "bbox": [
+        [
+          768.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          1120.0
+        ],
+        [
+          768.0,
+          1120.0
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,129 @@
+{
+  "node_id": 16,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "sofa",
+      "label": "sofa",
+      "score": 0.9,
+      "box": [
+        360.00000000000006,
+        480.00000000000006,
+        840.0,
+        1120.0
+      ],
+      "position": "center middle, near"
+    },
+    {
+      "id": "table",
+      "label": "table",
+      "score": 0.8,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "position": "right middle, near"
+    },
+    {
+      "id": "desk",
+      "label": "desk",
+      "score": 0.8,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "position": "center middle, far"
+    },
+    {
+      "id": "computer",
+      "label": "computer",
+      "score": 0.7,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "context": "在sofa上",
+      "position": "center middle, far"
+    },
+    {
+      "id": "chair",
+      "label": "chair",
+      "score": 0.8,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "position": "center middle, far"
+    },
+    {
+      "id": "filing cabinet",
+      "label": "filing cabinet",
+      "score": 0.9,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "position": "center middle, far"
+    },
+    {
+      "id": "trophies",
+      "label": "trophies",
+      "score": 0.8,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "context": "在sofa上",
+      "position": "center middle, far"
+    },
+    {
+      "id": "door",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        102.6,
+        606.4,
+        353.4,
+        993.6
+      ],
+      "same_entity": true,
+      "position": "left middle, far"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "EXIT",
+      "confidence": 0.8,
+      "bbox": [
+        [
+          24.0,
+          32.0
+        ],
+        [
+          432.0,
+          32.0
+        ],
+        [
+          432.0,
+          576.0
+        ],
+        [
+          24.0,
+          576.0
+        ]
+      ]
+    }
+  ]
+}

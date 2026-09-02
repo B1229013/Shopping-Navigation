@@ -1,0 +1,68 @@
+{
+  "node_id": 6,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "door",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "right middle, near"
+    },
+    {
+      "id": "trash bin_1",
+      "label": "trash bin",
+      "score": 0.8,
+      "box": [
+        24.0,
+        1024.0,
+        432.0,
+        1568.0
+      ],
+      "same_entity": true,
+      "position": "left bottom, near"
+    },
+    {
+      "id": "trash bin_2",
+      "label": "trash bin",
+      "score": 0.8,
+      "box": [
+        454.8,
+        1128.8,
+        745.2,
+        1463.2
+      ],
+      "position": "center bottom, far"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "會議室",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          768.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          1120.0
+        ],
+        [
+          768.0,
+          1120.0
+        ]
+      ]
+    }
+  ]
+}

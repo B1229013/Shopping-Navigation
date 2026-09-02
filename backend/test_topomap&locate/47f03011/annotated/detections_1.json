@@ -1,0 +1,128 @@
+{
+  "node_id": 1,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "couch",
+      "label": "couch",
+      "score": 0.9,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "context": "在cabinet上",
+      "position": "right middle, near"
+    },
+    {
+      "id": "table",
+      "label": "table",
+      "score": 0.9,
+      "box": [
+        360.00000000000006,
+        480.00000000000006,
+        840.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "center middle, near"
+    },
+    {
+      "id": "plant",
+      "label": "plant",
+      "score": 0.9,
+      "box": [
+        360.00000000000006,
+        480.00000000000006,
+        840.0,
+        1120.0
+      ],
+      "context": "在table上",
+      "position": "center middle, near"
+    },
+    {
+      "id": "cabinet",
+      "label": "cabinet",
+      "score": 0.9,
+      "box": [
+        846.6,
+        606.4,
+        1097.4,
+        993.6
+      ],
+      "position": "right middle, far"
+    },
+    {
+      "id": "posters",
+      "label": "posters",
+      "score": 0.8,
+      "box": [
+        846.6,
+        136.79999999999998,
+        1097.4,
+        471.2
+      ],
+      "position": "right top, far"
+    },
+    {
+      "id": "bulletin board",
+      "label": "bulletin board",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "left middle, near"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "2017",
+      "confidence": 0.8,
+      "bbox": [
+        [
+          846.6,
+          136.79999999999998
+        ],
+        [
+          1097.4,
+          136.79999999999998
+        ],
+        [
+          1097.4,
+          471.2
+        ],
+        [
+          846.6,
+          471.2
+        ]
+      ]
+    },
+    {
+      "text": "服務",
+      "confidence": 0.7,
+      "bbox": [
+        [
+          846.6,
+          136.79999999999998
+        ],
+        [
+          1097.4,
+          136.79999999999998
+        ],
+        [
+          1097.4,
+          471.2
+        ],
+        [
+          846.6,
+          471.2
+        ]
+      ]
+    }
+  ]
+}

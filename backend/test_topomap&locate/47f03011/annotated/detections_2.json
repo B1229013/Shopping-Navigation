@@ -1,0 +1,135 @@
+{
+  "node_id": 2,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "cabinet",
+      "label": "cabinet",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "position": "left middle, near"
+    },
+    {
+      "id": "refrigerator",
+      "label": "refrigerator",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "context": "在cabinet上",
+      "position": "left middle, near"
+    },
+    {
+      "id": "door",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "position": "center middle, far"
+    },
+    {
+      "id": "fire extinguisher",
+      "label": "fire extinguisher",
+      "score": 0.8,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "position": "center middle, far"
+    },
+    {
+      "id": "trash bin",
+      "label": "trash bin",
+      "score": 0.8,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "position": "center middle, far"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "20",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          24.0,
+          32.0
+        ],
+        [
+          432.0,
+          32.0
+        ],
+        [
+          432.0,
+          576.0
+        ],
+        [
+          24.0,
+          576.0
+        ]
+      ]
+    },
+    {
+      "text": "20",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          24.0,
+          32.0
+        ],
+        [
+          432.0,
+          32.0
+        ],
+        [
+          432.0,
+          576.0
+        ],
+        [
+          24.0,
+          576.0
+        ]
+      ]
+    },
+    {
+      "text": "Inns",
+      "confidence": 0.7,
+      "bbox": [
+        [
+          768.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          1120.0
+        ],
+        [
+          768.0,
+          1120.0
+        ]
+      ]
+    }
+  ]
+}

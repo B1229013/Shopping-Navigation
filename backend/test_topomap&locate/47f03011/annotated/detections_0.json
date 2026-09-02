@@ -1,0 +1,117 @@
+{
+  "node_id": 0,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "glass door",
+      "label": "glass door",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "position": "left middle, near"
+    },
+    {
+      "id": "bulletin board",
+      "label": "bulletin board",
+      "score": 0.85,
+      "box": [
+        102.6,
+        606.4,
+        353.4,
+        993.6
+      ],
+      "position": "left middle, far"
+    },
+    {
+      "id": "lockers",
+      "label": "lockers",
+      "score": 0.9,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "context": "在sofa上",
+      "position": "right middle, near"
+    },
+    {
+      "id": "sofa",
+      "label": "sofa",
+      "score": 0.85,
+      "box": [
+        846.6,
+        606.4,
+        1097.4,
+        993.6
+      ],
+      "position": "right middle, far"
+    },
+    {
+      "id": "table",
+      "label": "table",
+      "score": 0.8,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "position": "center middle, far"
+    },
+    {
+      "id": "trophies",
+      "label": "trophies",
+      "score": 0.8,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "context": "在table上",
+      "position": "center middle, far"
+    },
+    {
+      "id": "plants",
+      "label": "plants",
+      "score": 0.8,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "context": "在table上",
+      "position": "center middle, far"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "4F",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          24.0,
+          32.0
+        ],
+        [
+          432.0,
+          32.0
+        ],
+        [
+          432.0,
+          576.0
+        ],
+        [
+          24.0,
+          576.0
+        ]
+      ]
+    }
+  ]
+}

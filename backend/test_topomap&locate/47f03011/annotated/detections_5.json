@@ -1,0 +1,114 @@
+{
+  "node_id": 5,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "door_1",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "left middle, near"
+    },
+    {
+      "id": "trash bin_1",
+      "label": "trash bin",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "position": "left middle, near"
+    },
+    {
+      "id": "trash bin_2",
+      "label": "trash bin",
+      "score": 0.9,
+      "box": [
+        360.00000000000006,
+        480.00000000000006,
+        840.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "center middle, near"
+    },
+    {
+      "id": "trash bin_3",
+      "label": "trash bin",
+      "score": 0.9,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "position": "right middle, near"
+    },
+    {
+      "id": "door_2",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "position": "right middle, near"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "李偉",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          24.0,
+          32.0
+        ],
+        [
+          432.0,
+          32.0
+        ],
+        [
+          432.0,
+          576.0
+        ],
+        [
+          24.0,
+          576.0
+        ]
+      ]
+    },
+    {
+      "text": "副教授",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          24.0,
+          32.0
+        ],
+        [
+          432.0,
+          32.0
+        ],
+        [
+          432.0,
+          576.0
+        ],
+        [
+          24.0,
+          576.0
+        ]
+      ]
+    }
+  ]
+}

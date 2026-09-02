@@ -1,0 +1,54 @@
+{
+  "node_id": 12,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "door",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "position": "left middle, near"
+    },
+    {
+      "id": "sign",
+      "label": "sign",
+      "score": 0.9,
+      "box": [
+        24.0,
+        32.0,
+        432.0,
+        576.0
+      ],
+      "position": "left top, near"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "李秀青 副教授",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          24.0,
+          32.0
+        ],
+        [
+          432.0,
+          32.0
+        ],
+        [
+          432.0,
+          576.0
+        ],
+        [
+          24.0,
+          576.0
+        ]
+      ]
+    }
+  ]
+}

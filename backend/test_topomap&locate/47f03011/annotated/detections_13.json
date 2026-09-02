@@ -1,0 +1,104 @@
+{
+  "node_id": 13,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "door_1",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "left middle, near"
+    },
+    {
+      "id": "door_2",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        102.6,
+        606.4,
+        353.4,
+        993.6
+      ],
+      "position": "left middle, far"
+    },
+    {
+      "id": "door_3",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        846.6,
+        606.4,
+        1097.4,
+        993.6
+      ],
+      "position": "right middle, far"
+    },
+    {
+      "id": "sign_1",
+      "label": "sign",
+      "score": 0.8,
+      "box": [
+        24.0,
+        32.0,
+        432.0,
+        576.0
+      ],
+      "same_entity": true,
+      "position": "left top, near"
+    },
+    {
+      "id": "sign_2",
+      "label": "sign",
+      "score": 0.8,
+      "box": [
+        846.6,
+        606.4,
+        1097.4,
+        993.6
+      ],
+      "position": "right middle, far"
+    },
+    {
+      "id": "fire extinguisher",
+      "label": "fire extinguisher",
+      "score": 0.7,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "position": "center middle, far"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "李季霖 副教授",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          24.0,
+          32.0
+        ],
+        [
+          432.0,
+          32.0
+        ],
+        [
+          432.0,
+          576.0
+        ],
+        [
+          24.0,
+          576.0
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "node_id": 7,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "door_1",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "right middle, near"
+    },
+    {
+      "id": "door_2",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "position": "left middle, near"
+    },
+    {
+      "id": "trash bin_1",
+      "label": "trash bin",
+      "score": 0.8,
+      "box": [
+        24.0,
+        1024.0,
+        432.0,
+        1568.0
+      ],
+      "same_entity": true,
+      "position": "left bottom, near"
+    },
+    {
+      "id": "trash bin_2",
+      "label": "trash bin",
+      "score": 0.8,
+      "box": [
+        102.6,
+        606.4,
+        353.4,
+        993.6
+      ],
+      "position": "left middle, far"
+    },
+    {
+      "id": "trash bin_3",
+      "label": "trash bin",
+      "score": 0.8,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "position": "center middle, far"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "404",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          768.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          1120.0
+        ],
+        [
+          768.0,
+          1120.0
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,124 @@
+{
+  "node_id": 4,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "door",
+      "label": "door",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "left middle, near"
+    },
+    {
+      "id": "fire extinguisher",
+      "label": "fire extinguisher",
+      "score": 0.9,
+      "box": [
+        24.0,
+        480.00000000000006,
+        432.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "left middle, near"
+    },
+    {
+      "id": "trash bin",
+      "label": "trash bin",
+      "score": 0.8,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "position": "right middle, near"
+    },
+    {
+      "id": "ceiling light",
+      "label": "ceiling light",
+      "score": 0.9,
+      "box": [
+        360.00000000000006,
+        32.0,
+        840.0,
+        576.0
+      ],
+      "position": "center top, near"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "黃崇活 教授",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          24.0,
+          32.0
+        ],
+        [
+          432.0,
+          32.0
+        ],
+        [
+          432.0,
+          576.0
+        ],
+        [
+          24.0,
+          576.0
+        ]
+      ]
+    },
+    {
+      "text": "消防栓",
+      "confidence": 0.8,
+      "bbox": [
+        [
+          24.0,
+          480.00000000000006
+        ],
+        [
+          432.0,
+          480.00000000000006
+        ],
+        [
+          432.0,
+          1120.0
+        ],
+        [
+          24.0,
+          1120.0
+        ]
+      ]
+    },
+    {
+      "text": "EXIT",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          768.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          480.00000000000006
+        ],
+        [
+          1176.0,
+          1120.0
+        ],
+        [
+          768.0,
+          1120.0
+        ]
+      ]
+    }
+  ]
+}

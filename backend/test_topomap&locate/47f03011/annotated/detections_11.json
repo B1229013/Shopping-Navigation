@@ -1,0 +1,55 @@
+{
+  "node_id": 11,
+  "goal": "電腦 x1",
+  "detections": [
+    {
+      "id": "cabinet",
+      "label": "cabinet",
+      "score": 0.9,
+      "box": [
+        768.0,
+        480.00000000000006,
+        1176.0,
+        1120.0
+      ],
+      "same_entity": true,
+      "position": "right middle, near"
+    },
+    {
+      "id": "corridor",
+      "label": "corridor",
+      "score": 0.9,
+      "box": [
+        454.8,
+        606.4,
+        745.2,
+        993.6
+      ],
+      "position": "center middle, far"
+    }
+  ],
+  "ocr": [
+    {
+      "text": "出口",
+      "confidence": 0.9,
+      "bbox": [
+        [
+          24.0,
+          480.00000000000006
+        ],
+        [
+          432.0,
+          480.00000000000006
+        ],
+        [
+          432.0,
+          1120.0
+        ],
+        [
+          24.0,
+          1120.0
+        ]
+      ]
+    }
+  ]
+}

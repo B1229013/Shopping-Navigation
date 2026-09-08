@@ -53,6 +53,10 @@ it most likely corresponds to.
         --goal "尋找電腦"        可選：VLM 模式下要不要帶入導航目標（跟
                                 系統實際導航時的 goal 概念一樣，沒有的話
                                 留空即可，通用場景描述不受影響）
+        --detect-runs 3          可選：跑幾次偵測再合併（預設 1）。VLM
+                                每次觀察細節不完全一樣，容易造成信心分數
+                                波動，設成 2~3 用多輪合併降低這個波動
+                                （見下方「多輪偵測合併」說明）
 
 ════════════════════════════════════════════════════════════════════════════
 偵測模式 (Detection modes)
@@ -75,6 +79,29 @@ it most likely corresponds to.
 `--detect-mode auto` 會模擬 `server.py` 的行為：優先嘗試 GroundingDINO，
 失敗（沒裝 torch/模型權重）才退回 VLM；`--detect-mode groundingdino`
 強制只用 GroundingDINO，失敗就直接報錯，不會偷偷退回 VLM。
+
+════════════════════════════════════════════════════════════════════════════
+多輪偵測合併 (Multi-run detection merging)
+════════════════════════════════════════════════════════════════════════════
+實測發現：同一張照片、同一支程式，VLM 模式連續跑三次，分別偵測到
+5、7、7 個物件，其中一次漏讀了門上的 OCR 文字——這不是隨機亂猜，核心
+物件（desk/chair/sofa 這種明顯的東西）三次配對到的都是同一批，但
+「有沒有順手多注意到一兩樣東西、有沒有讀到某段文字」每次會有出入，
+導致最終信心分數在 55%~75% 之間跳動（見對話紀錄）。這是 VLM（語言
+模型）本身的特性，不是這支工具的 bug——GroundingDINO 模式已經驗證過
+「同一張圖連續跑兩次，結果位元級相同」，只有 VLM 模式才有這個問題。
+
+`--detect-runs N`（N>1）讓 CLI 真的把偵測重複跑 N 次（各自獨立呼叫
+模型，會花 N 倍的時間／API 額度），再用「標籤＋畫面位置」當作判斷
+「是不是同一個實體」的依據，把 N 輪結果合併成一份：物件清單取的是
+**聯集**（只出現在部分輪次的物件一樣會被保留，不會因為某一輪沒看到
+就漏掉），OCR 文字採「任一輪有讀到就採用」（漏讀比誤讀常見得多）。
+細節見 `_merge_multi_run_detections()` 的說明。
+
+實務建議：如果你只是要確認「排名第一的候選節點對不對」，跑 1 次通常
+就足夠（三次測試都正確排出同一個答案，只是分數本身有落差）；如果你
+在意信心分數本身的穩定度、或分數剛好卡在門檻附近很在意精確度，設成
+`--detect-runs 3` 可以有效收斂波動範圍。
 """
 from __future__ import annotations
 
@@ -302,8 +329,99 @@ def _auto_detect_vlm(
     return det_list, ocr_list
 
 
+def _merge_multi_run_detections(
+    runs: List[Tuple[List[dict], List[dict]]],
+) -> Tuple[List[dict], List[dict]]:
+    """把好幾輪（次）獨立跑出來的偵測結果合併成一份，降低 VLM 每次觀察
+    細節不一致造成的信心分數波動（見對話紀錄：同一張照片、同一支
+    程式，VLM 三次分別偵測到 5/7/7 個物件，其中一次漏讀了門上的
+    OCR 文字，導致最終分數在 55%~75% 之間跳動）。
+
+    合併規則（v2，取代最早用「標籤 + 精確位置文字」當識別依據的版本）：
+
+    最早的版本拿「標籤 + 畫面位置文字」當作判斷「是不是同一個實體」的
+    依據，結果實測發現一個問題：VLM 對同一張椅子，這輪判斷「畫面中間」、
+    下輪判斷「畫面中上」，位置文字有些微落差，就會被誤判成兩個不同的
+    椅子——輪數越多，這種誤拆分累積得越嚴重，查詢物件數不減反增
+    （5/7/7 → 跑三輪合併後變成 9/10/9），拖累覆蓋率分母，波動不減反而
+    只小幅改善。
+
+    改成**只用標籤本身**判斷數量，不再依賴位置文字精不精確：對每個
+    標籤，分別統計它在「每一輪各自」出現幾次，取**單一輪次裡出現次數
+    最多**的那一組當作這個標籤的代表數量與內容——例如某輪看到 3 個
+    垃圾桶、另一輪只看到 2 個，採用「3 個」那一輪的完整資料，因為那一
+    輪顯然觀察得比較完整，不是把兩輪的數字加起來變成 5 個（那樣才是
+    真正的重複計算）。這樣不管 VLM 對同一個實體的位置判斷有沒有落差，
+    只要輪次之間標籤本身讀得穩定，就不會被誤拆分。
+
+    - **只出現在部分輪次的標籤一樣會被保留**（例如只有 1 輪讀到
+      trophies）——這仍然是多輪合併主要想解決的問題：單一輪次偶爾漏看
+      某個東西，靠其他輪次補回來，標籤清單取的是「聯集」，不是
+      「交集」；只是「同一個標籤該算幾個」改成取最大值，不是逐一物件
+      各自比對位置。
+    - **OCR 文字用「同一標籤、物件數剛好一樣」的其他輪次回填**：勝出
+      的那組如果有物件缺 OCR 文字，去其他輪次「這個標籤、數量也一樣」
+      的那組裡，依相同順位找找看有沒有讀到文字，補回來——物件數不同
+      時對應關係不明確，不硬猜，直接跳過那一輪。
+    - OCR 清單依文字內容去重、合併（同一段文字被好幾輪重複讀到，
+      只保留一筆）。
+    - 合併完，再對合併後的清單重新跑一次 OCR 關聯（見
+      `_associate_ocr_with_detections()`）——用位置關聯再補一輪，
+      處理「回填規則沒對應到，但合併後的清單其實已經有另一個物件
+      離這段文字更近」這種情況。
+    """
+    best_group_by_label: Dict[str, List[dict]] = {}
+    all_groups_by_label: Dict[str, List[List[dict]]] = {}
+    label_order: List[str] = []
+
+    for det_list, _ocr_list in runs:
+        this_run_by_label: Dict[str, List[dict]] = {}
+        for det in det_list:
+            label = str(det.get("label", "")).strip().lower()
+            if not label:
+                continue
+            this_run_by_label.setdefault(label, []).append(dict(det))
+
+        for label, group in this_run_by_label.items():
+            all_groups_by_label.setdefault(label, []).append(group)
+            if label not in best_group_by_label:
+                best_group_by_label[label] = group
+                label_order.append(label)
+            elif len(group) > len(best_group_by_label[label]):
+                best_group_by_label[label] = group
+
+    # OCR 回填：勝出組裡缺文字的物件，去「同標籤、數量也一樣」的其他
+    # 輪次，依相同順位找找看有沒有讀到文字。
+    for label, best_group in best_group_by_label.items():
+        for other_group in all_groups_by_label[label]:
+            if other_group is best_group or len(other_group) != len(best_group):
+                continue
+            for i, det in enumerate(best_group):
+                if not det.get("nameplate_text") and other_group[i].get("nameplate_text"):
+                    det["nameplate_text"] = other_group[i]["nameplate_text"]
+
+    merged_detections = [det for label in label_order for det in best_group_by_label[label]]
+
+    merged_ocr_by_text: Dict[str, dict] = {}
+    ocr_order: List[str] = []
+    for _det_list, ocr_list in runs:
+        for ocr_item in ocr_list:
+            text = str(ocr_item.get("text", "")).strip()
+            if not text:
+                continue
+            if text not in merged_ocr_by_text:
+                merged_ocr_by_text[text] = dict(ocr_item)
+                ocr_order.append(text)
+    merged_ocr = [merged_ocr_by_text[t] for t in ocr_order]
+
+    # 合併後的清單更完整，重新關聯一次 OCR（只補缺，不覆蓋既有的）。
+    _associate_ocr_with_detections(merged_detections, merged_ocr)
+
+    return merged_detections, merged_ocr
+
+
 def _auto_detect(
-    photo_path: Path, img_w: int, img_h: int, *, mode: str = "vlm", goal: str = "",
+    photo_path: Path, img_w: int, img_h: int, *, mode: str = "vlm", goal: str = "", runs: int = 1,
 ) -> Tuple[List[dict], List[dict], str]:
     """依 `mode` 決定要走哪條偵測路徑，回傳 (detections, ocr_items, 實際用的模式)。
 
@@ -318,7 +436,32 @@ def _auto_detect(
                 嘗試 GroundingDINO，失敗（沒裝 torch/模型權重）才退回
                 VLM，並印出警告說明已切換模式。
         goal: 可選的導航目標文字，只有 VLM 模式會用到（併入 prompt）。
+        runs: 要跑幾次偵測，預設 1（跟原本行為完全一樣）。大於 1 時，
+            會真的重複呼叫這麼多次（每次都是獨立的一次模型呼叫，會
+            花對應倍數的時間／API 額度），再用
+            `_merge_multi_run_detections()` 合併——主要是為了降低 VLM
+            模式下「每次觀察細節不完全一樣」造成的信心分數波動（見
+            `_merge_multi_run_detections()` 的說明）。對 GroundingDINO
+            模式意義不大（同一張圖重複跑，結果本來就完全一樣，實測
+            驗證過），但這裡沒有特別擋掉，想跑多輪還是可以跑，只是
+            沒有實質效益、單純浪費時間。
     """
+    if runs > 1:
+        collected: List[Tuple[List[dict], List[dict]]] = []
+        actual_mode = mode
+        for i in range(runs):
+            det, ocr, actual_mode = _auto_detect(
+                photo_path, img_w, img_h, mode=mode, goal=goal, runs=1,
+            )
+            collected.append((det, ocr))
+            print(f"[多輪偵測] 第 {i + 1}/{runs} 輪，偵測到 {len(det)} 個物件", file=sys.stderr)
+        merged_det, merged_ocr = _merge_multi_run_detections(collected)
+        print(
+            f"[多輪偵測] 合併 {runs} 輪結果，共 {len(merged_det)} 個不重複物件",
+            file=sys.stderr,
+        )
+        return merged_det, merged_ocr, f"{actual_mode}（合併 {runs} 輪）"
+
     if mode == "vlm":
         det, ocr = _auto_detect_vlm(photo_path, img_w, img_h, goal)
         return det, ocr, "VLM 兩階段"
@@ -365,6 +508,12 @@ def main() -> None:
     parser.add_argument("--goal", default="",
                          help="可選：VLM 模式下的導航目標文字（例如「尋找電腦」），"
                               "只有 --detect-mode vlm/auto 退回 VLM 時會用到")
+    parser.add_argument("--detect-runs", type=int, default=1,
+                         help="要跑幾次偵測再合併（預設 1，等同原本行為）。VLM 模式"
+                              "每次觀察細節不完全一樣，容易造成信心分數波動，設成"
+                              "2~3 可以用多輪合併降低這個波動，代價是要花對應倍數的"
+                              "時間／API 額度；對 GroundingDINO 模式沒有實質效益"
+                              "（同一張圖重複跑結果本來就一樣）")
     args = parser.parse_args()
 
     map_path = Path(args.map).resolve()
@@ -387,6 +536,7 @@ def main() -> None:
         try:
             detections, ocr_items, mode_used = _auto_detect(
                 photo_path, img_w, img_h, mode=args.detect_mode, goal=args.goal,
+                runs=args.detect_runs,
             )
             print(f"偵測模式：{mode_used}", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 — 環境沒裝模型時給清楚引導，而不是丟一堆 traceback

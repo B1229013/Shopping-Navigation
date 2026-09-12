@@ -35,5 +35,11 @@ node_modules/
 *.log
 Thumbs.db
 
+# Test data
+backend/testPDR/
+
+# Build artifacts
+.vite/
+
 # Tooling
 .claude/

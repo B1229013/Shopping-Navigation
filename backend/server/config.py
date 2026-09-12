@@ -105,13 +105,21 @@ SAM_TOP_K_BOXES = 10
 
 # Generic indoor objects — always detected alongside goal_objects for spatial context
 GENERIC_INDOOR_OBJECTS = [
-    # 同學的 DEFAULT_CLASSES（19 項）
     "door", "cabinet", "chair", "table", "desk", "sofa", "sign",
     "fire extinguisher", "plant", "printer", "whiteboard", "monitor",
     "computer", "bookshelf", "window", "counter", "service counter",
     "bulletin board", "notice board",
-    # 額外補充
     "refrigerator", "water dispenser", "shelf", "trash can", "poster",
+]
+
+# Supermarket-specific objects — for PX Mart (全聯) and similar stores
+# Keep list short (<15) with distinct terms to avoid GroundingDINO label merging
+SUPERMARKET_OBJECTS = [
+    "shelf", "refrigerator", "freezer",
+    "shopping cart", "basket",
+    "cash register", "conveyor belt",
+    "sign", "poster", "price tag",
+    "door", "bottle", "fruit", "vegetable", "bread",
 ]
 
 # TASK 3 — crop-verify a goal detection with the VLM before trusting it.
@@ -150,15 +158,24 @@ LABEL_SYNONYMS = {
     "produce": ["produce", "vegetables", "fruits", "fresh produce", "greens"],
     "frozen": ["frozen", "frozen foods", "freezer section", "frozen aisle"],
     "bakery": ["bakery", "bread section", "baked goods", "bread aisle"],
-    "beverages": ["beverages", "drinks", "sodas", "water aisle", "juice"],
-    "checkout": ["checkout", "cashier", "register", "cash register", "till"],
+    "beverages": ["beverages", "drinks", "sodas", "water aisle", "juice", "beverage"],
+    "checkout": ["checkout", "cashier", "register", "cash register", "till", "checkout counter", "self checkout"],
     # Common products
     "milk": ["milk", "milk bottle", "milk carton", "whole milk", "skim milk"],
     "bread": ["bread", "loaf", "bread loaf", "sandwich bread"],
-    "refrigerator": ["refrigerator", "fridge", "cooler", "refrigerated case", "freezer"],
-    "shelf": ["shelf", "shelving", "rack", "display rack", "store shelf"],
-    "cart": ["cart", "shopping cart", "trolley", "basket"],
-    "sign": ["sign", "aisle sign", "store sign", "label", "price tag"],
+    "refrigerator": ["refrigerator", "fridge", "cooler", "refrigerated case", "freezer", "refrigerated"],
+    "shelf": ["shelf", "shelving", "rack", "display rack", "store shelf", "gondola shelf", "product display"],
+    "cart": ["cart", "shopping cart", "trolley", "basket", "shopping basket"],
+    "sign": ["sign", "aisle sign", "store sign", "hanging sign", "price tag", "banner"],
+    # Supermarket landmarks
+    "bottle": ["bottle", "water bottle", "plastic bottle"],
+    "can": ["can", "canned food", "tin"],
+    "fruit": ["fruit", "apple", "banana", "orange", "grape"],
+    "vegetable": ["vegetable", "lettuce", "cabbage", "carrot", "tomato"],
+    "meat": ["meat", "pork", "beef", "chicken", "fish"],
+    "entrance": ["entrance", "exit", "doorway", "gate"],
+    "pillar": ["pillar", "column", "post", "support column"],
+    "conveyor": ["conveyor belt", "conveyor"],
 }
 
 

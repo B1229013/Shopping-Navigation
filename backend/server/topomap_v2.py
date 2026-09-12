@@ -610,6 +610,7 @@ class TopoGraphV2:
     def add_walkway_edge(
         self, photo_a: int, photo_b: int, *,
         direction: str = "", distance_m: Optional[float] = None,
+        steps: Optional[int] = None,
     ) -> None:
         """第四種邊：photo → photo（走道），單向有向邊。
 
@@ -627,9 +628,12 @@ class TopoGraphV2:
         呼叫 `set_terminal_facing()` 建一條自我迴圈的邊來表示，見該方法
         說明。
         """
+        attrs = dict(etype=ETYPE_WALKWAY, direction=direction, distance_m=distance_m)
+        if steps is not None:
+            attrs["steps"] = steps
         self.graph.add_edge(
             photo_a, photo_b, key=f"walkway_{photo_a}_{photo_b}",
-            etype=ETYPE_WALKWAY, direction=direction, distance_m=distance_m,
+            **attrs,
         )
         self._touch()
 
@@ -700,9 +704,16 @@ class TopoGraphV2:
         # 依 bbox 中心 x 座標由左至右排序，符合筆記「最好照著左至右排」的要求
         sorted_dets = sorted(detections, key=lambda d: _bbox_center_x(d.get("box", [])))
 
+        _SKIP_LABELS = {
+            "person", "people", "human", "man", "woman", "child", "kid",
+            "cart", "shopping cart", "trolley", "basket", "shopping basket",
+        }
+
         object_ids: List[int] = []
         for det in sorted_dets:
             label = det.get("label", "unknown")
+            if label.lower() in _SKIP_LABELS:
+                continue
             box = det.get("box", [])
             nameplate = det.get("nameplate_text", "") or det.get("ocr_text", "")
             # 現有系統的 detections_*.json 常常沒有 "position" 欄位
@@ -1122,6 +1133,7 @@ class TopoGraphV2:
 
     def _layout_positions(
         self, photo_font: float = _PHOTO_FONT, object_font: float = _OBJECT_FONT, min_gap: float = 0.45,
+        use_sensor_layout: bool = False,
     ) -> Tuple[Dict[int, Tuple[float, float]], Dict[int, Tuple[float, float]], Dict[int, float]]:
         """把「照片節點沿走道排成一直線、物件節點吊掛在自己照片節點下方」
         設計成座標，取代預設的 spring_layout。
@@ -1157,7 +1169,7 @@ class TopoGraphV2:
         #        距離抓不到數字時就用一個固定的預設步長代替——這仍然只是
         #        「大概的形狀」，不是量出來的真座標，但比純直線更接近實際
         #        場景分布。
-        raw_xy, heading, parent_of = self._dead_reckon_tree()
+        raw_xy, heading, parent_of = self._dead_reckon_tree(use_sensor_layout=use_sensor_layout)
 
         # ── 2. 每張照片底下的物件依「九宮格 (row, col)」排位置：
         #        col 0/1/2（左/中/右）決定物件掛在照片節點哪一「欄」，
@@ -1726,10 +1738,14 @@ class TopoGraphV2:
                     return d
         return {}
 
-    def _dead_reckon_tree(self) -> Tuple[Dict[int, Tuple[float, float]], Dict[int, float], Dict[int, int]]:
+    def _dead_reckon_tree(self, use_sensor_layout: bool = False) -> Tuple[Dict[int, Tuple[float, float]], Dict[int, float], Dict[int, int]]:
         """以「第一張照片（id 最小）」為原點、沿走道邊做死算推位，把每個
         照片節點走道邊組成的圖當成一棵樹（用 BFS 展開，遇到還沒走過的
         節點才展開，天然就是使用者實際走過的分支結構，包括虛假分支節點）。
+
+        use_sensor_layout=True 時，改用節點 sensor_data 裡的 pdr_x/pdr_y
+        座標和 heading_deg 方位角，直接以感測器的 PDR 推算位置排版，
+        而不是從方向文字粗略猜測。
 
         Returns:
             (xy, heading, parent_of)：
@@ -1745,8 +1761,18 @@ class TopoGraphV2:
             return xy, heading, parent_of
 
         root = min(photo_nodes)
-        xy[root] = (0.0, 0.0)
-        heading[root] = 0.0
+        if use_sensor_layout:
+            root_sd = self.graph.nodes[root].get("sensor_data", {})
+            if "pdr_x" in root_sd and "pdr_y" in root_sd:
+                xy[root] = (root_sd["pdr_x"] * self._UNITS_PER_METER,
+                            root_sd["pdr_y"] * self._UNITS_PER_METER)
+                heading[root] = root_sd.get("heading_deg", 0.0)
+            else:
+                xy[root] = (0.0, 0.0)
+                heading[root] = 0.0
+        else:
+            xy[root] = (0.0, 0.0)
+            heading[root] = 0.0
         ug = self._walkway_undirected()
         visited = {root}
         queue = [root]
@@ -1757,6 +1783,16 @@ class TopoGraphV2:
             for nb in sorted(ug.neighbors(cur)):
                 if nb in visited:
                     continue
+                if use_sensor_layout:
+                    nb_sd = self.graph.nodes[nb].get("sensor_data", {})
+                    if "pdr_x" in nb_sd and "pdr_y" in nb_sd:
+                        xy[nb] = (nb_sd["pdr_x"] * self._UNITS_PER_METER,
+                                  nb_sd["pdr_y"] * self._UNITS_PER_METER)
+                        heading[nb] = nb_sd.get("heading_deg", 0.0)
+                        parent_of[nb] = cur
+                        visited.add(nb)
+                        queue.append(nb)
+                        continue
                 edge_data = self._walkway_edge_data(cur, nb)
                 text = edge_data.get("direction", "") or ""
                 turn = self._parse_turn_degrees(text)
@@ -1821,7 +1857,7 @@ class TopoGraphV2:
         )
         ax.add_patch(box)
 
-    def render_png(self) -> bytes:
+    def render_png(self, *, use_sensor_layout: bool = False) -> bytes:
         """把拓樸地圖畫成 PNG（照片＋物件＋所有邊，唯一一種畫法）。
 
         節點是依文字內容自動算出剛好包住文字的方塊（見 `_label_box_size`），
@@ -1848,7 +1884,7 @@ class TopoGraphV2:
             plt.close(fig)
             return buf.getvalue()
 
-        pos, sizes, heading = self._layout_positions()
+        pos, sizes, heading = self._layout_positions(use_sensor_layout=use_sensor_layout)
 
         photo_nodes = self.all_photo_nodes()
         object_nodes = self.all_object_nodes()

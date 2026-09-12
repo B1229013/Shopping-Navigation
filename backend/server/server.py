@@ -98,6 +98,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from server.sensor_nav import router as _snav_router
+app.include_router(_snav_router)
+
 _store = SessionStore()
 _perception: Optional[Perception] = None
 _ocr: Optional[OCR] = None

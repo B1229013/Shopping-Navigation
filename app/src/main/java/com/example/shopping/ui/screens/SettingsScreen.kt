@@ -312,8 +312,48 @@ fun SettingsScreen(navController: NavController) {
                 }
             }
 
-            // ── Storage Info ──
+            // ── Sensor Nav ──
             StaggeredItem(index = 2) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(SurfaceBase)
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .background(ChartBlue.copy(alpha = 0.10f), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Navigation, null, tint = ChartBlue, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("感測器導航", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
+                            Text("PDR 計步 + AI 視覺融合建圖導航", style = MaterialTheme.typography.bodySmall, color = TextTertiary)
+                        }
+                    }
+
+                    Button(
+                        onClick = { navController.navigate("sensor_nav") },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ChartBlue, contentColor = Color.White)
+                    ) {
+                        Icon(Icons.Default.Explore, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("開啟感測器導航", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
+            // ── Storage Info ──
+            StaggeredItem(index = 3) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

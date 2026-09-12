@@ -159,20 +159,16 @@ class OCR:
             self.load()
 
         try:
+            import numpy as np
             from PIL import Image as _PILImage
             img = _PILImage.open(image_path)
 
-            # 影像太大時先縮小，避免 EasyOCR 記憶體不足
-            # Resize if too large to prevent EasyOCR OOM
             max_dim = 2048
             if max(img.size) > max_dim:
                 img.thumbnail((max_dim, max_dim))
-                resized_path = image_path + ".ocr_tmp.jpg"
-                img.save(resized_path, format="JPEG", quality=90)
-                raw = self._reader.readtext(resized_path)
-                import os; os.remove(resized_path)  # 清理暫存檔 / Cleanup temp file
-            else:
-                raw = self._reader.readtext(image_path)
+
+            img_array = np.array(img.convert("RGB"))
+            raw = self._reader.readtext(img_array)
 
         except Exception as e:
             log.warning("OCR failed on %s: %s", image_path, e)

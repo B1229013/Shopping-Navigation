@@ -1,6 +1,7 @@
 package com.example.shopping
 
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -10,6 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -21,10 +23,30 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 
+val LocalVolumeKeyHandler = staticCompositionLocalOf<VolumeKeyHandler> { VolumeKeyHandler() }
+
+class VolumeKeyHandler {
+    var onVolumeDown: (() -> Unit)? = null
+    var onVolumeUp: (() -> Unit)? = null
+}
+
 private val CinemaEasing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
 
 class MainActivity : ComponentActivity() {
     private lateinit var auth: FirebaseAuth
+    private val volumeKeyHandler = VolumeKeyHandler()
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                volumeKeyHandler.onVolumeDown?.let { it(); return true }
+            }
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                volumeKeyHandler.onVolumeUp?.let { it(); return true }
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
+            CompositionLocalProvider(LocalVolumeKeyHandler provides volumeKeyHandler) {
             ShoppingTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -90,8 +113,15 @@ class MainActivity : ComponentActivity() {
                         composable("sensor_lab") {
                             SensorLabScreen(navController)
                         }
+                        composable("sensor_nav") {
+                            SensorNavHomeScreen(navController)
+                        }
+                        composable("sensor_nav_active") {
+                            SensorNavActiveScreen(navController)
+                        }
                     }
                 }
+            }
             }
         }
     }

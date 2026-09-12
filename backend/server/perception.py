@@ -254,6 +254,8 @@ class Perception:
         if not results:
             results = self._predict(image, image_source, text_prompt, GROUNDINGDINO_BOX_THRESHOLD_FALLBACK)
 
+        # 過濾空 label（GroundingDINO 有時偵測到框但無法匹配類別名稱）
+        results = [d for d in results if d.label.strip()]
         # 按信心分數降序排列，只取前 K 個 / Sort by score descending, take top K
         results.sort(key=lambda d: -d.score)
         return results[:SAM_TOP_K_BOXES]

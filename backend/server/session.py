@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from server.topomap import TopoMap
+from server.topomap_v2 import TopoGraphV2
 
 
 @dataclass
@@ -32,6 +33,12 @@ class Session:
     corrections: List[str] = field(default_factory=list)
     false_positive_nodes: List[int] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
+    # ── 地圖導航模式（從 Neo4j 載入 TopoGraphV2）──
+    topo_v2: Optional[TopoGraphV2] = None
+    place_name: str = ""
+    nav_mode: str = "explore"  # "map" = 有地圖路徑規劃, "explore" = 即時探索
+    goal_photo_ids: List[int] = field(default_factory=list)
+    planned_path: List[int] = field(default_factory=list)
 
 
 class SessionStore:

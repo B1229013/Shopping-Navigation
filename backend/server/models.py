@@ -28,6 +28,7 @@ class VLMResponse(BaseModel):
 
 class StartSessionRequest(BaseModel):
     goal: str
+    place_name: str = ""
 
 
 class StartSessionResponse(BaseModel):
@@ -35,6 +36,9 @@ class StartSessionResponse(BaseModel):
     guidance: str
     action: Literal["TAKE_PHOTO"] = "TAKE_PHOTO"
     goal_objects: List[str]
+    nav_mode: str = "explore"
+    goal_photo_ids: List[int] = []
+    place_name: str = ""
 
 
 class AnswerRequest(BaseModel):
@@ -51,6 +55,10 @@ class TurnResponse(BaseModel):
     question: Optional[str] = None
     node_id: int
     annotated_photo_url: Optional[str] = None
+    localized_photo_id: Optional[int] = None
+    localization_score: Optional[float] = None
+    localization_candidates: List[dict] = []
+    goal_photo_ids: List[int] = []
 
 
 class NodeJSON(BaseModel):

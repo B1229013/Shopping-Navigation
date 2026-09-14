@@ -11,13 +11,19 @@ import java.util.concurrent.TimeUnit
 
 // ── Request / Response models ──
 
-data class StartSessionRequest(val goal: String)
+data class StartSessionRequest(
+    val goal: String,
+    val place_name: String? = null,
+)
 
 data class StartSessionResponse(
     val session_id: String,
     val guidance: String,
     val action: String,
-    val goal_objects: List<String>
+    val goal_objects: List<String>,
+    val nav_mode: String = "explore",
+    val goal_photo_ids: List<Int> = emptyList(),
+    val place_name: String = "",
 )
 
 data class TurnResponse(
@@ -25,7 +31,11 @@ data class TurnResponse(
     val guidance: String,
     val question: String?,
     val node_id: Int,
-    val annotated_photo_url: String?
+    val annotated_photo_url: String?,
+    val localized_photo_id: Int? = null,
+    val localization_score: Double? = null,
+    val localization_candidates: List<Map<String, Any>> = emptyList(),
+    val goal_photo_ids: List<Int> = emptyList(),
 )
 
 data class AnswerRequest(val answer: String)
@@ -109,28 +119,33 @@ interface NavigationApiService {
 // ── Singleton client ──
 
 object NavigationApi {
-    private val baseUrl: String
-        get() {
-            val configured = BuildConfig.BACKEND_URL
-            return if (configured.isNotBlank()) configured else "http://10.0.2.2:8000/"
-        }
-
-    val service: NavigationApiService by lazy {
+    private val okClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         }
-        val client = OkHttpClient.Builder()
+        OkHttpClient.Builder()
             .addInterceptor(logging)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(300, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .build()
-
-        Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .addConverterFactory(GsonConverterFactory.create())
-            .client(client)
-            .build()
-            .create(NavigationApiService::class.java)
     }
+
+    private var _service: NavigationApiService? = null
+    private var _lastUrl: String? = null
+
+    val service: NavigationApiService
+        get() {
+            val url = BackendConfig.currentUrl
+            if (_service == null || _lastUrl != url) {
+                _service = Retrofit.Builder()
+                    .baseUrl(url)
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .client(okClient)
+                    .build()
+                    .create(NavigationApiService::class.java)
+                _lastUrl = url
+            }
+            return _service!!
+        }
 }

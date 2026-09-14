@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit
 data class SNavStartRequest(
     val goal: String,
     val map_id: String? = null,
+    val place_name: String? = null,
 )
 
 data class SNavStartResponse(
@@ -22,6 +23,14 @@ data class SNavStartResponse(
     val guidance: String,
     val action: String,
     val goal_objects: List<String>,
+    val nav_mode: String = "explore",
+    val goal_photo_ids: List<Int> = emptyList(),
+    val place_name: String = "",
+)
+
+data class Neo4jPlaceInfo(
+    val place_name: String,
+    val node_count: Int = 0,
 )
 
 data class SNavTurnResponse(
@@ -33,6 +42,10 @@ data class SNavTurnResponse(
     val step_guidance: String? = null,
     val estimated_remaining_steps: Int? = null,
     val estimated_remaining_distance: Double? = null,
+    val localized_photo_id: Int? = null,
+    val localization_score: Double? = null,
+    val localization_candidates: List<Map<String, Any>> = emptyList(),
+    val goal_photo_ids: List<Int> = emptyList(),
 )
 
 data class SNavMapInfo(
@@ -89,33 +102,41 @@ interface SensorNavApiService {
 
     @GET("snav/maps/{mapId}")
     suspend fun getMap(@Path("mapId") mapId: String): MapResponse
+
+    @GET("snav/neo4j/places")
+    suspend fun listNeo4jPlaces(): List<Neo4jPlaceInfo>
 }
 
 // ── Singleton client ──
 
 object SensorNavApi {
-    private val baseUrl: String
-        get() {
-            val configured = BuildConfig.BACKEND_URL
-            return if (configured.isNotBlank()) configured else "http://10.0.2.2:8000/"
-        }
-
-    val service: SensorNavApiService by lazy {
+    private val okClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         }
-        val client = OkHttpClient.Builder()
+        OkHttpClient.Builder()
             .addInterceptor(logging)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(300, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .build()
-
-        Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .addConverterFactory(GsonConverterFactory.create())
-            .client(client)
-            .build()
-            .create(SensorNavApiService::class.java)
     }
+
+    private var _service: SensorNavApiService? = null
+    private var _lastUrl: String? = null
+
+    val service: SensorNavApiService
+        get() {
+            val url = BackendConfig.currentUrl
+            if (_service == null || _lastUrl != url) {
+                _service = Retrofit.Builder()
+                    .baseUrl(url)
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .client(okClient)
+                    .build()
+                    .create(SensorNavApiService::class.java)
+                _lastUrl = url
+            }
+            return _service!!
+        }
 }

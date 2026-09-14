@@ -83,6 +83,24 @@ fun TeammateHomeScreen(navController: NavController) {
     var isCreatingSession by remember { mutableStateOf(false) }
     var backendError by remember { mutableStateOf<String?>(null) }
 
+    // Neo4j map selection
+    var neo4jPlaces by remember { mutableStateOf<List<com.example.shopping.network.Neo4jPlaceInfo>>(emptyList()) }
+    var isLoadingPlaces by remember { mutableStateOf(false) }
+    var selectedPlace by remember { mutableStateOf<String?>(null) }
+    var placeDropdownExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        isLoadingPlaces = true
+        try {
+            val places = withContext(Dispatchers.IO) {
+                com.example.shopping.network.SensorNavApi.service.listNeo4jPlaces()
+            }
+            neo4jPlaces = places
+            if (places.size == 1) selectedPlace = places[0].place_name
+        } catch (_: Exception) { }
+        isLoadingPlaces = false
+    }
+
     fun fetchLocationThenShow() {
         fetchingLocation = true
         try {
@@ -133,7 +151,7 @@ fun TeammateHomeScreen(navController: NavController) {
         scope.launch {
             try {
                 val response = withContext(Dispatchers.IO) {
-                    NavigationApi.service.startSession(StartSessionRequest(goal = goalText))
+                    NavigationApi.service.startSession(StartSessionRequest(goal = goalText, place_name = selectedPlace))
                 }
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_session_id", response.session_id)
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_goal", goalText)
@@ -251,9 +269,71 @@ fun TeammateHomeScreen(navController: NavController) {
                 }
             }
 
+            // Map selection dropdown
+            if (neo4jPlaces.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                StaggeredItem(index = 2) {
+                    ExposedDropdownMenuBox(
+                        expanded = placeDropdownExpanded,
+                        onExpandedChange = { placeDropdownExpanded = it },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = selectedPlace ?: "選擇地圖（可選）",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("導航地圖") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = placeDropdownExpanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextSecondary,
+                                focusedBorderColor = Gold,
+                                unfocusedBorderColor = TextTertiary,
+                                focusedLabelColor = Gold,
+                                unfocusedLabelColor = TextTertiary,
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = placeDropdownExpanded,
+                            onDismissRequest = { placeDropdownExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("不使用地圖") },
+                                onClick = {
+                                    selectedPlace = null
+                                    placeDropdownExpanded = false
+                                }
+                            )
+                            neo4jPlaces.forEach { place ->
+                                DropdownMenuItem(
+                                    text = { Text("${place.place_name}（${place.node_count} 節點）") },
+                                    onClick = {
+                                        selectedPlace = place.place_name
+                                        placeDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (isLoadingPlaces) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Gold, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("載入地圖列表...", style = MaterialTheme.typography.bodySmall, color = TextTertiary)
+                }
+            }
+
             Spacer(Modifier.height(16.dp))
 
-            StaggeredItem(index = 2) {
+            StaggeredItem(index = 3) {
                 OutlinedButton(
                     onClick = { openNearbyStores() },
                     modifier = Modifier
@@ -282,7 +362,7 @@ fun TeammateHomeScreen(navController: NavController) {
 
             Spacer(Modifier.height(10.dp))
 
-            StaggeredItem(index = 3) {
+            StaggeredItem(index = 4) {
                 Button(
                     onClick = { startNavigation() },
                     modifier = Modifier

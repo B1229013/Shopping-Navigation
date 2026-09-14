@@ -25,6 +25,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.example.shopping.network.AnswerRequest
 import com.example.shopping.network.ConfirmArrivalRequest
+import com.example.shopping.network.Neo4jPlaceInfo
 import com.example.shopping.network.SNavMapInfo
 import com.example.shopping.network.SNavStartRequest
 import com.example.shopping.network.SNavTurnResponse
@@ -98,6 +99,17 @@ class SensorNavViewModel : ViewModel() {
     var isSavingMap: Boolean by mutableStateOf(false)
     var savedMapId: String? by mutableStateOf(null)
 
+    // ── Neo4j places ──
+    var neo4jPlaces: List<Neo4jPlaceInfo> by mutableStateOf(emptyList())
+    var isLoadingPlaces: Boolean by mutableStateOf(false)
+    var navMode: String by mutableStateOf("explore")
+    var goalPhotoIds: List<Int> by mutableStateOf(emptyList())
+
+    // ── Localization ──
+    var localizedPhotoId: Int? by mutableStateOf(null)
+    var localizationScore: Double? by mutableStateOf(null)
+    var localizationCandidates: List<Map<String, Any>> by mutableStateOf(emptyList())
+
     // ── Local sessions ──
     var localSessions: List<LocalSession> by mutableStateOf(emptyList())
 
@@ -165,7 +177,7 @@ class SensorNavViewModel : ViewModel() {
 
     // ── Init ──
 
-    fun startSession(context: Context, goalText: String, mapId: String? = null) {
+    fun startSession(context: Context, goalText: String, mapId: String? = null, placeName: String? = null) {
         goal = goalText
         errorMessage = null
 
@@ -177,11 +189,15 @@ class SensorNavViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val response = withContext(Dispatchers.IO) {
-                    SensorNavApi.service.startSession(SNavStartRequest(goal = goalText, map_id = mapId))
+                    SensorNavApi.service.startSession(
+                        SNavStartRequest(goal = goalText, map_id = mapId, place_name = placeName)
+                    )
                 }
                 sessionId = response.session_id
                 guidance = response.guidance
                 currentAction = response.action
+                navMode = response.nav_mode
+                goalPhotoIds = response.goal_photo_ids
                 startPdr(context)
             } catch (e: Exception) {
                 Log.e("SensorNav", "Start session failed", e)
@@ -457,6 +473,21 @@ class SensorNavViewModel : ViewModel() {
         }
     }
 
+    fun loadNeo4jPlaces() {
+        isLoadingPlaces = true
+        viewModelScope.launch {
+            try {
+                neo4jPlaces = withContext(Dispatchers.IO) {
+                    SensorNavApi.service.listNeo4jPlaces()
+                }
+            } catch (e: Exception) {
+                Log.e("SensorNav", "Load Neo4j places failed", e)
+            } finally {
+                isLoadingPlaces = false
+            }
+        }
+    }
+
     fun saveMap(name: String) {
         val sid = sessionId ?: return
         isSavingMap = true
@@ -525,6 +556,14 @@ class SensorNavViewModel : ViewModel() {
         annotatedPhotoUrl = response.annotated_photo_url
         stepGuidance = response.step_guidance
         estimatedRemainingSteps = response.estimated_remaining_steps
+
+        // Update localization
+        localizedPhotoId = response.localized_photo_id
+        localizationScore = response.localization_score
+        localizationCandidates = response.localization_candidates
+        if (response.goal_photo_ids.isNotEmpty()) {
+            goalPhotoIds = response.goal_photo_ids
+        }
 
         when (response.action) {
             "ARRIVED" -> {

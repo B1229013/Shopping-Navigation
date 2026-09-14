@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.example.shopping.model.UserProfile
 import com.example.shopping.ui.components.*
+import com.example.shopping.network.BackendConfig
 import com.example.shopping.ui.theme.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -352,8 +353,73 @@ fun SettingsScreen(navController: NavController) {
                 }
             }
 
-            // ── Storage Info ──
+            // ── Backend Connection ──
             StaggeredItem(index = 3) {
+                var showIpDialog by remember { mutableStateOf(false) }
+                var backendUrl by remember { mutableStateOf(BackendConfig.currentUrl) }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(SurfaceBase)
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .background(ChartBlue.copy(alpha = 0.10f), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Dns, null, tint = ChartBlue, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "連線設定",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = TextPrimary
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("後端伺服器", style = MaterialTheme.typography.bodyMedium, color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                            Text(backendUrl, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        }
+                        Button(
+                            onClick = { showIpDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = ChartBlue.copy(alpha = 0.12f), contentColor = ChartBlue),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        ) {
+                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("變更", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+
+                if (showIpDialog) {
+                    BackendUrlDialog(
+                        currentUrl = backendUrl,
+                        onDismiss = { showIpDialog = false },
+                        onConfirm = { newUrl ->
+                            BackendConfig.setUrl(context, newUrl)
+                            backendUrl = BackendConfig.currentUrl
+                            showIpDialog = false
+                        },
+                    )
+                }
+            }
+
+            // ── Storage Info ──
+            StaggeredItem(index = 4) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

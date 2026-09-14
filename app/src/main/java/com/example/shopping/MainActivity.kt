@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         auth = Firebase.auth
+        com.example.shopping.network.BackendConfig.init(this)
 
         if (!Places.isInitialized() && BuildConfig.MAPS_API_KEY.isNotBlank()) {
             Places.initializeWithNewPlacesApiEnabled(applicationContext, BuildConfig.MAPS_API_KEY)

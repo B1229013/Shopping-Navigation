@@ -68,16 +68,23 @@ fun SensorNavHomeScreen(navController: NavController) {
     var isStarting by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var offlineMode by remember { mutableStateOf(false) }
+    var pdrEnabled by remember { mutableStateOf(true) }
+    var selectedPlace by remember { mutableStateOf<String?>(null) }
+    var placesExpanded by remember { mutableStateOf(false) }
+    var currentBackendUrl by remember { mutableStateOf(com.example.shopping.network.BackendConfig.currentUrl) }
 
     // Local sessions
     val vm: SensorNavViewModel = viewModel()
-    LaunchedEffect(Unit) { vm.loadLocalSessions(context) }
+    LaunchedEffect(Unit) {
+        vm.loadLocalSessions(context)
+        vm.loadNeo4jPlaces()
+    }
 
     Scaffold(
         containerColor = Noir,
         topBar = {
             TopAppBar(
-                title = { Text("感測器導航", style = MaterialTheme.typography.titleLarge, color = TextPrimary) },
+                title = { Text("AI 視覺導航", style = MaterialTheme.typography.titleLarge, color = TextPrimary) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = TextSecondary)
@@ -98,13 +105,13 @@ fun SensorNavHomeScreen(navController: NavController) {
             Spacer(Modifier.height(20.dp))
 
             Text(
-                "PDR 感測器 + AI 視覺導航",
+                "AI 視覺導航",
                 style = MaterialTheme.typography.headlineSmall,
                 color = TextPrimary,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                "走路時自動計步追蹤距離，拍照時 AI 分析場景給出方向指示。地圖會自動帶上步數和距離。",
+                "拍照時 AI 分析場景給出方向指示。可選擇預建地圖進行路線規劃，或即時探索。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary,
             )
@@ -149,6 +156,80 @@ fun SensorNavHomeScreen(navController: NavController) {
                 }
             }
 
+            // PDR sensor toggle
+            Surface(
+                color = if (pdrEnabled) Gold.copy(alpha = 0.12f) else SurfaceBase,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.clickable { pdrEnabled = !pdrEnabled },
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.DirectionsWalk,
+                        contentDescription = null,
+                        tint = if (pdrEnabled) Gold else TextTertiary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "PDR 感測器",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary,
+                        )
+                        Text(
+                            if (pdrEnabled) "計步、距離、方向追蹤" else "不使用感測器",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                        )
+                    }
+                    Switch(
+                        checked = pdrEnabled,
+                        onCheckedChange = null,
+                        colors = SwitchDefaults.colors(checkedTrackColor = Gold),
+                    )
+                }
+            }
+
+            // Backend URL info (only in online mode)
+            if (!offlineMode) {
+                Surface(
+                    color = SurfaceBase,
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Dns,
+                            contentDescription = null,
+                            tint = TextTertiary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            currentBackendUrl,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "設定頁可變更",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextTertiary,
+                        )
+                    }
+                }
+            }
+
             Spacer(Modifier.height(8.dp))
 
             OutlinedTextField(
@@ -166,6 +247,7 @@ fun SensorNavHomeScreen(navController: NavController) {
                                 navController.currentBackStackEntry?.savedStateHandle?.apply {
                                     set("snav_goal", goalText)
                                     set("snav_offline", true)
+                                    set("snav_pdr_enabled", pdrEnabled)
                                 }
                                 navController.navigate("sensor_nav_active")
                             } else {
@@ -174,13 +256,19 @@ fun SensorNavHomeScreen(navController: NavController) {
                                     try {
                                         val resp = withContext(Dispatchers.IO) {
                                             SensorNavApi.service.startSession(
-                                                com.example.shopping.network.SNavStartRequest(goal = goalText)
+                                                com.example.shopping.network.SNavStartRequest(
+                                                    goal = goalText,
+                                                    place_name = selectedPlace,
+                                                )
                                             )
                                         }
                                         navController.currentBackStackEntry?.savedStateHandle?.apply {
                                             set("snav_session_id", resp.session_id)
                                             set("snav_goal", goalText)
                                             set("snav_guidance", resp.guidance)
+                                            set("snav_nav_mode", resp.nav_mode)
+                                            set("snav_place_name", resp.place_name)
+                                            set("snav_pdr_enabled", pdrEnabled)
                                         }
                                         navController.navigate("sensor_nav_active")
                                     } catch (e: Exception) {
@@ -198,6 +286,59 @@ fun SensorNavHomeScreen(navController: NavController) {
                 )
             )
 
+            // Neo4j map selection (only in online mode)
+            if (!offlineMode) {
+                ExposedDropdownMenuBox(
+                    expanded = placesExpanded,
+                    onExpandedChange = { placesExpanded = it },
+                ) {
+                    OutlinedTextField(
+                        value = selectedPlace ?: "不使用地圖（即時探索）",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("選擇地圖") },
+                        trailingIcon = {
+                            if (vm.isLoadingPlaces) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = Gold,
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = placesExpanded)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Gold,
+                        ),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = placesExpanded,
+                        onDismissRequest = { placesExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("不使用地圖（即時探索）") },
+                            onClick = {
+                                selectedPlace = null
+                                placesExpanded = false
+                            },
+                        )
+                        vm.neo4jPlaces.forEach { place ->
+                            DropdownMenuItem(
+                                text = { Text("${place.place_name}（${place.node_count} 節點）") },
+                                onClick = {
+                                    selectedPlace = place.place_name
+                                    placesExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
             Button(
                 onClick = {
                     if (goalText.isNotBlank() && !isStarting) {
@@ -205,6 +346,7 @@ fun SensorNavHomeScreen(navController: NavController) {
                             navController.currentBackStackEntry?.savedStateHandle?.apply {
                                 set("snav_goal", goalText)
                                 set("snav_offline", true)
+                                set("snav_pdr_enabled", pdrEnabled)
                             }
                             navController.navigate("sensor_nav_active")
                         } else {
@@ -213,13 +355,19 @@ fun SensorNavHomeScreen(navController: NavController) {
                                 try {
                                     val resp = withContext(Dispatchers.IO) {
                                         SensorNavApi.service.startSession(
-                                            com.example.shopping.network.SNavStartRequest(goal = goalText)
+                                            com.example.shopping.network.SNavStartRequest(
+                                                goal = goalText,
+                                                place_name = selectedPlace,
+                                            )
                                         )
                                     }
                                     navController.currentBackStackEntry?.savedStateHandle?.apply {
                                         set("snav_session_id", resp.session_id)
                                         set("snav_goal", goalText)
                                         set("snav_guidance", resp.guidance)
+                                        set("snav_nav_mode", resp.nav_mode)
+                                        set("snav_place_name", resp.place_name)
+                                        set("snav_pdr_enabled", pdrEnabled)
                                     }
                                     navController.navigate("sensor_nav_active")
                                 } catch (e: Exception) {
@@ -328,6 +476,7 @@ fun SensorNavActiveScreen(navController: NavController) {
     val goal = navController.previousBackStackEntry?.savedStateHandle?.get<String>("snav_goal") ?: ""
     val initialGuidance = navController.previousBackStackEntry?.savedStateHandle?.get<String>("snav_guidance") ?: ""
     val isOffline = navController.previousBackStackEntry?.savedStateHandle?.get<Boolean>("snav_offline") == true
+    val pdrEnabled = navController.previousBackStackEntry?.savedStateHandle?.get<Boolean>("snav_pdr_enabled") != false
 
     // Camera permission
     var cameraPermissionGranted by remember {
@@ -342,9 +491,10 @@ fun SensorNavActiveScreen(navController: NavController) {
         if (!cameraPermissionGranted) permLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    // Activity recognition permission — must be granted BEFORE starting PdrTracker
+    // Activity recognition permission — only needed when PDR is enabled
     var activityPermGranted by remember {
         mutableStateOf(
+            !pdrEnabled ||
             Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
         )
@@ -352,13 +502,13 @@ fun SensorNavActiveScreen(navController: NavController) {
     val activityPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         activityPermGranted = it
     }
-    LaunchedEffect(Unit) {
-        if (!activityPermGranted) activityPermLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+    LaunchedEffect(pdrEnabled) {
+        if (pdrEnabled && !activityPermGranted) activityPermLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
     }
 
-    // Initialize session + PDR — wait for ACTIVITY_RECOGNITION before starting sensors
+    // Initialize session + PDR
     LaunchedEffect(sessionId, isOffline, activityPermGranted) {
-        if (!activityPermGranted) return@LaunchedEffect
+        if (pdrEnabled && !activityPermGranted) return@LaunchedEffect
 
         if (vm.sessionId == null) {
             if (isOffline) {
@@ -368,10 +518,9 @@ fun SensorNavActiveScreen(navController: NavController) {
                 vm.sessionId = sessionId
                 vm.goal = goal
                 vm.guidance = initialGuidance
-                vm.startPdr(context)
+                if (pdrEnabled) vm.startPdr(context)
             }
-        } else if (vm.pdrTracker == null) {
-            // Session was set up but PDR wasn't started (permission was pending)
+        } else if (pdrEnabled && vm.pdrTracker == null) {
             vm.startPdr(context)
         }
     }
@@ -463,6 +612,20 @@ fun SensorNavActiveScreen(navController: NavController) {
                             )
                             vm.stepGuidance?.let {
                                 Text(it, color = Color(0xFF86EFAC), fontSize = 11.sp)
+                            }
+                            // Localization info
+                            vm.localizedPhotoId?.let { pid ->
+                                val score = vm.localizationScore?.let { "%.0f%%".format(it * 100) } ?: "?"
+                                Text(
+                                    "定位: P$pid ($score)",
+                                    color = Color(0xFF93C5FD), fontSize = 11.sp,
+                                )
+                            }
+                            if (vm.goalPhotoIds.isNotEmpty()) {
+                                Text(
+                                    "目標: ${vm.goalPhotoIds.joinToString(",") { "P$it" }}",
+                                    color = Color(0xFFFCD34D), fontSize = 11.sp,
+                                )
                             }
                         }
                     }
@@ -559,6 +722,33 @@ fun SensorNavActiveScreen(navController: NavController) {
                                 Icon(Icons.Default.NearMe, contentDescription = null, tint = Gold, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(it, color = GoldDim, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+
+                    // Localization & goal info
+                    if (vm.localizedPhotoId != null || vm.goalPhotoIds.isNotEmpty()) {
+                        Surface(
+                            color = Color(0xFF1E293B),
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                vm.localizedPhotoId?.let { pid ->
+                                    val scoreText = vm.localizationScore?.let { "%.0f%%".format(it * 100) } ?: "?"
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.MyLocation, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("目前位置: P$pid (信心 $scoreText)", color = Color(0xFF93C5FD), fontSize = 13.sp)
+                                    }
+                                }
+                                if (vm.goalPhotoIds.isNotEmpty()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Flag, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("目標位置: ${vm.goalPhotoIds.joinToString(", ") { "P$it" }}", color = Color(0xFFFCD34D), fontSize = 13.sp)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1193,4 +1383,87 @@ private fun PdrTopoGraph(
             }
         }
     }
+}
+
+// ── Backend URL dialog ──
+
+@Composable
+fun BackendUrlDialog(
+    currentUrl: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var customIp by remember { mutableStateOf("") }
+    val port = "8000"
+
+    val presetOptions = listOf(
+        "172.20.10.10" to "iPhone 熱點",
+        "192.168.68.107" to "家用 Wi-Fi",
+        "10.0.2.2" to "Android 模擬器",
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("後端伺服器設定", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("選擇或輸入後端 IP：", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+
+                presetOptions.forEach { (ip, label) ->
+                    val url = "http://$ip:$port/"
+                    val isSelected = currentUrl == url
+                    Surface(
+                        color = if (isSelected) Gold.copy(alpha = 0.15f) else SurfaceBase,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onConfirm(url) },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                                Text(ip, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                            }
+                            if (isSelected) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Gold, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+                Text("自訂 IP：", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = customIp,
+                        onValueChange = { customIp = it },
+                        placeholder = { Text("192.168.x.x") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Gold, cursorColor = Gold),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (customIp.isNotBlank()) {
+                                onConfirm("http://$customIp:$port/")
+                            }
+                        },
+                        enabled = customIp.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Gold),
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text("連線")
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }

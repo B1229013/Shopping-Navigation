@@ -207,10 +207,50 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
     render_goal_graph(req.goal, goal_objects, str(graph_dir / "goal_graph.png"))
     log.info("Goal graph saved to %s", graph_dir / "goal_graph.png")
 
+    # Load TopoGraphV2 from Neo4j if place_name is given
+    nav_mode = "explore"
+    goal_photo_ids: list[int] = []
+    place_name = (req.place_name or "").strip()
+
+    if place_name:
+        try:
+            from server.sensor_nav import _get_neo4j_store, _search_goal_in_topo
+            neo4j = _get_neo4j_store()
+            if neo4j is not None:
+                topo_v2 = neo4j.download(place_name)
+                if topo_v2 is not None:
+                    s.topo_v2 = topo_v2
+                    s.place_name = place_name
+                    log.info("Loaded TopoGraphV2 '%s' from Neo4j: %d photos, %d objects",
+                             place_name,
+                             len(topo_v2.all_photo_nodes()),
+                             len(topo_v2.all_object_nodes()))
+                    goal_photo_ids = _search_goal_in_topo(topo_v2, req.goal, goal_objects)
+                    if goal_photo_ids:
+                        nav_mode = "map"
+                        s.goal_photo_ids = goal_photo_ids
+                        log.info("Goal found in map at photo nodes: %s", goal_photo_ids[:5])
+                    else:
+                        log.info("Goal not found in map, falling back to explore mode")
+                else:
+                    log.info("No map found in Neo4j for place '%s'", place_name)
+        except Exception as e:
+            log.warning("Failed to load map from Neo4j: %s", e)
+
+    s.nav_mode = nav_mode
+
+    if nav_mode == "map":
+        guidance = f"已載入「{place_name}」地圖，找到目標位置。拍一張照片開始定位導航。"
+    else:
+        guidance = "Upload a starting photo so I can see where you are."
+
     return StartSessionResponse(
         session_id=s.id,
-        guidance="Upload a starting photo so I can see where you are.",
+        guidance=guidance,
         goal_objects=goal_objects,
+        nav_mode=nav_mode,
+        goal_photo_ids=goal_photo_ids[:5],
+        place_name=place_name,
     )
 
 
@@ -466,6 +506,40 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
              ocr_results=ocr_results, goal_objects=s.goal_objects,
              region_mode=not has_grounding)
 
+    # ── Localization against topo_v2 map ──
+    localized_photo_id: Optional[int] = None
+    localization_score: Optional[float] = None
+    localization_candidates: list[dict] = []
+    if s.topo_v2 is not None:
+        try:
+            from server.locate_v2 import localize_photo as _localize
+            loc_result = _localize(
+                s.topo_v2, det_dicts, img_w, img_h,
+                ocr_items=ocr_bbox_list or None,
+                top_k=5,
+            )
+            if loc_result.best:
+                localized_photo_id = loc_result.best.photo_id
+                localization_score = round(loc_result.best.score, 4)
+                log.info("[session %s] localized to P%d (score=%.3f, matched=%d/%d)",
+                         session_id, loc_result.best.photo_rank,
+                         loc_result.best.score, loc_result.best.matched_count,
+                         loc_result.best.query_object_count)
+            localization_candidates = [
+                {
+                    "photo_id": c.photo_id,
+                    "photo_rank": c.photo_rank,
+                    "score": round(c.score, 4),
+                    "matched_count": c.matched_count,
+                    "region": c.region,
+                }
+                for c in loc_result.candidates[:5]
+            ]
+            if loc_result.warning:
+                log.info("[session %s] localization warning: %s", session_id, loc_result.warning)
+        except Exception as e:
+            log.warning("[session %s] localization failed: %s", session_id, e)
+
     # Save map JSON and PNG after each photo
     map_dir = out_dir / "map"
     map_dir.mkdir(parents=True, exist_ok=True)
@@ -531,6 +605,10 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         question=vlm_resp.question,
         node_id=nid,
         annotated_photo_url=f"/session/{session_id}/photo/{nid}.jpg",
+        localized_photo_id=localized_photo_id,
+        localization_score=localization_score,
+        localization_candidates=localization_candidates,
+        goal_photo_ids=s.goal_photo_ids[:5] if s.goal_photo_ids else [],
     )
 
 

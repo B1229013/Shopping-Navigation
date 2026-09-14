@@ -27,12 +27,15 @@ from server.goal_decomposer import decompose_goal
 from server.graph_renderer import (
     render_goal_graph, augment_goal_classes, postprocess_detections,
 )
+from server.config import normalize_label
 from server.map_store import MapStore
 from server.models import VLMAction, VLMResponse
+from server.neo4j_map_store import Neo4jMapStore
 from server.ocr import OCR, OCRResult
 from server.perception import Detection as PerceptionDetection, Perception, verify_goal_detection
 from server.session import Session
 from server.topomap import TopoMap
+from server.topomap_v2 import TopoGraphV2, NTYPE_OBJECT, ETYPE_WALKWAY
 from server.vlm import (
     decide as vlm_decide,
     perceive_and_decide as vlm_perceive_and_decide,
@@ -47,6 +50,122 @@ router = APIRouter(prefix="/snav", tags=["sensor-nav"])
 
 _sessions: Dict[str, Session] = {}
 _map_store = MapStore()
+_neo4j_store: Optional[Neo4jMapStore] = None
+
+
+def _get_neo4j_store() -> Optional[Neo4jMapStore]:
+    """Lazy-init Neo4j connection; returns None if env vars are missing."""
+    global _neo4j_store
+    if _neo4j_store is not None:
+        return _neo4j_store
+    import os
+    if not os.getenv("NEO4J_URI"):
+        return None
+    try:
+        _neo4j_store = Neo4jMapStore()
+        _neo4j_store.ping()
+        log.info("Neo4j map store connected")
+        return _neo4j_store
+    except Exception as e:
+        log.warning("Neo4j map store unavailable: %s", e)
+        return None
+
+
+def _search_goal_in_topo(topo: TopoGraphV2, goal: str, goal_objects: List[str]) -> List[int]:
+    """Search TopoGraphV2 for photo nodes whose objects match the goal.
+
+    Returns photo_ids sorted by match score (best first).
+    Uses keyword position weighting (earlier = more relevant) and
+    IDF penalty (labels appearing on many photos score lower).
+    """
+    import math
+
+    goal_lower = goal.lower()
+
+    # Build keyword list with position-based weight:
+    # first 1/3 of list = core (weight 1.0), rest = context (weight 0.3)
+    core_cutoff = max(len(goal_objects) // 3, 3)
+    kw_entries = []
+    for i, kw in enumerate(goal_objects):
+        w = 1.0 if i < core_cutoff else 0.3
+        kw_entries.append((kw.lower(), normalize_label(kw), w))
+
+    # Build IDF: count how many photos each label_norm appears on
+    label_photo_count: Dict[str, int] = {}
+    total_photos = 0
+    for nid, data in topo.graph.nodes(data=True):
+        if data.get("ntype") != NTYPE_OBJECT:
+            continue
+        ln = data.get("label_norm", "")
+        pid = data.get("photo_id")
+        if ln and pid is not None:
+            key = f"{ln}::{pid}"
+            if key not in label_photo_count:
+                label_photo_count.setdefault(ln, 0)
+                label_photo_count[ln] += 1
+                label_photo_count[key] = 1
+    total_photos = len(topo.all_photo_nodes())
+    # Clean up compound keys
+    label_photo_count = {k: v for k, v in label_photo_count.items() if "::" not in k}
+
+    def _idf(label_norm: str) -> float:
+        df = label_photo_count.get(label_norm, 0)
+        if df == 0 or total_photos == 0:
+            return 1.0
+        ratio = df / total_photos
+        if ratio > 0.15:
+            return 0.2
+        if ratio > 0.05:
+            return 0.5
+        return 1.0
+
+    photo_scores: Dict[int, float] = {}
+    for nid, data in topo.graph.nodes(data=True):
+        if data.get("ntype") != NTYPE_OBJECT:
+            continue
+        label_norm = data.get("label_norm", "")
+        label_raw = (data.get("label") or "").lower()
+        ocr_text = (data.get("ocr_text") or "").lower()
+        photo_id = data.get("photo_id")
+        if photo_id is None:
+            continue
+
+        score = 0.0
+        idf = _idf(label_norm)
+
+        # Label matching against keywords
+        best_label_score = 0.0
+        for kw_low, kw_norm, kw_weight in kw_entries:
+            if not kw_norm and not kw_low:
+                continue
+            s = 0.0
+            if label_norm and kw_norm and label_norm == kw_norm:
+                s = 3.0 * kw_weight * idf
+            elif label_norm and kw_norm and (kw_norm in label_norm or label_norm in kw_norm):
+                s = 1.5 * kw_weight * idf
+            elif kw_low and label_raw and (kw_low in label_raw or label_raw in kw_low):
+                s = 1.5 * kw_weight * idf
+            if s > best_label_score:
+                best_label_score = s
+        score += best_label_score
+
+        # OCR matching (no IDF — OCR text is specific)
+        if ocr_text:
+            best_ocr_score = 0.0
+            if goal_lower in ocr_text:
+                best_ocr_score = 3.0
+            for kw_low, _, kw_weight in kw_entries:
+                if kw_low and len(kw_low) >= 2 and kw_low in ocr_text:
+                    s = 2.0 * kw_weight
+                    if s > best_ocr_score:
+                        best_ocr_score = s
+            score += best_ocr_score
+
+        if score > 0:
+            photo_scores[photo_id] = photo_scores.get(photo_id, 0.0) + score
+
+    ranked = sorted(photo_scores.items(), key=lambda x: x[1], reverse=True)
+    return [pid for pid, _ in ranked]
 
 # ── Lazy singletons (same pattern as server.py) ──
 
@@ -104,6 +223,7 @@ class PdrData(BaseModel):
 class SNavStartRequest(BaseModel):
     goal: str
     map_id: Optional[str] = None
+    place_name: Optional[str] = None
 
 
 class SNavStartResponse(BaseModel):
@@ -111,6 +231,9 @@ class SNavStartResponse(BaseModel):
     guidance: str
     action: str = "TAKE_PHOTO"
     goal_objects: List[str]
+    nav_mode: str = "explore"  # "map" or "explore"
+    goal_photo_ids: List[int] = []
+    place_name: str = ""
 
 
 class SNavTurnResponse(BaseModel):
@@ -122,6 +245,11 @@ class SNavTurnResponse(BaseModel):
     step_guidance: Optional[str] = None
     estimated_remaining_steps: Optional[int] = None
     estimated_remaining_distance: Optional[float] = None
+    # 定位檢索結果（有 topo_v2 地圖時）
+    localized_photo_id: Optional[int] = None
+    localization_score: Optional[float] = None
+    localization_candidates: List[dict] = []
+    goal_photo_ids: List[int] = []
 
 
 class AnswerRequest(BaseModel):
@@ -220,7 +348,7 @@ def start_session(req: SNavStartRequest) -> SNavStartResponse:
     sid = uuid.uuid4().hex[:8]
     s = Session(id=sid, goal=req.goal, goal_objects=goal_objects)
 
-    # Load existing map if specified
+    # Load existing map if specified (local JSON)
     if req.map_id:
         loaded_topo, meta = _map_store.load(req.map_id)
         if loaded_topo is not None:
@@ -228,18 +356,59 @@ def start_session(req: SNavStartRequest) -> SNavStartResponse:
             log.info("Loaded map %s (%s) with %d nodes",
                      req.map_id, meta.get("name", ""), loaded_topo.graph.number_of_nodes())
 
+    # Load TopoGraphV2 from Neo4j if place_name is given
+    nav_mode = "explore"
+    goal_photo_ids: List[int] = []
+    place_name = req.place_name or ""
+
+    if place_name:
+        neo4j = _get_neo4j_store()
+        if neo4j is not None:
+            try:
+                topo_v2 = neo4j.download(place_name)
+                if topo_v2 is not None:
+                    s.topo_v2 = topo_v2
+                    s.place_name = place_name
+                    photo_count = len(topo_v2.all_photo_nodes())
+                    obj_count = len(topo_v2.all_object_nodes())
+                    log.info("[snav] Loaded TopoGraphV2 '%s' from Neo4j: %d photos, %d objects",
+                             place_name, photo_count, obj_count)
+
+                    goal_photo_ids = _search_goal_in_topo(topo_v2, req.goal, goal_objects)
+                    if goal_photo_ids:
+                        nav_mode = "map"
+                        s.goal_photo_ids = goal_photo_ids
+                        log.info("[snav] Goal found in map at photo nodes: %s", goal_photo_ids[:5])
+                    else:
+                        log.info("[snav] Goal not found in map, falling back to explore mode")
+                else:
+                    log.info("[snav] No map found in Neo4j for place '%s'", place_name)
+            except Exception as e:
+                log.warning("[snav] Failed to load from Neo4j: %s", e)
+
+    s.nav_mode = nav_mode
+
     _sessions[sid] = s
-    log.info("[snav] New session %s | goal: %s | objects: %s", sid, req.goal, goal_objects)
+    log.info("[snav] New session %s | goal: %s | objects: %s | mode: %s",
+             sid, req.goal, goal_objects, nav_mode)
 
     out_dir = ensure_output_dir(f"snav_{sid}")
     graph_dir = out_dir / "graph"
     graph_dir.mkdir(parents=True, exist_ok=True)
     render_goal_graph(req.goal, goal_objects, str(graph_dir / "goal_graph.png"))
 
+    if nav_mode == "map":
+        guidance = f"已載入「{place_name}」地圖，找到目標位置。拍一張照片開始定位導航。"
+    else:
+        guidance = "拍一張照片開始導航，感測器已在背景追蹤步行。"
+
     return SNavStartResponse(
         session_id=sid,
-        guidance="拍一張照片開始導航，感測器已在背景追蹤步行。",
+        guidance=guidance,
         goal_objects=goal_objects,
+        nav_mode=nav_mode,
+        goal_photo_ids=goal_photo_ids[:5],
+        place_name=place_name,
     )
 
 
@@ -477,6 +646,40 @@ async def upload_photo(
              ocr_results=ocr_results, goal_objects=s.goal_objects,
              region_mode=not has_grounding)
 
+    # ── Localization against topo_v2 map ──
+    localized_photo_id: Optional[int] = None
+    localization_score: Optional[float] = None
+    localization_candidates: list[dict] = []
+    if s.topo_v2 is not None:
+        try:
+            from server.locate_v2 import localize_photo as _localize
+            loc_result = _localize(
+                s.topo_v2, det_dicts, img_w, img_h,
+                ocr_items=ocr_bbox_list or None,
+                top_k=5,
+            )
+            if loc_result.best:
+                localized_photo_id = loc_result.best.photo_id
+                localization_score = round(loc_result.best.score, 4)
+                log.info("[snav %s] localized to P%d (score=%.3f, matched=%d/%d)",
+                         session_id, loc_result.best.photo_rank,
+                         loc_result.best.score, loc_result.best.matched_count,
+                         loc_result.best.query_object_count)
+            localization_candidates = [
+                {
+                    "photo_id": c.photo_id,
+                    "photo_rank": c.photo_rank,
+                    "score": round(c.score, 4),
+                    "matched_count": c.matched_count,
+                    "region": c.region,
+                }
+                for c in loc_result.candidates[:5]
+            ]
+            if loc_result.warning:
+                log.info("[snav %s] localization warning: %s", session_id, loc_result.warning)
+        except Exception as e:
+            log.warning("[snav %s] localization failed: %s", session_id, e)
+
     # Save raw sensor data
     if pdr and pdr.raw_sensors:
         sensor_dir = out_dir / "sensors"
@@ -550,6 +753,10 @@ async def upload_photo(
         step_guidance=step_guidance,
         estimated_remaining_steps=remaining_steps,
         estimated_remaining_distance=round(remaining_dist, 1) if remaining_dist else None,
+        localized_photo_id=localized_photo_id,
+        localization_score=localization_score,
+        localization_candidates=localization_candidates,
+        goal_photo_ids=s.goal_photo_ids[:5] if s.goal_photo_ids else [],
     )
 
 
@@ -692,6 +899,48 @@ def delete_map(map_id: str):
     if not _map_store.delete(map_id):
         raise HTTPException(status_code=404, detail={"error": "map_not_found"})
     return {"status": "deleted", "map_id": map_id}
+
+
+# ── Neo4j map endpoints ──
+
+@router.get("/neo4j/places")
+def list_neo4j_places():
+    """List all places stored in Neo4j."""
+    neo4j = _get_neo4j_store()
+    if neo4j is None:
+        raise HTTPException(status_code=503, detail={"error": "neo4j_unavailable"})
+    return neo4j.list_places()
+
+
+@router.get("/neo4j/places/{place_name}/preview")
+def preview_neo4j_place(place_name: str, goal: Optional[str] = Query(default=None)):
+    """Preview a Neo4j map: node counts and optional goal search."""
+    neo4j = _get_neo4j_store()
+    if neo4j is None:
+        raise HTTPException(status_code=503, detail={"error": "neo4j_unavailable"})
+    topo = neo4j.download(place_name)
+    if topo is None:
+        raise HTTPException(status_code=404, detail={"error": "place_not_found"})
+
+    photo_nodes = topo.all_photo_nodes()
+    object_nodes = topo.all_object_nodes()
+
+    result = {
+        "place_name": place_name,
+        "photo_count": len(photo_nodes),
+        "object_count": len(object_nodes),
+    }
+
+    if goal:
+        goal_objects = decompose_goal(goal)
+        goal_objects = augment_goal_classes(goal, goal_objects)
+        goal_photo_ids = _search_goal_in_topo(topo, goal, goal_objects)
+        result["goal"] = goal
+        result["goal_objects"] = goal_objects
+        result["goal_found"] = len(goal_photo_ids) > 0
+        result["goal_photo_ids"] = goal_photo_ids[:5]
+
+    return result
 
 
 # ── Static files (annotated photos) ──

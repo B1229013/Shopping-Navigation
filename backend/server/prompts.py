@@ -4,15 +4,19 @@ GOAL_DECOMPOSE_PROMPT = """\
 A person wants to find "{goal}" in an indoor environment (could be a retail
 store, supermarket, office, department, or campus building). List the object
 labels an object detector should look for, covering ALL of:
-- the exact target and its common variants
-- the area or section it belongs to (e.g. dairy section, reception area, corridor)
+- the exact target and its common variants, in BOTH English and Traditional Chinese
+- the area or section it belongs to (e.g. dairy section, 乳製品區, frozen food, 冷凍食品)
 - nearby landmark objects (e.g. refrigerator, shelf, door, sign, cabinet)
-- signage text that might appear (e.g. section sign, room name plate, directional sign)
-Give 6-10 items as a single comma-separated list. Be specific.
+- signage text that might appear in Chinese (e.g. 乳製品, 冷藏食品, 收銀台)
+- signage text that might appear in English (e.g. Dairy, Frozen, Cashier)
+- well-known brand names that belong to this product category (e.g. for chips: Lay's, Pringles, Doritos, 樂事, 品客)
+Give 10-15 items as a single comma-separated list. Include BOTH English and Chinese for each concept. Be specific — avoid generic words like "shelf", "door", "product".
 Reply ONLY with the list, no preamble.
 
-Example for "find milk":
-milk, milk carton, milk bottle, dairy section, refrigerator, cooler, dairy sign
+Example for "牛奶":
+milk, milk carton, milk bottle, 牛奶, 鮮奶, 鮮乳, dairy section, 乳製品, refrigerator, cooler, 冷藏食品
+Example for "洋芋片":
+chips, potato chips, snack bags, 洋芋片, 薯片, Lay's, 樂事, Pringles, 品客, Doritos, 多力多滋, snack aisle, 零食
 """
 
 
@@ -90,6 +94,7 @@ Rules for ocr_texts:
 - IMPORTANT: Read product labels and price tags on shelves — these identify what products are available.
 - Include both English and Chinese (Traditional/Simplified).
 - ACCURACY: Report EXACTLY the text you see, character by character. Do NOT substitute similar words — "衛生棉" and "衛生紙" are DIFFERENT products. Do NOT change text to match the goal items. If you cannot read it clearly, lower the score instead of guessing.
+- ONLY report text that you can literally SEE as printed/written characters in the image. Do NOT infer or translate from icons, symbols, or pictograms. A green running-man exit sign is NOT OCR text "出口" unless the characters "出口" are actually printed on it. If you see a symbol/icon but no readable characters, do NOT add it to ocr_texts.
 - position: where in the frame. Use the same format as detections. Example: "center top, near"
 
 Rules for scene_description:

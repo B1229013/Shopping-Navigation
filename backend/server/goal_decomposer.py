@@ -17,7 +17,7 @@ from server.prompts import GOAL_DECOMPOSE_PROMPT
 
 log = logging.getLogger(__name__)
 
-_MAX_ITEMS = 10
+_MAX_ITEMS = 35
 
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
 
@@ -89,8 +89,8 @@ def decompose_goal(goal: str) -> List[str]:
         log.warning("goal decompose failed (%s): %s — falling back", VLM_BACKEND, e)
         return _fallback(goal)
 
-    items = [s.strip().lower() for s in text.split(",")]
-    items = [s for s in items if 1 <= len(s) <= 30]
+    items = [s.strip() for s in text.split(",")]
+    items = [s for s in items if 1 <= len(s) <= 40]
     if not (1 <= len(items) <= _MAX_ITEMS):
         log.warning("goal decompose produced %d items — falling back", len(items))
         return _fallback(goal)

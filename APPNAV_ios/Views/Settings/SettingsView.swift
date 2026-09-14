@@ -9,6 +9,9 @@ struct SettingsView: View {
     @AppStorage("navigationBackendURL") private var navigationBackendURL = AppConfig.navigationBackendURL
     @State private var showSignOutAlert = false
     @State private var showSensorTest = false
+    @State private var showTopoMapTest = false
+    @State private var showSensorComboTest = false
+    @State private var showGPSLogger = false
 
     var body: some View {
         NavigationView {
@@ -83,6 +86,30 @@ struct SettingsView: View {
                             Text("計步器測試")
                         }
                     }
+                    Button {
+                        showTopoMapTest = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
+                            Text("拓樸地圖測試")
+                        }
+                    }
+                    Button {
+                        showSensorComboTest = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.triangle.branch")
+                            Text("感測器組合測試")
+                        }
+                    }
+                    Button {
+                        showGPSLogger = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "location.fill")
+                            Text("GPS 記錄")
+                        }
+                    }
                 }
 
                 // App info
@@ -122,6 +149,15 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showSensorTest) {
                 SensorTestView()
+            }
+            .sheet(isPresented: $showTopoMapTest) {
+                TopoMapTestView()
+            }
+            .sheet(isPresented: $showSensorComboTest) {
+                SensorComboTestView()
+            }
+            .sheet(isPresented: $showGPSLogger) {
+                GPSLoggerView()
             }
         }
     }

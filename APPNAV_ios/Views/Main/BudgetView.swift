@@ -67,7 +67,7 @@ struct BudgetView: View {
                 .presentationDetents([.height(200)])
         }
         .photosPicker(isPresented: .constant(false), selection: $selectedPhotoItem, matching: .images)
-        .onChange(of: selectedPhotoItem) { _, newItem in
+        .onChange(of: selectedPhotoItem) { newItem in
             Task {
                 if let data = try? await newItem?.loadTransferable(type: Data.self),
                    let image = UIImage(data: data) {
@@ -318,7 +318,7 @@ struct BudgetView: View {
                     .frame(maxWidth: .infinity).padding().background(Color.appSurface).foregroundColor(.appTextPrimary).cornerRadius(14)
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.appBorder, lineWidth: 1))
             }
-            .onChange(of: selectedPhotoItem) { _, _ in showAddSheet = false }
+            .onChange(of: selectedPhotoItem) { _ in showAddSheet = false }
             .padding(.bottom, 16)
         }
         .padding(.horizontal, 20)

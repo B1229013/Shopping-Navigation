@@ -62,9 +62,26 @@ final class NavigationSessionManager: ObservableObject {
         tracker.reloadCalibration()
     }
 
+    /// Call after `GyroCalibrator` saves a new bias so this session's tracker picks it up
+    /// without needing an app relaunch — same reasoning as `reloadCalibration()`.
+    func reloadGyroBias() {
+        tracker.reloadGyroBias()
+    }
+
     private func handle(_ point: PathPoint) {
-        currentPoint = point
-        let node = map.ingest(point)
+        let (node, driftCorrection) = map.ingest(point)
+
+        var correctedPoint = point
+        if let driftCorrection {
+            // Revisiting an already-mapped node — pull the live dead-reckoning estimate
+            // back toward that anchor so drift doesn't keep growing for the rest of the
+            // session (see TopologicalMap.ingest and MotionPathTracker.applyDriftCorrection).
+            tracker.applyDriftCorrection(dx: driftCorrection.dx, dy: driftCorrection.dy)
+            correctedPoint.x += driftCorrection.dx
+            correctedPoint.y += driftCorrection.dy
+        }
+
+        currentPoint = correctedPoint
         nodeCount = map.nodes.count
         loopDetector.recordVisit(nodeID: node.id, at: point.timestamp)
     }

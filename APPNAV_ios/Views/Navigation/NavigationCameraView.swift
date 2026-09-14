@@ -77,8 +77,14 @@ struct NavigationCameraView: View {
             requestCameraAccessIfNeeded()
             camera.configure()
             camera.start()
+            // Reset loop banner from any previous session
+            loopBanner = nil
             sensorSession.onLoopDetected = { event in
                 loopBanner = "偵測到您可能在原地繞圈（第 \(event.repeatCount) 次經過同一節點）"
+                // Auto-dismiss after 5 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    if loopBanner != nil { loopBanner = nil }
+                }
             }
             sensorSession.start()
         }
@@ -242,7 +248,7 @@ struct NavigationCameraView: View {
                     .frame(maxWidth: .infinity).frame(height: 46)
                     .buttonStyle(.borderedProminent).tint(.blue)
                     .disabled(isUploading)
-                    .onChange(of: galleryItem) { _, newItem in
+                    .onChange(of: galleryItem) { newItem in
                         uploadFromGallery(newItem)
                     }
                 }

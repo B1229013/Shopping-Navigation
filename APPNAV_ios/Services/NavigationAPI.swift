@@ -4,6 +4,7 @@ import Foundation
 
 struct StartSessionRequest: Codable {
     let goal: String
+    let place: String?
 }
 
 struct StartSessionResponse: Codable {
@@ -11,6 +12,18 @@ struct StartSessionResponse: Codable {
     let guidance: String
     let action: String
     let goalObjects: [String]
+    let place: String?
+}
+
+struct PlaceInfo: Codable, Identifiable, Hashable {
+    let name: String
+    let photoCount: Int
+
+    var id: String { name }
+}
+
+struct PlacesResponse: Codable {
+    let places: [PlaceInfo]
 }
 
 struct TurnResponse: Codable {
@@ -19,6 +32,36 @@ struct TurnResponse: Codable {
     let question: String?
     let nodeId: Int
     let annotatedPhotoUrl: String?
+    // Neo4j visual localization (position correction from reference map)
+    let correctedNodeId: Int?
+    let correctedConfidence: Double?
+    let correctedLocation: String?
+}
+
+/// Response from the standalone /localize endpoint.
+struct LocalizationResponse: Codable {
+    let matchedNid: Int?
+    let confidence: Double
+    let method: String
+    let reasoning: String
+    let detectedObjects: [String]?
+    let ocrTexts: [String]?
+    let refLocation: RefLocation?
+    let runnerUp: RunnerUp?
+
+    struct RefLocation: Codable {
+        let nid: Int
+        let photoFile: String
+        let pdrX: Double
+        let pdrY: Double
+        let headingDeg: Double
+        let session: String
+    }
+
+    struct RunnerUp: Codable {
+        let nid: Int
+        let score: Double
+    }
 }
 
 struct AnswerRequest: Codable {
@@ -78,10 +121,22 @@ struct SensorTestLap: Codable {
     let distanceFromPreviousLap: Double
 }
 
+/// Snapshot of the heading-fusion A/B toggle and gait profile in effect for one
+/// `SensorTestView` walk, so a later look at the uploaded record.json can tell which
+/// configuration actually produced it instead of guessing.
+struct SensorTestConfig: Codable {
+    var useGyroFusion: Bool
+    var useCalibrationCorrection: Bool
+    var heightCM: Double
+    var gaitK: Double
+    var gaitK1: Double
+}
+
 struct SensorTestRecord: Codable {
     let points: [PathPoint]
     let laps: [SensorTestLap]
     let recordedAt: Double
+    let config: SensorTestConfig?
 }
 
 struct SensorTestUploadResponse: Codable {
@@ -130,10 +185,16 @@ final class NavigationAPI {
         return try decoder.decode(T.self, from: data)
     }
 
-    func startSession(goal: String) async throws -> StartSessionResponse {
+    func getPlaces() async throws -> [PlaceInfo] {
+        let request = try request(path: "places", method: "GET")
+        let response: PlacesResponse = try await send(request)
+        return response.places
+    }
+
+    func startSession(goal: String, place: String? = nil) async throws -> StartSessionResponse {
         var request = try request(path: "session", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(StartSessionRequest(goal: goal))
+        request.httpBody = try encoder.encode(StartSessionRequest(goal: goal, place: place))
         return try await send(request)
     }
 
@@ -191,13 +252,32 @@ final class NavigationAPI {
     /// Uploads a standalone PDR sensor-accuracy test (SensorTestView.swift) — no
     /// navigation session involved. Backend stores the raw path + laps and renders
     /// a PNG plot; returns the test_id used to fetch that plot back.
-    func uploadSensorTest(points: [PathPoint], laps: [SensorTestLap]) async throws -> String {
+    func uploadSensorTest(points: [PathPoint], laps: [SensorTestLap], config: SensorTestConfig?) async throws -> String {
         var request = try request(path: "sensor-test", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body = SensorTestRecord(points: points, laps: laps, recordedAt: Date().timeIntervalSince1970 * 1000)
+        let body = SensorTestRecord(points: points, laps: laps, recordedAt: Date().timeIntervalSince1970 * 1000, config: config)
         request.httpBody = try encoder.encode(body)
         let response: SensorTestUploadResponse = try await send(request)
         return response.testId
+    }
+
+    /// Standalone localization: upload a photo and get the matching reference
+    /// node from the Neo4j topological map, without starting a navigation session.
+    func localize(imageData: Data) async throws -> LocalizationResponse {
+        var request = try request(path: "localize", method: "POST")
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 120
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"photo\"; filename=\"photo.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        return try await send(request)
     }
 
     func health() async throws -> HealthResponse {

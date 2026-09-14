@@ -79,7 +79,7 @@ struct AIView: View {
                 .padding(.vertical, 8)
                 .padding(.bottom, 20)
             }
-            .onChange(of: messages.count) { _, _ in
+            .onChange(of: messages.count) { _ in
                 withAnimation {
                     proxy.scrollTo(messages.last?.id, anchor: .bottom)
                 }

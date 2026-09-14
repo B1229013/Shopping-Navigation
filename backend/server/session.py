@@ -14,6 +14,7 @@ class Session:
     id: str
     goal: str
     goal_objects: List[str]
+    place: Optional[str] = None  # which map/place this session navigates in
     topomap: TopoMap = field(default_factory=TopoMap)
     history: List[dict] = field(default_factory=list)
     pending_question: Optional[str] = None
@@ -32,6 +33,7 @@ class Session:
     corrections: List[str] = field(default_factory=list)
     false_positive_nodes: List[int] = field(default_factory=list)
     repeated_misidentification_count: int = 0
+    last_corrected_nid: Optional[int] = None   # Neo4j reference node from visual localization
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -39,9 +41,9 @@ class SessionStore:
     def __init__(self) -> None:
         self._sessions: Dict[str, Session] = {}
 
-    def create(self, goal: str, goal_objects: List[str]) -> Session:
+    def create(self, goal: str, goal_objects: List[str], place: Optional[str] = None) -> Session:
         sid = uuid.uuid4().hex[:8]
-        s = Session(id=sid, goal=goal, goal_objects=goal_objects)
+        s = Session(id=sid, goal=goal, goal_objects=goal_objects, place=place)
         self._sessions[sid] = s
         return s
 

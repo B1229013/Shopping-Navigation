@@ -88,6 +88,8 @@ from server.vlm import (
     warm_up as _vlm_warm_up,
     ask_about_image as _vlm_ask_about_image,
 )
+from server.neo4j_client import get_neo4j
+from server.visual_localization import localize as _localize_photo
 
 log = logging.getLogger(__name__)
 
@@ -189,6 +191,20 @@ async def http_exc_handler(request, exc: HTTPException):
     return JSONResponse(status_code=exc.status_code, content=body)
 
 
+@app.get("/places")
+def list_places():
+    """Return all available map places from Neo4j."""
+    neo4j = get_neo4j()
+    if neo4j is None:
+        # Fall back: return the default place from config
+        from server.config import NEO4J_PLACE
+        if NEO4J_PLACE:
+            return {"places": [{"name": NEO4J_PLACE, "photo_count": 0}]}
+        return {"places": []}
+    places = neo4j.list_places()
+    return {"places": places}
+
+
 @app.post("/session", response_model=StartSessionResponse)
 def start_session(req: StartSessionRequest) -> StartSessionResponse:
     if not req.goal.strip():
@@ -207,8 +223,17 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
         g for g in goal_objects
         if g.lower() not in _generic_lower or g.lower() in _goal_mapped
     ]
-    log.info("New session | goal: %s | goal_objects: %s", req.goal, goal_objects)
-    s = _store.create(goal=req.goal, goal_objects=goal_objects)
+    # Resolve place: empty string "" = explore mode (no reference map);
+    # None/missing = fall back to .env default; otherwise use client's selection
+    from server.config import NEO4J_PLACE
+    if req.place == "":
+        # Explicit "new map / explore" — no reference map
+        selected_place = None
+        log.info("New session | goal: %s | place: (explore mode) | goal_objects: %s", req.goal, goal_objects)
+    else:
+        selected_place = req.place or NEO4J_PLACE or None
+        log.info("New session | goal: %s | place: %s | goal_objects: %s", req.goal, selected_place, goal_objects)
+    s = _store.create(goal=req.goal, goal_objects=goal_objects, place=selected_place)
 
     # Generate goal graph
     out_dir = ensure_output_dir(s.id)
@@ -221,6 +246,7 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
         session_id=s.id,
         guidance="Upload a starting photo so I can see where you are.",
         goal_objects=goal_objects,
+        place=selected_place,
     )
 
 
@@ -539,6 +565,30 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         json.dumps(det_json, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
+    # ── Neo4j visual localization (position correction) ──────────────
+    # Skip when in explore mode (s.place is None — no reference map)
+    loc_result = None
+    neo4j = get_neo4j() if s.place else None
+    if neo4j:
+        try:
+            loc_result = _localize_photo(
+                detected_labels=detected_labels,
+                ocr_texts=ocr_texts,
+                neo4j=neo4j,
+                hint_nid=getattr(s, "last_corrected_nid", None),
+                place=s.place,
+            )
+            if loc_result.matched_nid is not None:
+                s.last_corrected_nid = loc_result.matched_nid
+                log.info("[session %s] Neo4j localization: nid=%d conf=%.2f (%s)",
+                         session_id, loc_result.matched_nid,
+                         loc_result.confidence, loc_result.reasoning)
+            else:
+                log.info("[session %s] Neo4j localization: no confident match (%.2f)",
+                         session_id, loc_result.confidence)
+        except Exception as e:
+            log.warning("[session %s] Neo4j localization error: %s", session_id, e)
+
     if vlm_resp.action == VLMAction.ARRIVED:
         s.pending_arrival = True
         s.goal_node = nid
@@ -555,6 +605,9 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         question=vlm_resp.question,
         node_id=nid,
         annotated_photo_url=f"/session/{session_id}/photo/{nid}.jpg",
+        corrected_node_id=loc_result.matched_nid if loc_result else None,
+        corrected_confidence=round(loc_result.confidence, 3) if loc_result else None,
+        corrected_location=_ref_location_name(loc_result) if loc_result else None,
     )
 
 
@@ -855,6 +908,18 @@ def _check_vlm_and_warm():
     if not os.environ.get("UNIGOAL_TEST_MODE"):
         _vlm_warm_up()
 
+    # Neo4j: connect and pre-load reference map
+    neo4j = get_neo4j()
+    if neo4j:
+        try:
+            ref = neo4j.load_reference_map()
+            log.info("Neo4j reference map: %d photos, %d edges",
+                     len(ref.photos), len(ref.walkway_edges))
+        except Exception as e:
+            log.warning("Neo4j reference map load failed: %s", e)
+    else:
+        log.info("Neo4j not configured — visual localization disabled")
+
 
 @app.post("/ocr")
 async def ocr_extract(image: UploadFile = File(...)):
@@ -886,9 +951,147 @@ async def ocr_extract(image: UploadFile = File(...)):
     }
 
 
+def _ref_location_name(loc_result) -> Optional[str]:
+    """Build a human-readable location name from the localization result."""
+    if not loc_result or not loc_result.ref_node:
+        return None
+    node = loc_result.ref_node
+    # Use session + photo file as a rough location label
+    return f"{node.session} #{node.nid} ({node.photo_file})"
+
+
+@app.post("/localize")
+async def localize_photo(photo: UploadFile = File(...), place: str = Query(default="")):
+    """Standalone endpoint: upload a photo, get the matching reference node.
+
+    This is for ad-hoc position checks outside a navigation session — the app
+    can call it when the user wants to know "where am I?" without starting a
+    full navigation session. It runs the same VLM perception + Neo4j matching
+    that the session photo upload does, but returns only the localization result.
+    """
+    neo4j = get_neo4j()
+    if neo4j is None:
+        raise HTTPException(status_code=503, detail={
+            "error": "neo4j_unavailable",
+            "detail": "Neo4j not configured or not connected",
+        })
+
+    import tempfile
+    photo_bytes = await photo.read()
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
+            tf.write(photo_bytes)
+            tmp = tf.name
+
+        # Run perception (VLM-only mode since we don't need GroundingDINO for localization)
+        im = Image.open(tmp)
+        im = ImageOps.exif_transpose(im)
+        im = im.convert("RGB")
+        img_w, img_h = im.size
+        if max(img_w, img_h) > 1600:
+            im.thumbnail((1600, 1600))
+            img_w, img_h = im.size
+        im.save(tmp, format="JPEG", quality=85)
+        im.close()
+
+        # Use VLM to perceive the scene
+        perception, _ = _vlm_perceive_and_decide(
+            image_path=tmp,
+            goal="定位",
+            goal_objects=[],
+            topomap_summary="(localization only)",
+            img_w=img_w,
+            img_h=img_h,
+            prior_question=None,
+            prior_answer=None,
+            ocr_formatter=lambda vlm_ocr: "(localization)",
+        )
+
+        detected_labels = [d.label for d in perception.detections]
+        ocr_texts = [t.text for t in perception.ocr_texts]
+
+        # Also try EasyOCR if available
+        ocr_engine = get_ocr()
+        if ocr_engine:
+            easyocr_results = ocr_engine.read(
+                tmp, min_confidence=OCR_MIN_CONFIDENCE, max_results=OCR_MAX_RESULTS)
+            ocr_texts = [r.text for r in easyocr_results] if easyocr_results else ocr_texts
+
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.remove(tmp)
+
+    result = _localize_photo(
+        detected_labels=detected_labels,
+        ocr_texts=ocr_texts,
+        neo4j=neo4j,
+        place=place or None,
+    )
+
+    resp = {
+        "matched_nid": result.matched_nid,
+        "confidence": round(result.confidence, 3),
+        "method": result.method,
+        "reasoning": result.reasoning,
+        "detected_objects": detected_labels,
+        "ocr_texts": ocr_texts,
+    }
+    if result.ref_node:
+        resp["ref_location"] = {
+            "nid": result.ref_node.nid,
+            "photo_file": result.ref_node.photo_file,
+            "pdr_x": result.ref_node.pdr_x,
+            "pdr_y": result.ref_node.pdr_y,
+            "heading_deg": result.ref_node.heading_deg,
+            "session": result.ref_node.session,
+        }
+    if result.runner_up_nid is not None:
+        resp["runner_up"] = {
+            "nid": result.runner_up_nid,
+            "score": round(result.runner_up_score, 3),
+        }
+    return resp
+
+
+@app.get("/reference-map")
+def get_reference_map(place: str = Query(default="")):
+    """Return the reference topological map from Neo4j (for debugging/display)."""
+    neo4j = get_neo4j()
+    if neo4j is None:
+        raise HTTPException(status_code=503, detail={
+            "error": "neo4j_unavailable",
+            "detail": "Neo4j not configured or not connected",
+        })
+    ref = neo4j.load_reference_map(place or None)
+    return {
+        "place": ref.place,
+        "photo_count": len(ref.photos),
+        "edge_count": len(ref.walkway_edges),
+        "photos": [
+            {
+                "nid": p.nid,
+                "photo_file": p.photo_file,
+                "pdr_x": p.pdr_x,
+                "pdr_y": p.pdr_y,
+                "heading_deg": p.heading_deg,
+                "session": p.session,
+                "object_count": len(p.objects),
+                "objects": [o.label for o in p.objects],
+                "ocr_texts": [o.ocr_text for o in p.objects if o.ocr_text],
+            }
+            for p in ref.photos.values()
+        ],
+    }
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    neo4j = get_neo4j()
+    return {
+        "status": "ok",
+        "neo4j": "connected" if neo4j and neo4j.is_connected else "disconnected",
+    }
 
 
 @app.get("/session/{session_id}")

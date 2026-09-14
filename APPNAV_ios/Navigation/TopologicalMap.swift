@@ -40,15 +40,38 @@ final class TopologicalMap {
         self.mergeRadius = mergeRadius
     }
 
+    /// A revisited node's own (x, y) is intentionally left untouched here — dragging it
+    /// toward each new merged point (the old behavior) let a drifted revisit slowly
+    /// corrupt the one thing meant to be trustworthy. Instead the node stays anchored at
+    /// wherever it was first visited, and the caller (NavigationSessionManager) uses the
+    /// returned `driftCorrection` to pull the *live* dead-reckoning position back toward
+    /// that anchor — the causality that actually fixes drift instead of spreading it.
+    ///
+    /// `driftCorrection` only fires on the tick that *transitions into* a node (this merge's
+    /// node differs from `lastNodeID`) — not on every subsequent tick spent merged into that
+    /// same node. Firing on every tick was a real bug: a single footstep (~0.6–0.9m) is
+    /// always well inside `mergeRadius` (3m), so once *any* point merged into a node, the
+    /// correction snapped the caller's position to that node's exact (x, y) — and the very
+    /// next step, still within `mergeRadius` of that same fixed point, would merge and snap
+    /// again, forever. That pins the tracked position to the first node created for the rest
+    /// of the session: no second node can ever form, because the corrected position can
+    /// never actually get `mergeRadius` away from the first one. Confirmed by replaying a
+    /// real recorded walk (324 points) through this exact logic: it collapsed to 1 node with
+    /// 323 corrections — a correction on very nearly every single point. Gating on "this is a
+    /// genuine transition, not a continued stay" is what the doc comment's "revisit" framing
+    /// already implied but the code never actually checked.
     @discardableResult
-    func ingest(_ point: PathPoint) -> PathNode {
+    func ingest(_ point: PathPoint) -> (node: PathNode, driftCorrection: (dx: Double, dy: Double)?) {
         let node: PathNode
+        var driftCorrection: (dx: Double, dy: Double)?
+
         if let index = nearestNodeIndex(to: point), distance(nodes[index], point) <= mergeRadius {
+            let isTransitioningIn = nodes[index].id != lastNodeID
             nodes[index].visitCount += 1
             nodes[index].lastVisitedAt = point.timestamp
-            let n = Double(nodes[index].visitCount)
-            nodes[index].x += (point.x - nodes[index].x) / n
-            nodes[index].y += (point.y - nodes[index].y) / n
+            if isTransitioningIn {
+                driftCorrection = (nodes[index].x - point.x, nodes[index].y - point.y)
+            }
             node = nodes[index]
         } else {
             node = PathNode(x: point.x, y: point.y, firstVisitedAt: point.timestamp, lastVisitedAt: point.timestamp)
@@ -59,7 +82,7 @@ final class TopologicalMap {
             addOrIncrementEdge(from: lastID, to: node.id)
         }
         lastNodeID = node.id
-        return node
+        return (node, driftCorrection)
     }
 
     func reset() {

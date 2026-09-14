@@ -26,10 +26,16 @@ final class LoopDetector {
 
     var onLoopDetected: ((LoopEvent) -> Void)?
 
-    init(repeatThreshold: Int = 3, windowSeconds: Double = 90, cooldownSeconds: Double = 45) {
+    /// Minimum distinct nodes in window — if the user has visited many different
+    /// nodes, passing through the same hub node multiple times is normal navigation,
+    /// not circling.  Only fire when the route is short (few unique nodes).
+    var maxDistinctNodes: Int
+
+    init(repeatThreshold: Int = 4, windowSeconds: Double = 180, cooldownSeconds: Double = 120, maxDistinctNodes: Int = 5) {
         self.repeatThreshold = repeatThreshold
         self.windowSeconds = windowSeconds
         self.cooldownSeconds = cooldownSeconds
+        self.maxDistinctNodes = maxDistinctNodes
     }
 
     func recordVisit(nodeID: String, at timestamp: Double) {
@@ -39,6 +45,11 @@ final class LoopDetector {
 
         let matches = recentVisits.filter { $0.nodeID == nodeID }
         guard matches.count >= repeatThreshold else { return }
+
+        // If the user has visited many distinct nodes in the window, they're
+        // making progress — not circling.  Only flag when the route is short.
+        let distinctCount = Set(recentVisits.map(\.nodeID)).count
+        guard distinctCount <= maxDistinctNodes else { return }
 
         if nodeID == lastFiredNodeID, (timestamp - lastFiredAt) < cooldownSeconds * 1000 {
             return
@@ -50,7 +61,7 @@ final class LoopDetector {
         onLoopDetected?(LoopEvent(
             nodeID: nodeID,
             repeatCount: matches.count,
-            distinctNodesInWindow: Set(recentVisits.map(\.nodeID)).count,
+            distinctNodesInWindow: distinctCount,
             detectedAt: timestamp
         ))
     }

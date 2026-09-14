@@ -28,6 +28,7 @@ class VLMResponse(BaseModel):
 
 class StartSessionRequest(BaseModel):
     goal: str
+    place: Optional[str] = None  # which map/place to navigate in
 
 
 class StartSessionResponse(BaseModel):
@@ -35,6 +36,7 @@ class StartSessionResponse(BaseModel):
     guidance: str
     action: Literal["TAKE_PHOTO"] = "TAKE_PHOTO"
     goal_objects: List[str]
+    place: Optional[str] = None  # the resolved place used for this session
 
 
 class AnswerRequest(BaseModel):
@@ -56,6 +58,10 @@ class TurnResponse(BaseModel):
     question: Optional[str] = None
     node_id: int
     annotated_photo_url: Optional[str] = None
+    # Neo4j visual localization (position correction)
+    corrected_node_id: Optional[int] = None       # reference map node ID
+    corrected_confidence: Optional[float] = None   # 0.0–1.0
+    corrected_location: Optional[str] = None       # human-readable location name
 
 
 class NodeJSON(BaseModel):

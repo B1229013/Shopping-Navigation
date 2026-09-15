@@ -208,7 +208,7 @@ def _ocr_bbox_center(ocr_item: dict) -> Optional[tuple]:
     return None
 
 
-def _associate_ocr_with_detections(detections: List[dict], ocr_items: List[dict]) -> None:
+def _associate_ocr_with_detections(detections: List[dict], ocr_items: List[dict]) -> List[str]:
     """把 `ocr_items`（獨立的 OCR 結果清單）關聯到最近的物件，寫進該
     物件字典的 "nameplate_text" 欄位（原地修改 `detections`）。
 
@@ -225,9 +225,17 @@ def _associate_ocr_with_detections(detections: List[dict], ocr_items: List[dict]
     框，中心點完全一樣），不是隨便選排最前面那個，而是優先選標籤本身
     比較像是「會承載文字」的物件（招牌、告示牌類），其次才照原本順序
     ——同樣是打平手，一段文字關聯到「sign」會比關聯到「door」更合理。
+
+    Returns:
+        「查無所屬」的文字清單——3 個以上物件打平手時（見下方說明），
+        這段文字不會被硬塞給任何一個物件，但也不是完全沒有價值，回傳
+        給呼叫端（`build_subgraph_from_detections()`）存到照片節點本身
+        的 `ambient_ocr_texts` 欄位，供之後可能的「照片對照片，比對有
+        沒有讀到同一句背景文字」這類用途使用（目前定位比對邏輯
+        `locate_v2.py` 還沒有使用這個欄位，純粹先把資料留著）。
     """
     if not ocr_items or not detections:
-        return
+        return []
 
     text_bearing_keywords = (
         "sign", "board", "plaque", "notice", "menu", "poster",
@@ -241,6 +249,8 @@ def _associate_ocr_with_detections(detections: List[dict], ocr_items: List[dict]
             det_centers.append(((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0))
         else:
             det_centers.append(None)
+
+    unassigned_texts: List[str] = []
 
     for ocr_item in ocr_items:
         text = str(ocr_item.get("text", "")).strip()
@@ -260,6 +270,7 @@ def _associate_ocr_with_detections(detections: List[dict], ocr_items: List[dict]
             if best_dist is None or dist < best_dist:
                 best_dist = dist
         if best_dist is None:
+            unassigned_texts.append(text)
             continue
 
         tied_indices = [
@@ -267,6 +278,21 @@ def _associate_ocr_with_detections(detections: List[dict], ocr_items: List[dict]
             if center is not None
             and (center[0] - ocr_center[0]) ** 2 + (center[1] - ocr_center[1]) ** 2 == best_dist
         ]
+
+        # 3 個以上不同物件打平手（VLM 模式常見：一大段裝飾性布條/海報
+        # 文字，跟好幾個不相干的物件剛好共用同一個粗略模板框），這種
+        # 情況通常代表這段文字是牆面裝飾、不是專門描述某一個特定物件
+        # 的門牌/標示牌，硬要猜一個容易猜錯（實測踩到：「InnoServe」
+        # 得獎感謝布條的文字，被誤植到跟它毫不相干的「bucket」身上，
+        # 導致後續定位比對出現「trophies↔bucket」這種標籤對不上、卻
+        # 因為 OCR 文字剛好對上而配對成功的異常結果）。這種情況乾脆
+        # 不猜、直接跳過，比硬猜一個然後猜錯安全，改記到「查無所屬」
+        # 清單裡。只有 2 個物件打平手時（例如一扇門跟旁邊的標示牌），
+        # 才用「優先選招牌類標籤」這條規則去判斷。
+        if len(tied_indices) >= 3:
+            unassigned_texts.append(text)
+            continue
+
         best_idx = min(
             tied_indices,
             key=lambda i: (
@@ -278,6 +304,12 @@ def _associate_ocr_with_detections(detections: List[dict], ocr_items: List[dict]
         det = detections[best_idx]
         if not (det.get("nameplate_text") or det.get("ocr_text")):
             det["nameplate_text"] = text
+        else:
+            # 這個物件已經有文字了(例如同一輪次別的 OCR 項目先佔用)，
+            # 這筆就算沒地方去，一樣記到「查無所屬」清單，不要憑空消失。
+            unassigned_texts.append(text)
+
+    return unassigned_texts
 
 
 def _bbox_iou(box_a: List[float], box_b: List[float]) -> float:
@@ -465,6 +497,7 @@ class TopoGraphV2:
         region: Optional[str] = None,
         is_virtual: bool = False,
         note: str = "",
+        ambient_ocr_texts: Optional[List[str]] = None,
     ) -> int:
         """新增照片節點（子圖的根節點）。
 
@@ -475,6 +508,14 @@ class TopoGraphV2:
                 目前僅原樣保存，供之後的距離/方向計算使用。
             region: 所屬區域標籤（暫時方案，見模組開頭說明）。
             is_virtual: 是否為「虛假照片節點」（代表偵測到但沒走過的路）。
+            ambient_ocr_texts: 「查無所屬」的 OCR 文字清單——這張照片有
+                讀到，但沒辦法安全歸屬給某個特定物件的背景文字（例如
+                牆上的裝飾性布條、跟好幾個不相干物件共用同一個粗略模板
+                框的文字，見 `_associate_ocr_with_detections()` 的說明）。
+                目前只是原樣保存，比對邏輯（`locate_v2.py`）還沒有使用
+                這個欄位；`build_subgraph_from_detections()` 通常會在
+                建完子圖後自動補上這個節點屬性，這裡的參數主要是給
+                想手動指定的呼叫端用。
         """
         nid = self._new_id()
         self.graph.add_node(
@@ -487,6 +528,7 @@ class TopoGraphV2:
             region=region,
             is_virtual=is_virtual,
             note=note,
+            ambient_ocr_texts=list(ambient_ocr_texts) if ambient_ocr_texts else [],
         )
         self._touch()
         return nid
@@ -610,7 +652,6 @@ class TopoGraphV2:
     def add_walkway_edge(
         self, photo_a: int, photo_b: int, *,
         direction: str = "", distance_m: Optional[float] = None,
-        steps: Optional[int] = None,
     ) -> None:
         """第四種邊：photo → photo（走道），單向有向邊。
 
@@ -628,12 +669,9 @@ class TopoGraphV2:
         呼叫 `set_terminal_facing()` 建一條自我迴圈的邊來表示，見該方法
         說明。
         """
-        attrs = dict(etype=ETYPE_WALKWAY, direction=direction, distance_m=distance_m)
-        if steps is not None:
-            attrs["steps"] = steps
         self.graph.add_edge(
             photo_a, photo_b, key=f"walkway_{photo_a}_{photo_b}",
-            **attrs,
+            etype=ETYPE_WALKWAY, direction=direction, distance_m=distance_m,
         )
         self._touch()
 
@@ -698,22 +736,22 @@ class TopoGraphV2:
         # 把獨立的 OCR 結果關聯到最近的物件（見 _associate_ocr_with_detections()
         # 說明）——修正之前「ocr_items 接了但沒真的用來關聯」的問題。
         # 原地修改 detections 裡每個字典（補上 nameplate_text），不影響
-        # 呼叫端傳進來的原始物件參照以外的任何東西。
-        _associate_ocr_with_detections(detections, ocr_items)
+        # 呼叫端傳進來的原始物件參照以外的任何東西。回傳值是「查無所屬」
+        # 的文字（牆面裝飾之類，沒辦法安全歸屬給某個特定物件），存到
+        # 這張照片節點本身的 ambient_ocr_texts 屬性，不要整個丟掉——
+        # 目前比對邏輯還沒有使用這份資料，純粹先保留，見
+        # `_associate_ocr_with_detections()` 開頭的說明。
+        unassigned_ocr_texts = _associate_ocr_with_detections(detections, ocr_items)
+        if photo_id in self.graph.nodes:
+            existing = self.graph.nodes[photo_id].get("ambient_ocr_texts", [])
+            self.graph.nodes[photo_id]["ambient_ocr_texts"] = existing + unassigned_ocr_texts
 
         # 依 bbox 中心 x 座標由左至右排序，符合筆記「最好照著左至右排」的要求
         sorted_dets = sorted(detections, key=lambda d: _bbox_center_x(d.get("box", [])))
 
-        _SKIP_LABELS = {
-            "person", "people", "human", "man", "woman", "child", "kid",
-            "cart", "shopping cart", "trolley", "basket", "shopping basket",
-        }
-
         object_ids: List[int] = []
         for det in sorted_dets:
             label = det.get("label", "unknown")
-            if label.lower() in _SKIP_LABELS:
-                continue
             box = det.get("box", [])
             nameplate = det.get("nameplate_text", "") or det.get("ocr_text", "")
             # 現有系統的 detections_*.json 常常沒有 "position" 欄位
@@ -1133,7 +1171,6 @@ class TopoGraphV2:
 
     def _layout_positions(
         self, photo_font: float = _PHOTO_FONT, object_font: float = _OBJECT_FONT, min_gap: float = 0.45,
-        use_sensor_layout: bool = False,
     ) -> Tuple[Dict[int, Tuple[float, float]], Dict[int, Tuple[float, float]], Dict[int, float]]:
         """把「照片節點沿走道排成一直線、物件節點吊掛在自己照片節點下方」
         設計成座標，取代預設的 spring_layout。
@@ -1169,7 +1206,7 @@ class TopoGraphV2:
         #        距離抓不到數字時就用一個固定的預設步長代替——這仍然只是
         #        「大概的形狀」，不是量出來的真座標，但比純直線更接近實際
         #        場景分布。
-        raw_xy, heading, parent_of = self._dead_reckon_tree(use_sensor_layout=use_sensor_layout)
+        raw_xy, heading, parent_of = self._dead_reckon_tree()
 
         # ── 2. 每張照片底下的物件依「九宮格 (row, col)」排位置：
         #        col 0/1/2（左/中/右）決定物件掛在照片節點哪一「欄」，
@@ -1738,14 +1775,10 @@ class TopoGraphV2:
                     return d
         return {}
 
-    def _dead_reckon_tree(self, use_sensor_layout: bool = False) -> Tuple[Dict[int, Tuple[float, float]], Dict[int, float], Dict[int, int]]:
+    def _dead_reckon_tree(self) -> Tuple[Dict[int, Tuple[float, float]], Dict[int, float], Dict[int, int]]:
         """以「第一張照片（id 最小）」為原點、沿走道邊做死算推位，把每個
         照片節點走道邊組成的圖當成一棵樹（用 BFS 展開，遇到還沒走過的
         節點才展開，天然就是使用者實際走過的分支結構，包括虛假分支節點）。
-
-        use_sensor_layout=True 時，改用節點 sensor_data 裡的 pdr_x/pdr_y
-        座標和 heading_deg 方位角，直接以感測器的 PDR 推算位置排版，
-        而不是從方向文字粗略猜測。
 
         Returns:
             (xy, heading, parent_of)：
@@ -1761,18 +1794,8 @@ class TopoGraphV2:
             return xy, heading, parent_of
 
         root = min(photo_nodes)
-        if use_sensor_layout:
-            root_sd = self.graph.nodes[root].get("sensor_data", {})
-            if "pdr_x" in root_sd and "pdr_y" in root_sd:
-                xy[root] = (root_sd["pdr_x"] * self._UNITS_PER_METER,
-                            root_sd["pdr_y"] * self._UNITS_PER_METER)
-                heading[root] = root_sd.get("heading_deg", 0.0)
-            else:
-                xy[root] = (0.0, 0.0)
-                heading[root] = 0.0
-        else:
-            xy[root] = (0.0, 0.0)
-            heading[root] = 0.0
+        xy[root] = (0.0, 0.0)
+        heading[root] = 0.0
         ug = self._walkway_undirected()
         visited = {root}
         queue = [root]
@@ -1783,16 +1806,6 @@ class TopoGraphV2:
             for nb in sorted(ug.neighbors(cur)):
                 if nb in visited:
                     continue
-                if use_sensor_layout:
-                    nb_sd = self.graph.nodes[nb].get("sensor_data", {})
-                    if "pdr_x" in nb_sd and "pdr_y" in nb_sd:
-                        xy[nb] = (nb_sd["pdr_x"] * self._UNITS_PER_METER,
-                                  nb_sd["pdr_y"] * self._UNITS_PER_METER)
-                        heading[nb] = nb_sd.get("heading_deg", 0.0)
-                        parent_of[nb] = cur
-                        visited.add(nb)
-                        queue.append(nb)
-                        continue
                 edge_data = self._walkway_edge_data(cur, nb)
                 text = edge_data.get("direction", "") or ""
                 turn = self._parse_turn_degrees(text)
@@ -1857,7 +1870,7 @@ class TopoGraphV2:
         )
         ax.add_patch(box)
 
-    def render_png(self, *, use_sensor_layout: bool = False) -> bytes:
+    def render_png(self) -> bytes:
         """把拓樸地圖畫成 PNG（照片＋物件＋所有邊，唯一一種畫法）。
 
         節點是依文字內容自動算出剛好包住文字的方塊（見 `_label_box_size`），
@@ -1884,7 +1897,7 @@ class TopoGraphV2:
             plt.close(fig)
             return buf.getvalue()
 
-        pos, sizes, heading = self._layout_positions(use_sensor_layout=use_sensor_layout)
+        pos, sizes, heading = self._layout_positions()
 
         photo_nodes = self.all_photo_nodes()
         object_nodes = self.all_object_nodes()

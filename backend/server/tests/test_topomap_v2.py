@@ -1176,3 +1176,109 @@ def test_ocr_association_ties_prefer_sign_like_labels():
     objs = {topo.graph.nodes[oid]["label"]: topo.graph.nodes[oid] for oid in object_ids}
     assert objs["sign"]["ocr_text"] == "會議室"
     assert objs["door"]["ocr_text"] == ""
+
+
+def test_ocr_association_skips_three_way_ties_instead_of_guessing():
+    """回歸測試：對應一次真實踩到的問題。VLM 模式底下，一整面牆的
+    裝飾性布條/海報文字（例如比賽得獎感謝布條），常常跟好幾個不相干
+    的物件（水桶、櫃子、咖啡機）剛好共用同一個粗略模板框——3 個以上
+    物件打平手時，這段文字通常是背景裝飾，不是專門描述某一個特定
+    物件的門牌，硬猜一個（例如「優先選標籤裡有關鍵字的」規則在這種
+    情況下沒有任何一個候選是招牌類標籤，只能退化成「選排最前面的」）
+    容易猜錯，反而讓後續定位比對出現「trophies↔bucket」這種標籤對不上
+    卻因為 OCR 文字剛好對上而配對成功的異常結果。3 個以上物件打平手時
+    應該直接跳過，不猜。
+    """
+    topo = TopoGraphV2("測試場所")
+    p = topo.add_photo_node("p.jpg")
+    same_box = [768, 480, 1176, 1120]
+    detections = [
+        {"label": "door", "box": [24, 480, 432, 1120], "score": 0.9},
+        {"label": "bucket", "box": same_box, "score": 0.8},
+        {"label": "cabinet", "box": same_box, "score": 0.9},
+        {"label": "coffee machine", "box": same_box, "score": 0.8},
+    ]
+    ocr_items = [
+        {"text": "InnoServe", "bbox": [[768, 480], [1176, 480], [1176, 1120], [768, 1120]]},
+    ]
+    object_ids = topo.build_subgraph_from_detections(p, detections, 900, 600, ocr_items=ocr_items)
+    objs = {topo.graph.nodes[oid]["label"]: topo.graph.nodes[oid] for oid in object_ids}
+    assert objs["bucket"]["ocr_text"] == ""
+    assert objs["cabinet"]["ocr_text"] == ""
+    assert objs["coffee machine"]["ocr_text"] == ""
+    assert objs["door"]["ocr_text"] == ""
+
+
+# ── 查無所屬的 OCR 文字：存到照片節點的 ambient_ocr_texts，不整個丟棄 ──
+
+def test_unassigned_ocr_text_is_stored_on_photo_node_not_discarded():
+    """3 個以上物件打平手、判斷「查無所屬」的文字，不該憑空消失——
+    應該被存到這張照片節點本身的 `ambient_ocr_texts` 屬性，供之後可能
+    的「照片對照片，比對有沒有讀到同一句背景文字」這類用途使用（目前
+    比對邏輯還沒有用到這個欄位，這裡只驗證資料有沒有正確保留）。
+    """
+    topo = TopoGraphV2("測試場所")
+    p = topo.add_photo_node("p.jpg")
+    same_box = [768, 480, 1176, 1120]
+    detections = [
+        {"label": "door", "box": [24, 480, 432, 1120], "score": 0.9},
+        {"label": "bucket", "box": same_box, "score": 0.8},
+        {"label": "cabinet", "box": same_box, "score": 0.9},
+        {"label": "coffee machine", "box": same_box, "score": 0.8},
+    ]
+    ocr_items = [
+        {"text": "InnoServe", "bbox": [[768, 480], [1176, 480], [1176, 1120], [768, 1120]]},
+    ]
+    topo.build_subgraph_from_detections(p, detections, 900, 600, ocr_items=ocr_items)
+    assert topo.graph.nodes[p]["ambient_ocr_texts"] == ["InnoServe"]
+
+
+def test_assigned_ocr_text_is_not_also_stored_as_ambient():
+    """正常關聯成功的文字（例如 2 個物件打平手、成功選到 sign），只會
+    出現在那個物件的 ocr_text 裡，不該重複出現在 ambient_ocr_texts。
+    """
+    topo = TopoGraphV2("測試場所")
+    p = topo.add_photo_node("p.jpg")
+    same_box = [100, 100, 200, 200]
+    detections = [
+        {"label": "door", "box": same_box, "score": 0.9},
+        {"label": "sign", "box": same_box, "score": 0.8},
+    ]
+    ocr_items = [
+        {"text": "會議室", "bbox": [[100, 100], [200, 100], [200, 200], [100, 200]]},
+    ]
+    topo.build_subgraph_from_detections(p, detections, 900, 600, ocr_items=ocr_items)
+    assert topo.graph.nodes[p]["ambient_ocr_texts"] == []
+
+
+def test_photo_node_without_ambient_ocr_texts_defaults_to_empty_list():
+    """沒有傳 `ocr_items`（例如既有、還沒重新建圖的舊地圖資料），照片
+    節點也該有這個欄位、預設是空清單，不會讓讀取端因為 KeyError 掛掉。
+    """
+    topo = TopoGraphV2("測試場所")
+    p = topo.add_photo_node("p.jpg")
+    assert topo.graph.nodes[p]["ambient_ocr_texts"] == []
+
+
+def test_ambient_ocr_texts_survive_save_and_load():
+    """存檔、讀檔一輪，ambient_ocr_texts 這個新欄位要能正確保留下來
+    （驗證序列化沒有遺漏這個欄位，`to_dict()`/`from_dict()` 是通用地
+    存/讀節點所有屬性，理論上不用特別處理，這裡直接測一次確認）。
+    """
+    topo = TopoGraphV2("測試場所")
+    p = topo.add_photo_node("p.jpg")
+    same_box = [768, 480, 1176, 1120]
+    detections = [
+        {"label": "door", "box": [24, 480, 432, 1120], "score": 0.9},
+        {"label": "bucket", "box": same_box, "score": 0.8},
+        {"label": "cabinet", "box": same_box, "score": 0.9},
+        {"label": "coffee machine", "box": same_box, "score": 0.8},
+    ]
+    ocr_items = [
+        {"text": "InnoServe", "bbox": [[768, 480], [1176, 480], [1176, 1120], [768, 1120]]},
+    ]
+    topo.build_subgraph_from_detections(p, detections, 900, 600, ocr_items=ocr_items)
+
+    restored = TopoGraphV2.from_dict(topo.to_dict())
+    assert restored.graph.nodes[p]["ambient_ocr_texts"] == ["InnoServe"]
+

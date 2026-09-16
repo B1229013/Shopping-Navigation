@@ -88,14 +88,16 @@ Rules for detections:
 - If a product label or packaging is clearly readable, use the actual product name you can read. Do NOT guess or copy example names — only report text you can actually see in the photo.
 - score: your confidence 0.0~1.0. Use the FULL range: 0.9+ only if very clear, 0.5~0.8 if partially visible or uncertain, below 0.5 if guessing. Do NOT default everything to the same value.
 - position: IMPORTANT — describe precisely where the object is in the frame. Use the format: "left/center/right" + "top/middle/bottom" + ", near/far". Example: "right middle, near". This is the primary way we locate objects, so be accurate.
+- near vs far: judge this by how much of the frame the object fills and how much fine detail (small text, texture) you can actually make out — "near" means it's close enough to reach out and touch, filling a large part of the frame with fine print legible; "far" means it's small in the frame, part of a distant row/shelf, or its fine details are not clearly legible even if you can name it. Do NOT default to "near" just because you can identify what the object is — you can often recognize a product from across an aisle.
 
 Rules for ocr_texts:
 - List ALL visible text: aisle signs, nameplates, labels, posters, price tags, directional signs, product names on packaging.
 - IMPORTANT: Read product labels and price tags on shelves — these identify what products are available.
 - Include both English and Chinese (Traditional/Simplified).
 - ACCURACY: Report EXACTLY the text you see, character by character. Do NOT substitute similar words — "衛生棉" and "衛生紙" are DIFFERENT products. Do NOT change text to match the goal items. If you cannot read it clearly, lower the score instead of guessing.
+- If the text you read matches (or closely resembles) one of the goal items {goal_objects}, transcribe it EXACTLY as printed — do not paraphrase or translate it into a different phrasing. This exact text is later matched against the goal, so an exact transcription is what lets the system recognize it.
 - ONLY report text that you can literally SEE as printed/written characters in the image. Do NOT infer or translate from icons, symbols, or pictograms. A green running-man exit sign is NOT OCR text "出口" unless the characters "出口" are actually printed on it. If you see a symbol/icon but no readable characters, do NOT add it to ocr_texts.
-- position: where in the frame. Use the same format as detections. Example: "center top, near"
+- position: where in the frame. Use the same format as detections, including the same near/far judgment described above (based on how much of the frame it fills and how legible it is, not just whether you can read it). Example: "center top, near"
 
 Rules for scene_description:
 - Describe the layout: corridor/aisle/room, what is on each side, the path ahead.
@@ -130,12 +132,13 @@ Decide the next step. Reply with EXACTLY one JSON object on one line, nothing el
 {{"action": "ARRIVED" | "MOVE" | "ASK", "guidance": "<one or two sentences>", "question": "<short question, only if ASK, else null>", "vlm_summary": "<one phrase summarizing the location>"}}
 
 Rules:
-- ARRIVED only if the goal item is clearly visible in the photo (point at it in `guidance`).
+- ARRIVED only if the goal item is clearly visible AND tagged "near" (or otherwise filling a meaningful part of the frame with fine details legible) — point at it in `guidance`. This includes a close-up of the item itself — the goal item does NOT need to be sitting on a visible shelf or rack. A detected label or OCR text that directly names the goal item (or its brand/packaging) is enough to declare ARRIVED, but ONLY when it is tagged "near". A "far" match on the goal item is NOT arrival — see the next rule.
+- If the goal item's name or brand appears in detections or OCR but is tagged "far" (or otherwise small/distant in the frame), do NOT declare ARRIVED. This is strong evidence you are heading the right way — respond MOVE, tell the user to walk toward it, and take another photo once closer.
 - ASK if you cannot decide between two plausible directions and a yes/no answer would resolve it.
 - MOVE otherwise. Tell the user a concrete direction (e.g., "turn left and walk down the corridor, then take another photo").
 - USE the listed positions to give correct directions: if a goal-related item or sign is on the left, say turn left; if on the right, say turn right; if centered and near, say go straight.
-- USE the OCR text to identify places, sections, signs. The text tells you WHERE you are.
-- SHELF STRATEGY: If a shelf/rack is detected but specific products are unclear, guide the user to move closer and take another photo. If product names or labels are visible (via detections or OCR), check whether the goal product is among them.
+- USE the OCR text for TWO purposes, and check both every time: (1) identify places, sections, signs — the text tells you WHERE you are; AND (2) confirm WHAT you found — if any OCR text or detected label matches the goal item's name or brand, treat that as direct evidence (ARRIVED if "near", MOVE-toward-it if "far"), on equal footing with (1), not secondary to it.
+- PRODUCT MATCH STRATEGY: Whether or not a shelf/rack is visible, check every detected label and every OCR text against the goal item. If the goal product's name or brand is among them AND tagged "near", declare ARRIVED. If tagged "far", guide the user toward it instead. If a shelf/rack is visible but the specific products on it are unclear, guide the user to move closer and take another photo.
 - Do NOT invent details not in the photo or detection results.
 - Do NOT invent or assume aisle numbers, room numbers, or location names not visible in the photo or OCR.
 - ALWAYS reply the "guidance" and "question" fields in Traditional Chinese (繁體中文).

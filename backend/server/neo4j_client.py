@@ -5,18 +5,24 @@ No `neo4j` pip package needed — just the `requests` library already in the pro
 
 API docs: https://neo4j.com/docs/http-api/current/
 
-Schema (as stored by the Android topomap builder):
-  (:TopoNode:Photo {place, nid, photo_file, sensor_data_pdr_x, sensor_data_pdr_y,
-                     sensor_data_heading_deg, sensor_data_session, timestamp, ...})
-  (:TopoNode {ntype:"object", label, label_norm, score, ocr_text, role, grid_cell,
-              photo_id, ...})
-  (photo)-[:CONTAINS_*]->(object)
-  (photo)-[:WALKWAY {direction, distance_m, steps}]->(photo)
+Supports two schemas (auto-detected per place):
+
+Schema V2 (new — 4 directional photos per waypoint):
+  (:Waypoint {place, nid, pdr_x, pdr_y, session, timestamp})
+  (:Waypoint)-[:HAS_PHOTO {slot}]->(:DirPhoto {heading_deg, photo_file})
+  (:DirPhoto)-[:DETECTED]->(:Object {label, label_norm, score, ocr_text, role, grid_cell})
+  (:Waypoint)-[:WALKWAY {direction, distance_m, steps}]->(:Waypoint)
+
+Schema V1 (legacy — 1 photo per node):
+  (:TopoNode:Photo {place, nid, photo_file, sensor_data_pdr_x, ...})
+  (:TopoNode:Photo)-[:CONTAINS]->(:Object {label, ...})
+  (:TopoNode:Photo)-[:WALKWAY]->(:TopoNode:Photo)
 """
 from __future__ import annotations
 
 import base64
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -41,8 +47,17 @@ class RefObject:
 
 
 @dataclass
+class DirectionalRef:
+    """One of the 4 directional reference photos at a node (front/right/back/left)."""
+    slot: str             # "front" | "right" | "back" | "left"
+    heading_deg: float    # absolute heading of this directional photo
+    photo_file: str
+    objects: List[RefObject] = field(default_factory=list)
+
+
+@dataclass
 class RefPhotoNode:
-    """A reference photo location from the pre-built topological map."""
+    """A reference waypoint from the pre-built topological map."""
     nid: int
     photo_file: str
     pdr_x: float
@@ -53,12 +68,14 @@ class RefPhotoNode:
     total_distance_m: float
     objects: List[RefObject] = field(default_factory=list)
     neighbor_nids: List[int] = field(default_factory=list)
+    directional_photos: List[DirectionalRef] = field(default_factory=list)
 
 
 @dataclass
 class RefMap:
     """The full reference topological map for one place."""
     place: str
+    schema_version: int = 1
     photos: Dict[int, RefPhotoNode] = field(default_factory=dict)
     walkway_edges: List[dict] = field(default_factory=list)
 
@@ -66,16 +83,10 @@ class RefMap:
 # ── HTTP-based Neo4j client ───────────────────────────────────────────────
 
 def _bolt_to_query_url(bolt_uri: str, database: str = "neo4j") -> str:
-    """Convert a bolt URI to the Neo4j Query API v2 endpoint.
-
-    Aura Free blocks the old tx/commit endpoint (403) but exposes the
-    newer Query API v2 on port 443:
-      neo4j+s://xxx.databases.neo4j.io  →  https://xxx.databases.neo4j.io/db/<database>/query/v2
-    """
+    """Convert a bolt URI to the Neo4j Query API v2 endpoint."""
     uri = bolt_uri.strip()
     if uri.startswith(("neo4j+s://", "bolt+s://", "neo4j+ssc://")):
         host = uri.split("://", 1)[1].rstrip("/")
-        # Aura: standard HTTPS port 443 (no port suffix needed)
         if ":" in host:
             host = host.split(":")[0]
         return f"https://{host}/db/{database}/query/v2"
@@ -114,7 +125,6 @@ class Neo4jClient:
             ).decode()
             self._auth_header = f"Basic {creds}"
 
-            # Ping with a trivial query
             rows = self._query("RETURN 1 AS ok")
             if rows and rows[0].get("ok") == 1:
                 self._connected = True
@@ -139,13 +149,7 @@ class Neo4jClient:
     def _query(
         self, cypher: str, parameters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        """Execute a Cypher statement via the Query API v2 and return rows as dicts.
-
-        POST /db/<database>/query/v2
-        Request:  {"statement": "...", "parameters": {...}}
-        Response: {"data": {"fields": ["col1","col2"], "values": [v1,v2,v3,v4,...]}}
-        Values are flattened: every N consecutive items form one row (N = len(fields)).
-        """
+        """Execute a Cypher statement via the Query API v2 and return rows as dicts."""
         body = {
             "statement": cypher,
             "parameters": parameters or {},
@@ -163,14 +167,11 @@ class Neo4jClient:
         resp.raise_for_status()
         payload = resp.json()
 
-        # Check for Cypher errors
         errors = payload.get("errors", [])
         if errors:
             msg = "; ".join(e.get("message", str(e)) for e in errors)
             raise RuntimeError(f"Neo4j query error: {msg}")
 
-        # Parse Query API v2 response format
-        # {"data": {"fields": ["col1","col2"], "values": [[v1,v2], [v3,v4], ...]}}
         data = payload.get("data", {})
         fields = data.get("fields", [])
         values = data.get("values", [])
@@ -182,12 +183,24 @@ class Neo4jClient:
             rows.append(dict(zip(fields, row_vals)))
         return rows
 
+    # ── Schema detection ─────────────────────────────────────────────────
+
+    def _detect_schema(self, place: str) -> int:
+        """Detect which schema a place uses. Returns 2 for new, 1 for legacy."""
+        rows = self._query(
+            "MATCH (w:Waypoint {place: $place}) RETURN count(w) AS cnt",
+            {"place": place},
+        )
+        if rows and rows[0]["cnt"] > 0:
+            return 2
+        return 1
+
     # ── Load reference map ────────────────────────────────────────────────
 
     def load_reference_map(self, place: Optional[str] = None) -> RefMap:
         """Load the full reference topological map for the given place.
 
-        Three Cypher queries: photo nodes → objects → walkway edges.
+        Auto-detects schema version and loads accordingly.
         Results are cached in memory after the first load.
         """
         place = place or NEO4J_PLACE
@@ -198,7 +211,144 @@ class Neo4jClient:
             log.warning("Neo4j not connected — returning empty reference map")
             return RefMap(place=place)
 
-        ref = RefMap(place=place)
+        version = self._detect_schema(place)
+        log.info("Detected schema V%d for '%s'", version, place)
+
+        if version == 2:
+            ref = self._load_v2(place)
+        else:
+            ref = self._load_v1(place)
+
+        self._ref_map_cache = ref
+        return ref
+
+    # ── Schema V2: Waypoint → DirPhoto → Object ─────────────────────────
+
+    def _load_v2(self, place: str) -> RefMap:
+        ref = RefMap(place=place, schema_version=2)
+
+        # 1) Waypoints
+        rows = self._query("""
+            MATCH (w:Waypoint {place: $place})
+            RETURN w.nid AS nid,
+                   w.pdr_x AS pdr_x,
+                   w.pdr_y AS pdr_y,
+                   w.heading_deg AS heading,
+                   w.session AS session,
+                   w.total_steps AS steps,
+                   w.total_distance_m AS dist
+            ORDER BY w.nid
+        """, {"place": place})
+
+        for r in rows:
+            nid = r["nid"]
+            ref.photos[nid] = RefPhotoNode(
+                nid=nid,
+                photo_file="",
+                pdr_x=r["pdr_x"] or 0.0,
+                pdr_y=r["pdr_y"] or 0.0,
+                heading_deg=r["heading"] or 0.0,
+                session=r["session"] or "",
+                total_steps=r["steps"] or 0,
+                total_distance_m=r["dist"] or 0.0,
+            )
+
+        log.info("V2: loaded %d waypoints for '%s'", len(ref.photos), place)
+
+        # 2) Directional photos + their objects
+        rows = self._query("""
+            MATCH (w:Waypoint {place: $place})-[hp:HAS_PHOTO]->(p:DirPhoto)
+            OPTIONAL MATCH (p)-[:DETECTED]->(obj:Object)
+            RETURN w.nid AS nid,
+                   hp.slot AS slot,
+                   p.heading_deg AS heading,
+                   p.photo_file AS photo_file,
+                   obj.label AS label,
+                   obj.label_norm AS label_norm,
+                   obj.score AS score,
+                   obj.ocr_text AS ocr_text,
+                   obj.role AS role,
+                   obj.grid_cell AS grid_cell
+        """, {"place": place})
+
+        # Group by (nid, slot) to build DirectionalRef with its objects
+        dir_data: Dict[tuple, dict] = {}
+        for r in rows:
+            key = (r["nid"], r["slot"])
+            if key not in dir_data:
+                dir_data[key] = {
+                    "slot": r["slot"],
+                    "heading": r["heading"] or 0.0,
+                    "photo_file": r["photo_file"] or "",
+                    "objects": [],
+                }
+            if r["label"]:
+                dir_data[key]["objects"].append(RefObject(
+                    label=r["label"] or "",
+                    label_norm=r["label_norm"] or "",
+                    score=r["score"] or 0.0,
+                    ocr_text=r["ocr_text"] or "",
+                    role=r["role"] or "",
+                    grid_cell=r["grid_cell"] or "",
+                ))
+
+        obj_count = 0
+        for (nid, slot), d in dir_data.items():
+            if nid not in ref.photos:
+                continue
+            node = ref.photos[nid]
+            dr = DirectionalRef(
+                slot=d["slot"],
+                heading_deg=d["heading"],
+                photo_file=d["photo_file"],
+                objects=d["objects"],
+            )
+            node.directional_photos.append(dr)
+            # Aggregate all directional objects into node.objects for localization
+            node.objects.extend(d["objects"])
+            obj_count += len(d["objects"])
+            # Use front photo as the node's primary photo
+            if d["slot"] == "front" and not node.photo_file:
+                node.photo_file = d["photo_file"]
+
+        # If no front photo was set, use any available photo
+        for node in ref.photos.values():
+            if not node.photo_file and node.directional_photos:
+                node.photo_file = node.directional_photos[0].photo_file
+
+        log.info("V2: loaded %d directional photos, %d objects",
+                 len(dir_data), obj_count)
+
+        # 3) Walkway edges
+        rows = self._query("""
+            MATCH (a:Waypoint {place: $place})-[r:WALKWAY]->(b:Waypoint)
+            RETURN a.nid AS from_nid,
+                   b.nid AS to_nid,
+                   r.direction AS direction,
+                   r.distance_m AS distance_m,
+                   r.steps AS steps
+        """, {"place": place})
+
+        for r in rows:
+            from_nid = r["from_nid"]
+            to_nid = r["to_nid"]
+            ref.walkway_edges.append({
+                "from": from_nid,
+                "to": to_nid,
+                "direction": r["direction"] or "",
+                "distance_m": r["distance_m"] or 0.0,
+                "steps": r["steps"] or 0,
+            })
+            if from_nid in ref.photos:
+                ref.photos[from_nid].neighbor_nids.append(to_nid)
+
+        log.info("V2: loaded %d walkway edges", len(ref.walkway_edges))
+        return ref
+
+    # ── Schema V1 (legacy): TopoNode:Photo → Object ─────────────────────
+
+    def _load_v1(self, place: str) -> RefMap:
+        ref = RefMap(place=place, schema_version=1)
 
         # 1) Photo nodes
         rows = self._query("""
@@ -228,44 +378,12 @@ class Neo4jClient:
                 total_distance_m=r["dist"] or 0.0,
             )
 
-        log.info("Loaded %d photo nodes for '%s'", len(ref.photos), place)
+        log.info("V1: loaded %d photo nodes for '%s'", len(ref.photos), place)
 
         # 2) Objects per photo node
-        #    Objects live on separate :Photo nodes (not :TopoNode) linked via
-        #    :CONTAINS → :Object.  Photo.node_id ≠ TopoNode.nid, but within
-        #    each session the node counts match and both are ordered, so we
-        #    build a node_id → nid mapping by session-internal position.
-
-        # 2a) Build mapping: Photo.node_id → TopoNode.nid
-        topo_by_session: Dict[str, List[int]] = {}
-        for nid, node in sorted(ref.photos.items()):
-            topo_by_session.setdefault(node.session, []).append(nid)
-
-        photo_order_rows = self._query("""
-            MATCH (p:Photo)-[:CONTAINS]->(o)
-            WHERE NOT p:TopoNode AND p.place_name = $place
-            WITH DISTINCT p
-            RETURN p.node_id AS node_id, p.sensor_session AS session
-            ORDER BY p.node_id
-        """, {"place": place})
-
-        photo_by_session: Dict[str, List[int]] = {}
-        for r in photo_order_rows:
-            sess = r["session"] or ""
-            photo_by_session.setdefault(sess, []).append(r["node_id"])
-
-        node_id_to_nid: Dict[int, int] = {}
-        for sess, photo_ids in photo_by_session.items():
-            topo_nids = topo_by_session.get(sess, [])
-            for i, pid in enumerate(photo_ids):
-                if i < len(topo_nids):
-                    node_id_to_nid[pid] = topo_nids[i]
-
-        # 2b) Load objects and map to TopoNode nids
         rows = self._query("""
-            MATCH (p:Photo)-[:CONTAINS]->(obj:Object)
-            WHERE NOT p:TopoNode AND p.place_name = $place
-            RETURN p.node_id AS photo_node_id,
+            MATCH (p:TopoNode {place: $place, ntype: 'photo'})-[:CONTAINS]->(obj:Object)
+            RETURN p.nid AS nid,
                    obj.label AS label,
                    obj.label_norm AS label_norm,
                    obj.score AS score,
@@ -276,8 +394,8 @@ class Neo4jClient:
 
         obj_count = 0
         for r in rows:
-            nid = node_id_to_nid.get(r["photo_node_id"])
-            if nid is not None and nid in ref.photos:
+            nid = r["nid"]
+            if nid in ref.photos:
                 ref.photos[nid].objects.append(RefObject(
                     label=r["label"] or "",
                     label_norm=r["label_norm"] or "",
@@ -288,9 +406,58 @@ class Neo4jClient:
                 ))
                 obj_count += 1
 
-        log.info("Loaded %d object detections across photo nodes", obj_count)
+        log.info("V1: loaded %d object detections", obj_count)
 
-        # 3) Walkway edges (photo→photo)
+        # 3) Synthesize directional photos from single heading
+        from server.heading import slot_headings
+
+        pos_groups: Dict[tuple, List[int]] = defaultdict(list)
+        for nid, node in ref.photos.items():
+            key = (round(node.pdr_x, 1), round(node.pdr_y, 1))
+            pos_groups[key].append(nid)
+
+        for pos, nids in pos_groups.items():
+            if len(nids) == 1:
+                node = ref.photos[nids[0]]
+                slots = slot_headings(node.heading_deg)
+                for slot, hdeg in slots.items():
+                    node.directional_photos.append(DirectionalRef(
+                        slot=slot.value,
+                        heading_deg=hdeg,
+                        photo_file=node.photo_file,
+                        objects=list(node.objects),
+                    ))
+            else:
+                primary_nid = nids[0]
+                primary_node = ref.photos[primary_nid]
+                slots = slot_headings(primary_node.heading_deg)
+
+                for slot, target_hdeg in slots.items():
+                    best_nid = primary_nid
+                    best_diff = 999.0
+                    for nid in nids:
+                        diff = abs(((ref.photos[nid].heading_deg - target_hdeg + 180) % 360) - 180)
+                        if diff < best_diff:
+                            best_diff = diff
+                            best_nid = nid
+                    matched_node = ref.photos[best_nid]
+                    primary_node.directional_photos.append(DirectionalRef(
+                        slot=slot.value,
+                        heading_deg=matched_node.heading_deg,
+                        photo_file=matched_node.photo_file,
+                        objects=list(matched_node.objects),
+                    ))
+
+                for nid in nids[1:]:
+                    ref.photos[nid].directional_photos = list(
+                        primary_node.directional_photos
+                    )
+
+        dir_count = sum(len(n.directional_photos) for n in ref.photos.values())
+        log.info("V1: synthesized %d directional slots across %d nodes",
+                 dir_count, len(ref.photos))
+
+        # 4) Walkway edges
         rows = self._query("""
             MATCH (a:TopoNode {place: $place, ntype: 'photo'})
                   -[r:WALKWAY]->(b:TopoNode {ntype: 'photo'})
@@ -314,25 +481,34 @@ class Neo4jClient:
             if from_nid in ref.photos:
                 ref.photos[from_nid].neighbor_nids.append(to_nid)
 
-        log.info("Loaded %d walkway edges", len(ref.walkway_edges))
-
-        self._ref_map_cache = ref
+        log.info("V1: loaded %d walkway edges", len(ref.walkway_edges))
         return ref
 
-    def list_places(self) -> List[Dict[str, Any]]:
-        """Return all distinct places in the topological map.
+    # ── Place listing (works with both schemas) ──────────────────────────
 
-        Each dict: {"name": str, "photo_count": int}
-        """
+    def list_places(self) -> List[Dict[str, Any]]:
+        """Return all distinct places in the topological map."""
         if not self._connected:
             return []
-        rows = self._query("""
+        # V2 places
+        v2 = self._query("""
+            MATCH (w:Waypoint)
+            RETURN w.place AS name, count(w) AS photo_count
+        """)
+        # V1 places
+        v1 = self._query("""
             MATCH (t:TopoNode {ntype: 'photo'})
             RETURN t.place AS name, count(t) AS photo_count
-            ORDER BY t.place
         """)
-        return [{"name": r["name"], "photo_count": r["photo_count"]}
-                for r in rows if r["name"]]
+        seen = set()
+        result = []
+        for r in v2 + v1:
+            name = r.get("name")
+            if name and name not in seen:
+                seen.add(name)
+                result.append({"name": name, "photo_count": r["photo_count"]})
+        result.sort(key=lambda x: x["name"])
+        return result
 
     def invalidate_cache(self) -> None:
         self._ref_map_cache = None
@@ -356,9 +532,12 @@ class Neo4jClient:
         if not self._connected:
             return None
         place = place or NEO4J_PLACE
-        rows = self._query("""
-            MATCH (a:TopoNode {place: $place, nid: $from_nid}),
-                  (b:TopoNode {place: $place, nid: $to_nid}),
+        ref = self.load_reference_map(place)
+        # Use the right node label depending on schema
+        label = "Waypoint" if ref.schema_version == 2 else "TopoNode"
+        rows = self._query(f"""
+            MATCH (a:{label} {{place: $place, nid: $from_nid}}),
+                  (b:{label} {{place: $place, nid: $to_nid}}),
                   path = shortestPath((a)-[:WALKWAY*]-(b))
             WITH nodes(path) AS ns, relationships(path) AS rs
             UNWIND range(0, size(rs)-1) AS i

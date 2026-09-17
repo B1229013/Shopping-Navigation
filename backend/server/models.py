@@ -62,6 +62,13 @@ class TurnResponse(BaseModel):
     corrected_node_id: Optional[int] = None       # reference map node ID
     corrected_confidence: Optional[float] = None   # 0.0–1.0
     corrected_location: Optional[str] = None       # human-readable location name
+    # Heading estimation from directional photo matching
+    heading_deg: Optional[float] = None            # estimated user heading [0, 360)
+    heading_slot: Optional[str] = None             # "front"/"right"/"back"/"left"
+    heading_confidence: Optional[float] = None     # 0.0–1.0
+    # Route-aware navigation context
+    next_instruction: Optional[str] = None         # e.g. "右轉，走向第3區"
+    remaining_targets: Optional[int] = None        # how many targets left
 
 
 class NodeJSON(BaseModel):
@@ -91,3 +98,42 @@ class MapJSON(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     detail: str
+
+
+# ── Multi-target route planning ─────────────────────────────────────────
+
+class PlanRouteRequest(BaseModel):
+    """Request to plan an optimised multi-target route."""
+    targets: List[str] = Field(..., description="List of target queries (product names, locations)")
+    start_node: Optional[int] = Field(None, description="Starting node ID (from visual localization)")
+    checkout_node: Optional[int] = Field(None, description="Checkout/counter node ID")
+    exit_node: Optional[int] = Field(None, description="Exit node ID")
+    place: Optional[str] = Field(None, description="Map/place name")
+
+
+class RouteLegResponse(BaseModel):
+    from_node: int = Field(..., alias="from")
+    to: int
+    path: List[int]
+    cost: float
+    actions: List[str]
+    purpose: str  # "target" | "checkout" | "exit"
+
+    class Config:
+        populate_by_name = True
+
+
+class PlanRouteResponse(BaseModel):
+    visit_order: List[int] = Field(..., description="Target nodes in optimal visit order")
+    total_cost: float
+    full_path: List[int]
+    legs: List[RouteLegResponse]
+    resolved_targets: List[dict] = Field(default_factory=list, description="Query → node resolution results")
+    checkout_node: Optional[int] = None
+    exit_node: Optional[int] = None
+
+
+class ModifyRouteRequest(BaseModel):
+    """Add or remove targets mid-route."""
+    add: List[str] = Field(default_factory=list, description="Targets to add")
+    remove: List[str] = Field(default_factory=list, description="Targets to remove")

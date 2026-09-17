@@ -8,10 +8,8 @@ from typing import List
 import requests
 
 from server.config import (
-    GEMINI_API_KEY, GEMINI_MODEL,
     OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL,
-    OLLAMA_URL, OLLAMA_MODEL,
-    GOAL_DECOMPOSE_TIMEOUT_S, VLM_BACKEND,
+    GOAL_DECOMPOSE_TIMEOUT_S,
 )
 from server.prompts import GOAL_DECOMPOSE_PROMPT
 
@@ -19,37 +17,13 @@ log = logging.getLogger(__name__)
 
 _MAX_ITEMS = 10
 
-_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-
 
 def _fallback(goal: str) -> List[str]:
-    words = re.findall(r"[a-zA-Z]+", goal.lower())
-    stop = {"find", "the", "a", "an", "to", "where", "is", "are", "all", "every"}
-    return [w for w in words if w not in stop] or [goal.strip().lower()]
-
-
-def _call_gemini(prompt: str) -> str:
-    url = _GEMINI_URL.format(model=GEMINI_MODEL, key=GEMINI_API_KEY)
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 256},
-    }
-    r = requests.post(url, json=body, timeout=GOAL_DECOMPOSE_TIMEOUT_S)
-    r.raise_for_status()
-    candidates = r.json().get("candidates", [])
-    if not candidates:
-        return ""
-    return candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-
-
-def _call_ollama(prompt: str) -> str:
-    r = requests.post(
-        f"{OLLAMA_URL}/api/generate",
-        json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-        timeout=GOAL_DECOMPOSE_TIMEOUT_S,
-    )
-    r.raise_for_status()
-    return r.json().get("response", "")
+    # Extract Chinese tokens (consecutive CJK chars) and English words
+    tokens = re.findall(r'[一-鿿㐀-䶿]+|[a-zA-Z]+', goal)
+    stop = {"find", "the", "a", "an", "to", "where", "is", "are", "all", "every", "x"}
+    result = [w for w in tokens if w.lower() not in stop and len(w) > 0]
+    return result or [goal.strip().lower()]
 
 
 def _call_openai(prompt: str) -> str:
@@ -73,20 +47,12 @@ def decompose_goal(goal: str) -> List[str]:
     prompt = GOAL_DECOMPOSE_PROMPT.format(goal=goal)
 
     try:
-        if VLM_BACKEND == "gemini":
-            if not GEMINI_API_KEY:
-                log.warning("GEMINI_API_KEY not set — using fallback")
-                return _fallback(goal)
-            text = _call_gemini(prompt)
-        elif VLM_BACKEND == "openai":
-            if not OPENAI_API_KEY:
-                log.warning("OPENAI_API_KEY not set — using fallback")
-                return _fallback(goal)
-            text = _call_openai(prompt)
-        else:
-            text = _call_ollama(prompt)
+        if not OPENAI_API_KEY:
+            log.warning("OPENAI_API_KEY not set — using fallback")
+            return _fallback(goal)
+        text = _call_openai(prompt)
     except Exception as e:
-        log.warning("goal decompose failed (%s): %s — falling back", VLM_BACKEND, e)
+        log.warning("goal decompose failed: %s — falling back", e)
         return _fallback(goal)
 
     items = [s.strip().lower() for s in text.split(",")]

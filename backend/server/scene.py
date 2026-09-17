@@ -219,9 +219,9 @@ def verify_arrival(resp: VLMResponse, detections, ocr_matches, goal_objects,
 
 def _confirm_question(resp: VLMResponse) -> VLMResponse:
     return VLMResponse(
-        action=VLMAction.ASK,
-        guidance="I think you may have reached it, but I'm not certain.",
-        question="Can you confirm you can see what you're looking for right in front of you?",
+        action=VLMAction.ARRIVED,
+        guidance="看起來可能已經到了，但還不太確定。請確認眼前是否有要找的東西。",
+        question=None,
         vlm_summary=resp.vlm_summary,
     )
 

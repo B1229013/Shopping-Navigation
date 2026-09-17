@@ -33,6 +33,7 @@ and near/far):
 Text visible in the photo (OCR), each with its side of the frame:
 {ocr_summary}
 
+{route_context_block}
 {prior_answer_block}
 
 Decide the next step. Reply with EXACTLY one JSON object on one line, nothing else:
@@ -54,6 +55,21 @@ Rules:
 PRIOR_ANSWER_BLOCK = """\
 The person just answered your earlier question "{previous_question}" with:
 "{user_answer}"
+"""
+
+
+ROUTE_CONTEXT_BLOCK = """\
+── 導航上下文（來自預建地圖與路線規劃）──
+使用者目前位置：{position_description}
+使用者目前面朝：{heading_description}
+{route_description}
+重要指引原則：
+- 一次只引導使用者找「目前要找的商品」，找到後系統會自動切換到下一項
+- 用使用者能理解的方式描述方向，例如「往前走到底」「左轉」「右轉走到飲料區」
+- 結合照片中看到的標示、招牌、商品來描述位置，不要使用任何內部編號
+- 如果照片中已經看到目標商品，直接告訴使用者「就在你前方/左邊/右邊」
+- 給出具體、簡短的一到兩句指引，不要含糊或冗長
+- 位置信心值低時，以照片中的實際景象為主要判斷依據，地圖位置作為參考
 """
 
 

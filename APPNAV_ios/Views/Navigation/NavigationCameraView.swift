@@ -79,13 +79,9 @@ struct NavigationCameraView: View {
             camera.start()
             // Reset loop banner from any previous session
             loopBanner = nil
-            sensorSession.onLoopDetected = { event in
-                loopBanner = "偵測到您可能在原地繞圈（第 \(event.repeatCount) 次經過同一節點）"
-                // Auto-dismiss after 5 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                    if loopBanner != nil { loopBanner = nil }
-                }
-            }
+            // Loop detection disabled — PDR node revisits trigger false
+            // positives that confuse users during normal navigation.
+            sensorSession.onLoopDetected = nil
             sensorSession.start()
         }
         .onDisappear {
@@ -110,6 +106,12 @@ struct NavigationCameraView: View {
                     .font(.subheadline)
                     .foregroundColor(.white.opacity(0.85))
                     .lineLimit(2)
+                if let currentLocation {
+                    Text("📍 \(currentLocation)")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                        .lineLimit(1)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -271,8 +273,18 @@ struct NavigationCameraView: View {
         }
     }
 
+    @State private var currentLocation: String?
+
     private func applyTurn(_ response: TurnResponse) {
-        guidance = response.guidance
+        // Show friendly location if localization succeeded
+        if let loc = response.correctedLocation {
+            currentLocation = loc
+        }
+        if let loc = currentLocation {
+            guidance = "📍 目前位置：\(loc)\n\n\(response.guidance)"
+        } else {
+            guidance = response.guidance
+        }
         switch response.action {
         case "ARRIVED":
             pendingArrival = true

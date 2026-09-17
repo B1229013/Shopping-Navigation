@@ -44,6 +44,11 @@ class LocalizationResult:
     runner_up_nid: Optional[int] = None
     runner_up_score: float = 0.0
 
+    # Heading estimation from directional photo matching
+    matched_heading: Optional[float] = None   # estimated user heading in degrees [0, 360)
+    matched_slot: Optional[str] = None        # which directional slot matched ("front"/"right"/"back"/"left")
+    heading_confidence: float = 0.0           # 0.0–1.0, how certain the heading is
+
 
 # ── Object-set matching ───────────────────────────────────────────────────
 
@@ -107,23 +112,39 @@ def match_by_objects(
         # Base: Jaccard similarity on normalized object labels
         j = _jaccard(live_labels, ref_labels)
 
-        # OCR bonus: matching OCR text is a strong localization signal
-        ocr_matches = live_ocr & ref_ocr - {""}
-        ocr_bonus = min(len(ocr_matches) * 0.15, 0.3)  # up to +0.3
+        # OCR matching — the strongest localization signal in stores.
+        # Use partial matching (substring) since OCR is noisy.
+        ocr_match_count = 0
+        ocr_matched_texts = set()
+        for live_t in live_ocr:
+            if not live_t or len(live_t) < 2:
+                continue
+            for ref_t in ref_ocr:
+                if not ref_t or len(ref_t) < 2:
+                    continue
+                match_len = min(len(live_t), len(ref_t))
+                if match_len < 2:
+                    continue
+                if live_t == ref_t:
+                    ocr_match_count += 1
+                    ocr_matched_texts.add(f"{live_t}={ref_t}")
+                    break
+                elif match_len >= 3 and (live_t in ref_t or ref_t in live_t):
+                    ocr_match_count += 1
+                    ocr_matched_texts.add(f"{live_t}≈{ref_t}")
+                    break
+        ocr_bonus = min(ocr_match_count * 0.25, 0.6)
 
-        # Role-weighted: 標示牌 (signs) are more location-specific than 商品
-        sign_labels_live = {_normalize_label(l) for l, labels_list in
-                           zip(detected_labels, detected_labels)}  # simplified
+        # Role-weighted: 標示牌 (signs) are more location-specific
         ref_signs = {_normalize_label(o.label) for o in ref_node.objects
                      if o.role == "標示牌"}
-        live_signs = live_labels  # we don't have role info on live detections
-        sign_overlap = len(live_signs & ref_signs)
+        sign_overlap = len(live_labels & ref_signs)
         sign_bonus = min(sign_overlap * 0.05, 0.15)
 
         total = j + ocr_bonus + sign_bonus
         parts = [f"jaccard={j:.2f}"]
-        if ocr_matches:
-            parts.append(f"ocr_match={ocr_matches}")
+        if ocr_matched_texts:
+            parts.append(f"ocr_match={ocr_matched_texts}")
         if sign_bonus > 0:
             parts.append(f"sign_bonus={sign_bonus:.2f}")
 
@@ -136,7 +157,7 @@ def match_by_objects(
 # ── Main localization entry point ─────────────────────────────────────────
 
 # Minimum score to accept a match without VLM confirmation
-CONFIDENT_THRESHOLD = 0.35
+CONFIDENT_THRESHOLD = 0.05
 
 # If the gap between #1 and #2 is smaller than this, the match is ambiguous
 AMBIGUITY_GAP = 0.10
@@ -221,12 +242,54 @@ def localize(
             runner_up_nid=runner_nid, runner_up_score=runner_score,
         )
 
+    # ── Heading estimation via directional photos ────────────────────
+    matched_heading: Optional[float] = None
+    matched_slot: Optional[str] = None
+    heading_conf = 0.0
+
+    matched_ref = ref_map.photos.get(best_nid)
+    if matched_ref and matched_ref.directional_photos:
+        from server.heading import estimate_heading, best_matching_slot, DirectionalPhoto
+
+        live_labels_lower = {l.lower().strip() for l in detected_labels if l}
+        live_ocr_lower = {t.lower().strip() for t in ocr_texts if t}
+
+        # Build DirectionalPhoto objects for the heading estimator
+        dir_photos = [
+            DirectionalPhoto(
+                slot=dp.slot if hasattr(dp, 'slot') else dp.slot,
+                heading_deg=dp.heading_deg,
+                photo_file=dp.photo_file,
+                objects=[{"label": o.label, "ocr_text": o.ocr_text}
+                         for o in dp.objects],
+            )
+            for dp in matched_ref.directional_photos
+        ]
+
+        matched_heading = estimate_heading(live_labels_lower, live_ocr_lower, dir_photos)
+        slot_result = best_matching_slot(live_labels_lower, live_ocr_lower, dir_photos)
+        matched_slot = slot_result if isinstance(slot_result, str) else (slot_result.value if slot_result else None)
+
+        # Heading confidence: if multiple directions have the same objects
+        # (synthesized from single photo), confidence is low
+        unique_obj_sets = len({
+            frozenset(o.label for o in dp.objects)
+            for dp in matched_ref.directional_photos
+        })
+        if unique_obj_sets > 1:
+            heading_conf = min(confidence, 0.8)  # real directional data
+        else:
+            heading_conf = 0.2  # synthesized — all slots look the same
+
     return LocalizationResult(
         matched_nid=best_nid,
         confidence=confidence,
         method="object_set",
         reasoning=best_reason,
-        ref_node=ref_map.photos.get(best_nid),
+        ref_node=matched_ref,
         runner_up_nid=runner_nid,
         runner_up_score=runner_score,
+        matched_heading=matched_heading,
+        matched_slot=matched_slot,
+        heading_confidence=heading_conf,
     )

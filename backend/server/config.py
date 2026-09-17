@@ -74,15 +74,10 @@ SAM_WEIGHTS = _LOCAL_MODELS / "sam_vit_h_4b8939.pth"
 # Output
 OUTPUT_ROOT = PROJECT_ROOT / "output" / "sessions"
 
-# LLM services — "gemini" (default), "openai", or "ollama"
-VLM_BACKEND = os.environ.get("VLM_BACKEND", "gemini")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# LLM service — OpenAI GPT-4o
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2-vision")
 
 # Neo4j Aura
 NEO4J_URI = os.environ.get("NEO4J_URI", "")
@@ -96,7 +91,7 @@ SERVER_HOST = os.environ.get("SERVER_HOST", "0.0.0.0")
 SERVER_PORT = int(os.environ.get("SERVER_PORT", "8000"))
 
 # Detection thresholds (TASK 1 — raised for busy store shelves; retry lower only if nothing found)
-PERCEPTION_ENABLED = os.environ.get("PERCEPTION_ENABLED", "1") != "0"
+PERCEPTION_ENABLED = os.environ.get("PERCEPTION_ENABLED", "0") != "0"
 GROUNDINGDINO_BOX_THRESHOLD = 0.30
 GROUNDINGDINO_TEXT_THRESHOLD = 0.25
 GROUNDINGDINO_BOX_THRESHOLD_FALLBACK = 0.20
@@ -119,10 +114,10 @@ GOAL_CROP_VERIFY = os.environ.get("GOAL_CROP_VERIFY", "1") != "0" and not os.env
 
 # Minimum detection score for an ARRIVED to count as corroborated by perception.
 # Below this (and with no OCR sign match), ARRIVED is downgraded to a confirm question.
-ARRIVED_MIN_DETECTION_SCORE = float(os.environ.get("ARRIVED_MIN_DETECTION_SCORE", "0.35"))
+ARRIVED_MIN_DETECTION_SCORE = float(os.environ.get("ARRIVED_MIN_DETECTION_SCORE", "0.50"))
 
 # OCR
-OCR_ENABLED = os.environ.get("OCR_ENABLED", "1") != "0"
+OCR_ENABLED = os.environ.get("OCR_ENABLED", "0") != "0"
 OCR_LANGUAGES = os.environ.get("OCR_LANGUAGES", "en,ch_tra").split(",")
 OCR_MIN_CONFIDENCE = float(os.environ.get("OCR_MIN_CONFIDENCE", "0.3"))
 OCR_MAX_RESULTS = int(os.environ.get("OCR_MAX_RESULTS", "15"))

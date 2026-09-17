@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from server.topomap import TopoMap
 
@@ -35,6 +35,47 @@ class Session:
     repeated_misidentification_count: int = 0
     last_corrected_nid: Optional[int] = None   # Neo4j reference node from visual localization
     created_at: datetime = field(default_factory=datetime.utcnow)
+
+    # ── Heading / orientation ──────────────────────────────────────
+    user_heading: Optional[float] = None          # estimated heading in degrees [0, 360)
+    heading_slot: Optional[str] = None            # "front" / "right" / "back" / "left"
+    heading_confidence: float = 0.0               # 0.0–1.0
+
+    # ── Multi-target route planning ─────────────────────────────────
+    # All target node IDs the user wants to visit (resolved from goal_objects)
+    target_nodes: List[int] = field(default_factory=list)
+    # Targets already visited (removed from routing but kept for history)
+    visited_targets: Set[int] = field(default_factory=set)
+    # The current optimised route plan (from path_planner)
+    route_plan: Optional[object] = None   # server.path_planner.RoutePlan
+    # Index into route_plan.legs — which leg the user is currently on
+    current_leg_index: int = 0
+    # Fixed terminal nodes
+    checkout_node: Optional[int] = None
+    exit_node: Optional[int] = None
+
+    @property
+    def remaining_targets(self) -> List[int]:
+        """Targets not yet visited, in their current planned order."""
+        return [t for t in self.target_nodes if t not in self.visited_targets]
+
+    def mark_target_visited(self, node: int) -> None:
+        """Mark a target as reached."""
+        self.visited_targets.add(node)
+
+    def add_target(self, node: int) -> None:
+        """Add a new target mid-route."""
+        if node not in self.target_nodes:
+            self.target_nodes.append(node)
+
+    def remove_target(self, node: int) -> None:
+        """Remove a target mid-route (user changed their mind)."""
+        self.target_nodes = [t for t in self.target_nodes if t != node]
+        self.visited_targets.discard(node)
+
+    @property
+    def all_targets_visited(self) -> bool:
+        return len(self.remaining_targets) == 0
 
 
 class SessionStore:

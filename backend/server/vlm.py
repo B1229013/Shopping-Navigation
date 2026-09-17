@@ -1,20 +1,9 @@
-"""VLM 客戶端：把「照片 + 提示詞」送給視覺語言模型，並解析出結構化的導航決策。
+"""VLM 客戶端：把「照片 + 提示詞」送給 OpenAI GPT-4o，並解析出結構化的導航決策。
 
-支援三種後端（由 config.VLM_BACKEND 決定）：Gemini（預設）、OpenAI、Ollama。
-
-跟 Navigation-main-4/navigate_one_by_one.py 的 VLM 呼叫方式不同：
-    navigate_one_by_one.py 是「自由對話」模式 —— 直接問模型「你看到什麼、
-    該往哪走」，模型回傳一段自然語言中文文字，ARRIVED（是否抵達）則是由
-    OCR 文字比對 + GroundingDINO 信心分數在腳本主流程另外判斷，VLM 完全
-    不參與這個決策。
-
-    APPNAV 這裡刻意維持「結構化決策」模式 —— 要求模型回傳單行 JSON
-    （action / guidance / question / vlm_summary），因為 server.py 整個
-    導航狀態機（ARRIVED/MOVE/ASK、pending_question、pending_arrival …）
-    都是直接讀這個 action 欄位來驅動流程；如果改成自由文字，server.py
-    與手機 App 前端的 API 合約都要跟著大改。因此本檔案只從參考腳本移植
-    「呼叫方式與容錯設計」的精神（例如重試、失敗時給使用者看得懂的中文
-    回覆），並沒有更動對外的 JSON 決策介面。
+採用「結構化決策」模式 —— 要求模型回傳單行 JSON
+（action / guidance / question / vlm_summary），server.py 的導航狀態機
+（ARRIVED/MOVE/ASK、pending_question、pending_arrival …）直接讀 action
+欄位來驅動流程。
 """
 from __future__ import annotations
 
@@ -31,13 +20,11 @@ from PIL import Image
 
 from server import scene
 from server.config import (
-    GEMINI_API_KEY, GEMINI_MODEL,
     OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL,
-    OLLAMA_URL, OLLAMA_MODEL,
-    VLM_TIMEOUT_S, VLM_BACKEND,
+    VLM_TIMEOUT_S,
 )
 from server.models import VLMAction, VLMResponse
-from server.prompts import PER_TURN_PROMPT, PRIOR_ANSWER_BLOCK, PERCEIVE_PROMPT
+from server.prompts import PER_TURN_PROMPT, PRIOR_ANSWER_BLOCK, PERCEIVE_PROMPT, ROUTE_CONTEXT_BLOCK
 
 log = logging.getLogger(__name__)
 
@@ -49,9 +36,6 @@ _FALLBACK = VLMResponse(
     question=None,
     vlm_summary="",
 )
-
-_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-
 
 # ── VLM-only perception (used when GroundingDINO/EasyOCR are disabled) ─────
 
@@ -89,10 +73,10 @@ def _build_prompt(
     prior_question: Optional[str],
     prior_answer: Optional[str],
     ocr_summary: Optional[str] = None,
+    route_context: Optional[str] = None,
 ) -> str:
-    """組合本輪要送給 VLM 的完整提示詞（目標、地圖摘要、偵測結果、OCR 文字）。"""
+    """組合本輪要送給 VLM 的完整提示詞（目標、地圖摘要、偵測結果、OCR 文字、路徑上下文）。"""
     if prior_question and prior_answer:
-        # 使用者剛回答了上一輪的確認問題，把問答內容補進提示詞讓模型有上下文
         block = PRIOR_ANSWER_BLOCK.format(previous_question=prior_question, user_answer=prior_answer)
     else:
         block = ""
@@ -102,6 +86,7 @@ def _build_prompt(
         topomap_summary=topomap_summary or "(starting location)",
         detections_summary=detections_summary or "(no detections)",
         ocr_summary=ocr_summary or "(no text detected)",
+        route_context_block=route_context or "",
         prior_answer_block=block,
     )
 
@@ -129,45 +114,9 @@ def _parse(text: str) -> Optional[VLMResponse]:
         return None
 
 
-# ── Gemini 後端（預設）──────────────────────────────────────────────────
+# ── OpenAI GPT-4o ──────────────────────────────────────────────────────
 
-def _gemini_generate(prompt: str, image_b64: Optional[str] = None) -> str:
-    url = _GEMINI_URL.format(model=GEMINI_MODEL, key=GEMINI_API_KEY)
-    parts: list = []
-    if image_b64:
-        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": image_b64}})
-    parts.append({"text": prompt})
-    body = {
-        "contents": [{"parts": parts}],
-        # temperature 調低讓 JSON 格式更穩定，maxOutputTokens 限制避免回覆過長
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 512},
-    }
-    r = requests.post(url, json=body, timeout=VLM_TIMEOUT_S)
-    r.raise_for_status()
-    resp = r.json()
-    candidates = resp.get("candidates", [])
-    if not candidates:
-        return ""
-    text_parts = [p.get("text", "") for p in candidates[0].get("content", {}).get("parts", [])]
-    return "".join(text_parts)
-
-
-# ── Ollama 後端（本機模型，對應 navigate_one_by_one.py 唯一使用的後端）───
-
-def _ollama_generate(prompt: str, images: Optional[List[str]] = None) -> str:
-    # format="json" 要求 Ollama 端強制輸出合法 JSON，
-    # 這點比 navigate_one_by_one.py 單純用自然語言提示詞更穩健。
-    body = {"model": OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json"}
-    if images:
-        body["images"] = images
-    r = requests.post(f"{OLLAMA_URL}/api/generate", json=body, timeout=VLM_TIMEOUT_S)
-    r.raise_for_status()
-    return r.json().get("response", "")
-
-
-# ── OpenAI 後端 ──────────────────────────────────────────────────────────
-
-def _openai_generate(prompt: str, image_b64: Optional[str] = None) -> str:
+def _generate(prompt: str, image_b64: Optional[str] = None) -> str:
     url = f"{OPENAI_BASE_URL}/chat/completions"
     content: list = []
     if image_b64:
@@ -188,17 +137,6 @@ def _openai_generate(prompt: str, image_b64: Optional[str] = None) -> str:
     return choices[0].get("message", {}).get("content", "")
 
 
-# ── 統一派發：依 config.VLM_BACKEND 選擇實際呼叫哪個後端 ─────────────────
-
-def _generate(prompt: str, image_b64: Optional[str] = None) -> str:
-    if VLM_BACKEND == "gemini":
-        return _gemini_generate(prompt, image_b64=image_b64)
-    elif VLM_BACKEND == "openai":
-        return _openai_generate(prompt, image_b64=image_b64)
-    else:
-        return _ollama_generate(prompt, images=[image_b64] if image_b64 else None)
-
-
 def ask_about_image(image_pil: Image.Image, prompt: str) -> str:
     """對單張圖片問一個自由文字問題，回傳模型的原始文字回覆（不解析 JSON）。
 
@@ -216,18 +154,14 @@ def warm_up() -> None:
 
     若金鑰未設定則直接跳過（不視為錯誤），呼叫失敗也只記警告，不阻擋啟動。
     """
-    backend = VLM_BACKEND
-    if backend == "gemini" and not GEMINI_API_KEY:
-        log.warning("GEMINI_API_KEY not set — VLM warm-up skipped")
-        return
-    if backend == "openai" and not OPENAI_API_KEY:
+    if not OPENAI_API_KEY:
         log.warning("OPENAI_API_KEY not set — VLM warm-up skipped")
         return
     try:
         _generate("Reply with an empty JSON object: {}")
-        log.info("VLM warm-up complete (%s)", backend)
+        log.info("VLM warm-up complete (OpenAI %s)", OPENAI_MODEL)
     except Exception as e:
-        log.warning("VLM warm-up failed (continuing, backend=%s): %s", backend, e)
+        log.warning("VLM warm-up failed (continuing): %s", e)
 
 
 def decide(
@@ -239,6 +173,7 @@ def decide(
     prior_question: Optional[str],
     prior_answer: Optional[str],
     ocr_summary: Optional[str] = None,
+    route_context: Optional[str] = None,
 ) -> VLMResponse:
     """本輪導航的主要入口：讀圖 → 建提示詞 → 呼叫 VLM → 解析 JSON，並在失敗時重試一次。
 
@@ -246,14 +181,11 @@ def decide(
     _FALLBACK，讓 server.py 的狀態機可以安全地繼續（視為 MOVE，請使用者
     再拍一張照片），不會讓整個 API 請求噴例外。
     """
-    if VLM_BACKEND == "gemini" and not GEMINI_API_KEY:
-        log.error("GEMINI_API_KEY not set — cannot call VLM")
-        return _FALLBACK
-    if VLM_BACKEND == "openai" and not OPENAI_API_KEY:
+    if not OPENAI_API_KEY:
         log.error("OPENAI_API_KEY not set — cannot call VLM")
         return _FALLBACK
 
-    prompt = _build_prompt(goal, goal_objects, topomap_summary, detections_summary, prior_question, prior_answer, ocr_summary=ocr_summary)
+    prompt = _build_prompt(goal, goal_objects, topomap_summary, detections_summary, prior_question, prior_answer, ocr_summary=ocr_summary, route_context=route_context)
     try:
         img = Image.open(image_path).convert("RGB")
         # 縮圖降低上傳流量與模型延遲，1024px 已足夠模型辨識場景與物件
@@ -335,28 +267,21 @@ def _parse_perception(text: str, img_w: int, img_h: int) -> Optional[VLMPercepti
         return None
 
 
-def perceive_and_decide(
+def perceive(
     image_path: str,
     goal: str,
     goal_objects: List[str],
-    topomap_summary: str,
     img_w: int,
     img_h: int,
-    prior_question: Optional[str],
-    prior_answer: Optional[str],
-    ocr_formatter: Callable[[List[VLMDetectedText]], str],
-) -> Tuple[VLMPerception, VLMResponse]:
-    """VLM-only mode (PERCEPTION_ENABLED=0): instead of GroundingDINO + EasyOCR
-    feeding the per-turn decision prompt, ask the VLM to look at the photo itself
-    first (objects + text + scene) and use THAT as the detections/OCR summaries
-    for the exact same `decide()` call the real-detector path uses. Two separate
-    VLM calls (perceive, then decide) rather than one combined call, so the
-    decision prompt/schema stays identical either way — server.py and the phone
-    app don't need to know which mode produced the detections.
+) -> VLMPerception:
+    """Stage 1: ask VLM to perceive the photo (detections + OCR + scene).
+
+    Returns perception only — caller runs localization with the labels,
+    then calls decide() with the route context.
     """
-    if (VLM_BACKEND == "gemini" and not GEMINI_API_KEY) or (VLM_BACKEND == "openai" and not OPENAI_API_KEY):
-        log.error("VLM API key not set — cannot call VLM")
-        return _EMPTY_PERCEPTION, _FALLBACK
+    if not OPENAI_API_KEY:
+        log.error("OPENAI_API_KEY not set — cannot call VLM")
+        return _EMPTY_PERCEPTION
 
     try:
         img = Image.open(image_path).convert("RGB")
@@ -368,7 +293,7 @@ def perceive_and_decide(
         img_b64 = base64.b64encode(buf.getvalue()).decode()
     except Exception as e:
         log.warning("VLM could not read image %s: %s", image_path, e)
-        return _EMPTY_PERCEPTION, _FALLBACK
+        return _EMPTY_PERCEPTION
 
     prompt = PERCEIVE_PROMPT.format(goal=goal, goal_objects=", ".join(goal_objects) or "(none)")
     perception = _EMPTY_PERCEPTION
@@ -383,6 +308,23 @@ def perceive_and_decide(
             perception = parsed
             break
         log.warning("VLM perception unparseable response (attempt %d/2): %.200s", attempt, text)
+    return perception
+
+
+def perceive_and_decide(
+    image_path: str,
+    goal: str,
+    goal_objects: List[str],
+    topomap_summary: str,
+    img_w: int,
+    img_h: int,
+    prior_question: Optional[str],
+    prior_answer: Optional[str],
+    ocr_formatter: Callable[[List[VLMDetectedText]], str],
+    route_context: Optional[str] = None,
+) -> Tuple[VLMPerception, VLMResponse]:
+    """VLM-only mode: perceive then decide (legacy combined call)."""
+    perception = perceive(image_path, goal, goal_objects, img_w, img_h)
 
     detections_summary = scene.format_detections(
         [{"label": d.label, "box": d.bbox, "score": d.score} for d in perception.detections],
@@ -399,5 +341,6 @@ def perceive_and_decide(
         prior_question=prior_question,
         prior_answer=prior_answer,
         ocr_summary=ocr_summary,
+        route_context=route_context,
     )
     return perception, decision

@@ -1,0 +1,1219 @@
+<!doctype html>
+<title>拓樸地圖建置器</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,500;0,700;1,400&display=swap">
+<style>
+:root {
+  --bg: #0c1018;
+  --surface: #141c28;
+  --surface-raised: #1a2436;
+  --border: #243044;
+  --text: #b8c4d4;
+  --text-bright: #e4eaf2;
+  --text-dim: #5e7089;
+  --set01: #4ade80;
+  --set02: #60a5fa;
+  --set03: #fb923c;
+  --font-data: 'DM Mono', 'SF Mono', 'Menlo', monospace;
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --selected: #a78bfa;
+  --merge-color: #f472b6;
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.header h1 {
+  font-family: var(--font-data);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-bright);
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+.stat-chip {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  padding: 3px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.stat-chip b { color: var(--text-bright); font-weight: 500; }
+.legend {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.filter-btn {
+  font-family: var(--font-data);
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.filter-btn.active { color: #fff; border-color: transparent; }
+.filter-btn:not(.active) { opacity: .45; }
+.filter-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+.toggle-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+.toggle-label {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-label input { accent-color: var(--selected); }
+
+.main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.map-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+}
+.map-wrap canvas { display: block; width: 100%; height: 100%; }
+.map-hint {
+  position: absolute;
+  bottom: 12px; left: 12px;
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: var(--text-dim);
+  pointer-events: none;
+  opacity: .7;
+}
+.zoom-controls {
+  position: absolute;
+  bottom: 12px; right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.zoom-btn {
+  width: 32px; height: 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-bright);
+  font-family: var(--font-data);
+  font-size: 16px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+}
+.zoom-btn:hover { background: var(--surface-raised); }
+
+.coord-tooltip {
+  position: absolute;
+  top: 12px; left: 12px;
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--text-bright);
+  background: rgba(20,28,40,.92);
+  border: 1px solid var(--selected);
+  padding: 4px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+  display: none;
+  z-index: 5;
+}
+
+.panel {
+  width: 340px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+.panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 8px;
+  text-align: center;
+}
+.panel-empty-icon { font-size: 28px; opacity: .3; }
+.panel-empty-text {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.panel-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-section h2 {
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.panel-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.panel-label {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.panel-value {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--text-bright);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 12px 16px;
+}
+.photo-cell {
+  position: relative;
+  aspect-ratio: 4/3;
+  background: var(--surface-raised);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.photo-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.photo-cell .dir-label {
+  position: absolute;
+  top: 3px; left: 3px;
+  background: rgba(0,0,0,.75);
+  color: #fff;
+  font-family: var(--font-data);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+.photo-cell .set-badge {
+  position: absolute;
+  top: 3px; right: 3px;
+  font-family: var(--font-data);
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  color: #fff;
+}
+
+.neighbor-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.neighbor-chip {
+  font-family: var(--font-data);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.neighbor-chip:hover { border-color: var(--selected); color: var(--text-bright); }
+
+.merge-section {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.merge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.merge-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-data);
+  font-size: 11px;
+}
+.merge-item .mi-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.merge-item .mi-label { color: var(--text-bright); }
+.merge-item .mi-coord { color: var(--text-dim); font-size: 10px; }
+.merge-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.source-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.source-tab {
+  font-family: var(--font-data);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.source-tab.active { color: #fff; border-color: transparent; }
+
+.bottombar {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.btn {
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  font-family: var(--font-data);
+  font-size: 12px;
+  cursor: pointer;
+  background: var(--surface-raised);
+  color: var(--text);
+}
+.btn:hover { background: #222e3e; }
+.btn-primary {
+  background: var(--selected);
+  color: #fff;
+  border-color: transparent;
+}
+.btn-primary:hover { background: #8b6ff0; }
+.btn-merge {
+  background: transparent;
+  color: var(--merge-color);
+  border-color: var(--merge-color);
+}
+.btn-merge:hover { background: rgba(244,114,182,.1); }
+.btn-warn {
+  background: transparent;
+  color: var(--set03);
+  border-color: var(--set03);
+}
+.btn-warn:hover { background: rgba(251,146,60,.1); }
+.status-msg {
+  margin-left: auto;
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+</style>
+
+<div class="header">
+  <h1>拓樸地圖建置器</h1>
+  <span class="stat-chip" id="stat-nodes"></span>
+  <span class="stat-chip" id="stat-merges">合併 <b>0</b></span>
+  <div class="legend">
+    <button class="filter-btn active" data-set="01" onclick="toggleSet('01',this)">
+      <span class="filter-dot" style="background:var(--set01)"></span>01
+    </button>
+    <button class="filter-btn active" data-set="02" onclick="toggleSet('02',this)">
+      <span class="filter-dot" style="background:var(--set02)"></span>02
+    </button>
+    <button class="filter-btn active" data-set="03" onclick="toggleSet('03',this)">
+      <span class="filter-dot" style="background:var(--set03)"></span>03
+    </button>
+  </div>
+  <div class="toggle-group">
+    <label class="toggle-label">
+      <input type="checkbox" id="chkRef" checked onchange="showRef=this.checked;draw()">參考圖
+    </label>
+    <label class="toggle-label">
+      <input type="checkbox" id="chkLabels" checked onchange="showLabels=this.checked;draw()">標號
+    </label>
+  </div>
+</div>
+
+<div class="main">
+  <div class="map-wrap" id="mapWrap">
+    <canvas id="mapCanvas"></canvas>
+    <div class="coord-tooltip" id="coordTip"></div>
+    <div class="map-hint">拖曳節點移動 · Shift+點擊多選 · 滾輪縮放 · 空白處拖曳平移</div>
+    <div class="zoom-controls">
+      <button class="zoom-btn" onclick="zoomBy(1.3)">+</button>
+      <button class="zoom-btn" onclick="zoomBy(0.7)">−</button>
+    </div>
+  </div>
+  <div class="panel" id="panel">
+    <div class="panel-empty">
+      <div class="panel-empty-icon">◎</div>
+      <div class="panel-empty-text">拖曳節點調整位置<br>Shift+點擊多選後合併<br>點擊節點查看照片</div>
+    </div>
+  </div>
+</div>
+
+<div class="bottombar">
+  <button class="btn btn-primary" onclick="confirmMap()">確認並儲存</button>
+  <button class="btn btn-merge" id="btnMerge" style="display:none" onclick="mergeSelected()">合併選取</button>
+  <button class="btn" onclick="undoLastMerge()">復原合併</button>
+  <span class="status-msg" id="statusMsg">載入中…</span>
+</div>
+
+<script>
+const SET_COLORS = { '01': '#4ade80', '02': '#60a5fa', '03': '#fb923c' };
+const SET_COLORS_DIM = { '01': 'rgba(74,222,128,.3)', '02': 'rgba(96,165,250,.3)', '03': 'rgba(251,146,60,.3)' };
+const DIR_LABELS = { front: '前', right: '右', back: '後', left: '左' };
+const SELECTED_COLOR = '#a78bfa';
+const MERGE_COLOR = '#f472b6';
+const REF_SESSION_COLORS = {
+  '家樂福1': '#E2654A', '家樂福2': '#38C99A', '家樂福3': '#D4A03C',
+  '家樂福4': '#8B7BD4', '家樂福5': '#4A9FD8',
+};
+
+let mapData = null;
+let refMap = null;
+let visibleSets = new Set(['01', '02', '03']);
+let showRef = true;
+let showLabels = true;
+
+// Selection: multiple nodes can be selected
+let selection = new Set();
+
+// Merge state: array of { primary: nodeId, absorbed: [nodeId, ...] }
+let mergeHistory = [];
+// nodeId -> primary nodeId (if absorbed into another)
+let absorbedInto = {};
+
+// Camera
+let camX = 0, camY = 0, camZoom = 14;
+let isPanning = false, panLastX = 0, panLastY = 0;
+
+// Drag
+let dragNode = null;
+let dragDidMove = false;
+let dragStartSX = 0, dragStartSY = 0;
+// When dragging a selected group, move all selected nodes
+let dragOffsets = {};
+
+const canvas = document.getElementById('mapCanvas');
+const ctx = canvas.getContext('2d');
+const coordTip = document.getElementById('coordTip');
+const dpr = window.devicePixelRatio || 1;
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+}
+
+function worldToScreen(wx, wy) {
+  const cx = canvas.width / 2 / dpr;
+  const cy = canvas.height / 2 / dpr;
+  return { x: cx + (wx - camX) * camZoom, y: cy - (wy - camY) * camZoom };
+}
+function screenToWorld(sx, sy) {
+  const cx = canvas.width / 2 / dpr;
+  const cy = canvas.height / 2 / dpr;
+  return { x: camX + (sx - cx) / camZoom, y: camY - (sy - cy) / camZoom };
+}
+
+// ── Helpers ──
+
+function nodeById(id) { return mapData.nodes.find(n => n.id === id); }
+
+function isVisible(node) {
+  if (absorbedInto[node.id] != null) return false;
+  return visibleSets.has(node.set);
+}
+
+function visibleNodes() { return mapData ? mapData.nodes.filter(isVisible) : []; }
+
+function getAbsorbedNodes(primaryId) {
+  const result = [];
+  for (const [nid, pid] of Object.entries(absorbedInto)) {
+    if (pid === primaryId) result.push(nodeById(Number(nid)));
+  }
+  return result.filter(Boolean);
+}
+
+function allSetsOfNode(node) {
+  const sets = new Set([node.set]);
+  for (const ab of getAbsorbedNodes(node.id)) sets.add(ab.set);
+  return [...sets].sort();
+}
+
+function allSourcesOfNode(node) {
+  const sources = [node];
+  return sources.concat(getAbsorbedNodes(node.id));
+}
+
+// ── Drawing ──
+
+function draw() {
+  if (!mapData) return;
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  const W = canvas.width / dpr;
+  const H = canvas.height / dpr;
+
+  ctx.fillStyle = '#0c1018';
+  ctx.fillRect(0, 0, W, H);
+
+  drawGrid(W, H);
+  if (showRef && refMap) drawRefMap(W, H);
+
+  // Existing grid dots
+  if (mapData.existing_grid) {
+    ctx.fillStyle = 'rgba(90,110,140,.1)';
+    for (const pos of mapData.existing_grid.positions) {
+      const p = worldToScreen(pos[0], pos[1]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  drawOriginCross();
+
+  const nodeMap = {};
+  for (const n of mapData.nodes) nodeMap[n.id] = n;
+
+  // Edges
+  for (const e of mapData.edges) {
+    let na = nodeMap[e.from], nb = nodeMap[e.to];
+    if (!na || !nb) continue;
+    // Redirect absorbed nodes to their primary
+    if (absorbedInto[na.id] != null) na = nodeMap[absorbedInto[na.id]];
+    if (absorbedInto[nb.id] != null) nb = nodeMap[absorbedInto[nb.id]];
+    if (!na || !nb || na.id === nb.id) continue;
+    if (!visibleSets.has(e.set)) continue;
+
+    const pa = worldToScreen(na.x, na.y);
+    const pb = worldToScreen(nb.x, nb.y);
+    const color = SET_COLORS_DIM[e.set] || '#2a3a4a';
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+
+    const dx = pb.x - pa.x, dy = pb.y - pa.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 20) {
+      const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
+      const ux = dx / len, uy = dy / len;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(mx + ux * 5, my + uy * 5);
+      ctx.lineTo(mx - ux * 3 - uy * 3, my - uy * 3 + ux * 3);
+      ctx.lineTo(mx - ux * 3 + uy * 3, my - uy * 3 - ux * 3);
+      ctx.fill();
+    }
+  }
+
+  // Nodes
+  for (const node of visibleNodes()) {
+    const p = worldToScreen(node.x, node.y);
+    const isSel = selection.has(node.id);
+    const isDrag = dragNode && dragNode.id === node.id;
+    const sets = allSetsOfNode(node);
+    const hasAbsorbed = getAbsorbedNodes(node.id).length > 0;
+    const r = isSel || isDrag ? 8 : (hasAbsorbed ? 7 : 5);
+
+    // Node fill
+    if (sets.length > 1) {
+      const sa = (Math.PI * 2) / sets.length;
+      sets.forEach((s, i) => {
+        ctx.fillStyle = SET_COLORS[s] || '#888';
+        ctx.beginPath(); ctx.moveTo(p.x, p.y);
+        ctx.arc(p.x, p.y, r, i * sa - Math.PI / 2, (i + 1) * sa - Math.PI / 2);
+        ctx.fill();
+      });
+    } else {
+      ctx.fillStyle = SET_COLORS[node.set] || '#888';
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Merge indicator ring
+    if (hasAbsorbed) {
+      ctx.strokeStyle = MERGE_COLOR;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r + 3, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // Selection ring
+    if (isSel) {
+      ctx.strokeStyle = SELECTED_COLOR;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r + 4, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Drag glow
+    if (isDrag) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r + 3, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // Label
+    if (showLabels) {
+      ctx.font = '10px "DM Mono", monospace';
+      ctx.fillStyle = SET_COLORS[node.set] || '#8899aa';
+      ctx.globalAlpha = 0.7;
+      ctx.textAlign = 'center';
+      const label = node.set + '-' + node.wp_num;
+      ctx.fillText(label, p.x, p.y - r - 4);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawGrid(W, H) {
+  const gridStep = 5;
+  ctx.strokeStyle = '#111924';
+  ctx.lineWidth = 1;
+  const tl = screenToWorld(0, 0);
+  const br = screenToWorld(W, H);
+  const gMinX = Math.floor(Math.min(tl.x, br.x) / gridStep) * gridStep;
+  const gMaxX = Math.ceil(Math.max(tl.x, br.x) / gridStep) * gridStep;
+  const gMinY = Math.floor(Math.min(tl.y, br.y) / gridStep) * gridStep;
+  const gMaxY = Math.ceil(Math.max(tl.y, br.y) / gridStep) * gridStep;
+  for (let gx = gMinX; gx <= gMaxX; gx += gridStep) {
+    const p = worldToScreen(gx, 0);
+    ctx.beginPath(); ctx.moveTo(p.x, 0); ctx.lineTo(p.x, H); ctx.stroke();
+  }
+  for (let gy = gMinY; gy <= gMaxY; gy += gridStep) {
+    const p = worldToScreen(0, gy);
+    ctx.beginPath(); ctx.moveTo(0, p.y); ctx.lineTo(W, p.y); ctx.stroke();
+  }
+  ctx.font = '9px "DM Mono", monospace';
+  ctx.fillStyle = '#3a4a60';
+  ctx.textAlign = 'left';
+  for (let gx = gMinX; gx <= gMaxX; gx += gridStep) {
+    const p = worldToScreen(gx, 0);
+    ctx.fillText(gx + 'm', p.x + 2, H - 4);
+  }
+  for (let gy = gMinY; gy <= gMaxY; gy += gridStep) {
+    const p = worldToScreen(0, gy);
+    ctx.fillText(gy + 'm', 4, p.y - 3);
+  }
+}
+
+function drawOriginCross() {
+  const o = worldToScreen(0, 0);
+  ctx.strokeStyle = 'rgba(180,200,220,.2)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath(); ctx.arc(o.x, o.y, 14, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(o.x - 18, o.y); ctx.lineTo(o.x + 18, o.y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(o.x, o.y - 18); ctx.lineTo(o.x, o.y + 18); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = '10px "DM Mono", monospace';
+  ctx.fillStyle = '#5e7089';
+  ctx.textAlign = 'left';
+  ctx.fillText('原點', o.x + 16, o.y - 8);
+}
+
+function drawRefMap(W, H) {
+  const refNodeMap = {};
+  for (const n of refMap.nodes) refNodeMap[n.id] = n;
+
+  ctx.lineWidth = 1;
+  for (const e of refMap.edges) {
+    const na = refNodeMap[e.a], nb = refNodeMap[e.b];
+    if (!na || !nb) continue;
+    const pa = worldToScreen(na.x, na.y);
+    const pb = worldToScreen(nb.x, nb.y);
+    if (pa.x < -50 && pb.x < -50) continue;
+    if (pa.x > W + 50 && pb.x > W + 50) continue;
+    if (pa.y < -50 && pb.y < -50) continue;
+    if (pa.y > H + 50 && pb.y > H + 50) continue;
+
+    let color = 'rgba(70,100,130,0.12)';
+    if (na.sn === nb.sn && REF_SESSION_COLORS[na.sn]) {
+      const c = REF_SESSION_COLORS[na.sn];
+      const r = parseInt(c.slice(1,3),16), g = parseInt(c.slice(3,5),16), b = parseInt(c.slice(5,7),16);
+      color = `rgba(${r},${g},${b},0.12)`;
+    }
+    ctx.strokeStyle = color;
+    ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+  }
+
+  for (const n of refMap.nodes) {
+    const p = worldToScreen(n.x, n.y);
+    if (p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) continue;
+    const c = REF_SESSION_COLORS[n.sn] || '#6688aa';
+    const r = parseInt(c.slice(1,3),16), g = parseInt(c.slice(3,5),16), b = parseInt(c.slice(5,7),16);
+    ctx.fillStyle = `rgba(${r},${g},${b},0.18)`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+    if (n.labels.length > 0 && camZoom > 8) {
+      ctx.font = '8px "DM Mono", monospace';
+      ctx.fillStyle = `rgba(${r},${g},${b},0.3)`;
+      ctx.textAlign = 'left';
+      ctx.fillText(n.labels[0], p.x + 5, p.y + 3);
+    }
+  }
+}
+
+// ── Hit test ──
+
+function hitTestNode(sx, sy) {
+  let best = null, bestDist = Infinity;
+  for (const node of visibleNodes()) {
+    const p = worldToScreen(node.x, node.y);
+    const dx = sx - p.x, dy = sy - p.y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d < 16 && d < bestDist) { bestDist = d; best = node; }
+  }
+  return best;
+}
+
+// ── Mouse ──
+
+canvas.addEventListener('mousedown', e => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  const hit = hitTestNode(sx, sy);
+
+  if (hit) {
+    dragNode = hit;
+    dragDidMove = false;
+    dragStartSX = e.clientX;
+    dragStartSY = e.clientY;
+    canvas.style.cursor = 'grabbing';
+
+    // If dragging a selected node, prepare to drag all selected
+    if (selection.has(hit.id) && selection.size > 1) {
+      dragOffsets = {};
+      for (const nid of selection) {
+        const n = nodeById(nid);
+        if (n && n.id !== hit.id) {
+          dragOffsets[nid] = { dx: n.x - hit.x, dy: n.y - hit.y };
+        }
+      }
+    } else {
+      dragOffsets = {};
+    }
+    return;
+  }
+
+  isPanning = true;
+  panLastX = e.clientX;
+  panLastY = e.clientY;
+});
+
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+
+  if (dragNode) {
+    const dsx = e.clientX - dragStartSX;
+    const dsy = e.clientY - dragStartSY;
+    if (Math.abs(dsx) > 2 || Math.abs(dsy) > 2) dragDidMove = true;
+
+    const w = screenToWorld(sx, sy);
+    const nx = Math.round(w.x * 10) / 10;
+    const ny = Math.round(w.y * 10) / 10;
+    dragNode.x = nx;
+    dragNode.y = ny;
+
+    // Move group
+    for (const [nid, off] of Object.entries(dragOffsets)) {
+      const n = nodeById(Number(nid));
+      if (n) { n.x = Math.round((nx + off.dx) * 10) / 10; n.y = Math.round((ny + off.dy) * 10) / 10; }
+    }
+
+    coordTip.style.display = 'block';
+    const count = Object.keys(dragOffsets).length + 1;
+    coordTip.textContent = count > 1
+      ? `移動 ${count} 個節點: (${nx}, ${ny})`
+      : `${dragNode.set}-${dragNode.wp_num}: (${nx}, ${ny})`;
+
+    draw();
+    return;
+  }
+
+  if (isPanning) {
+    const dx = e.clientX - panLastX;
+    const dy = e.clientY - panLastY;
+    panLastX = e.clientX;
+    panLastY = e.clientY;
+    camX -= dx / camZoom;
+    camY += dy / camZoom;
+    draw();
+    return;
+  }
+
+  canvas.style.cursor = hitTestNode(sx, sy) ? 'pointer' : 'grab';
+});
+
+canvas.addEventListener('mouseup', e => {
+  if (dragNode) {
+    if (!dragDidMove) {
+      // Click — toggle selection
+      if (e.shiftKey) {
+        if (selection.has(dragNode.id)) selection.delete(dragNode.id);
+        else selection.add(dragNode.id);
+      } else {
+        selection.clear();
+        selection.add(dragNode.id);
+      }
+      updateMergeBtn();
+      showDetail();
+    } else {
+      // Drag finished
+      if (!selection.has(dragNode.id)) {
+        selection.clear();
+        selection.add(dragNode.id);
+      }
+      showDetail();
+    }
+    dragNode = null;
+    dragOffsets = {};
+    coordTip.style.display = 'none';
+    canvas.style.cursor = 'grab';
+    draw();
+    return;
+  }
+
+  if (isPanning) {
+    isPanning = false;
+  }
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.85 : 1.18;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const wBefore = screenToWorld(mx, my);
+  camZoom *= factor;
+  camZoom = Math.max(2, Math.min(80, camZoom));
+  const wAfter = screenToWorld(mx, my);
+  camX -= wAfter.x - wBefore.x;
+  camY -= wAfter.y - wBefore.y;
+  draw();
+}, { passive: false });
+
+function zoomBy(factor) {
+  camZoom *= factor;
+  camZoom = Math.max(2, Math.min(80, camZoom));
+  draw();
+}
+function toggleSet(sid, btn) {
+  if (visibleSets.has(sid)) { visibleSets.delete(sid); btn.classList.remove('active'); }
+  else { visibleSets.add(sid); btn.classList.add('active'); }
+  draw();
+}
+
+// ── Merge ──
+
+function updateMergeBtn() {
+  const btn = document.getElementById('btnMerge');
+  // Enable merge when 2+ nodes from different sets are selected
+  if (selection.size >= 2) {
+    const sets = new Set();
+    for (const nid of selection) {
+      const n = nodeById(nid);
+      if (n) sets.add(n.set);
+    }
+    btn.style.display = sets.size >= 2 ? '' : 'none';
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+function mergeSelected() {
+  if (selection.size < 2) return;
+  const ids = [...selection];
+  const primary = nodeById(ids[0]);
+  if (!primary) return;
+
+  const absorbed = [];
+  for (let i = 1; i < ids.length; i++) {
+    const n = nodeById(ids[i]);
+    if (!n) continue;
+    // Move absorbed node to primary's position
+    n.x = primary.x;
+    n.y = primary.y;
+    absorbedInto[n.id] = primary.id;
+    absorbed.push(n.id);
+  }
+
+  mergeHistory.push({ primary: primary.id, absorbed });
+  selection.clear();
+  selection.add(primary.id);
+  updateMergeBtn();
+  updateStats();
+  showDetail();
+  draw();
+}
+
+function undoLastMerge() {
+  if (mergeHistory.length === 0) return;
+  const last = mergeHistory.pop();
+  for (const nid of last.absorbed) {
+    delete absorbedInto[nid];
+  }
+  selection.clear();
+  selection.add(last.primary);
+  updateMergeBtn();
+  updateStats();
+  showDetail();
+  draw();
+}
+
+// ── Detail panel ──
+
+function showDetail() {
+  const panel = document.getElementById('panel');
+  const ids = [...selection];
+
+  if (ids.length === 0) {
+    panel.innerHTML = `<div class="panel-empty">
+      <div class="panel-empty-icon">◎</div>
+      <div class="panel-empty-text">拖曳節點調整位置<br>Shift+點擊多選後合併<br>點擊節點查看照片</div>
+    </div>`;
+    return;
+  }
+
+  // Multi-select view
+  if (ids.length > 1) {
+    let html = '<div class="merge-section"><h2>已選取 ' + ids.length + ' 個節點</h2>';
+    html += '<div class="merge-list">';
+    for (const nid of ids) {
+      const n = nodeById(nid);
+      if (!n) continue;
+      html += `<div class="merge-item">
+        <span class="mi-dot" style="background:${SET_COLORS[n.set]}"></span>
+        <span class="mi-label">${n.set}-${n.wp_num}</span>
+        <span class="mi-coord">(${n.x}, ${n.y})</span>
+      </div>`;
+    }
+    html += '</div>';
+    // Check if mergeable
+    const sets = new Set(ids.map(id => nodeById(id)?.set).filter(Boolean));
+    if (sets.size >= 2) {
+      html += '<div class="merge-actions"><button class="btn btn-merge" onclick="mergeSelected()">合併這些節點</button></div>';
+    } else {
+      html += '<div style="font-family:var(--font-data);font-size:10px;color:var(--text-dim)">需要不同路線的節點才能合併</div>';
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+    return;
+  }
+
+  // Single node detail
+  const node = nodeById(ids[0]);
+  if (!node) return;
+
+  const allSources = allSourcesOfNode(node);
+  const sets = allSetsOfNode(node);
+
+  let html = `<div class="panel-section">
+    <h2>${node.set}-${node.wp_num}${sets.length > 1 ? ' (已合併)' : ''}</h2>
+    <div class="panel-row"><span class="panel-label">座標</span><span class="panel-value">(${node.x}, ${node.y})</span></div>
+    <div class="panel-row"><span class="panel-label">路線</span>
+      <span class="panel-value">${sets.map(s => '<span style="color:' + SET_COLORS[s] + '">' + s + '</span>').join(' ')}</span></div>`;
+  if (allSources.length > 1) {
+    html += `<div class="panel-row"><span class="panel-label">合併來源</span><span class="panel-value">${allSources.length}</span></div>`;
+  }
+  html += '</div>';
+
+  // Source tabs for merged nodes
+  const activeSource = allSources[0];
+  if (allSources.length > 1) {
+    html += '<div class="source-tabs">';
+    allSources.forEach((src, i) => {
+      const isActive = i === 0;
+      html += `<button class="source-tab ${isActive ? 'active' : ''}"
+        style="${isActive ? 'background:' + SET_COLORS[src.set] + ';' : ''}"
+        onclick="switchSource(${node.id},${src.id},this)">${src.set}-${src.wp_num}</button>`;
+    });
+    html += '</div>';
+  }
+
+  html += buildPhotoSection(activeSource);
+
+  // Neighbors
+  const neighbors = findNeighbors(node);
+  if (neighbors.length) {
+    html += '<div class="panel-section"><h2>相鄰節點</h2><div class="neighbor-list">';
+    for (const nb of neighbors) {
+      html += `<span class="neighbor-chip" onclick="selectNode(${nb.id})">→ ${nb.set}-${nb.wp_num}</span>`;
+    }
+    html += '</div></div>';
+  }
+
+  // Unmerge button if merged
+  if (allSources.length > 1) {
+    html += `<div class="panel-section">
+      <button class="btn btn-warn" onclick="unmergeNode(${node.id})">拆分此合併節點</button>
+    </div>`;
+  }
+
+  panel.innerHTML = html;
+}
+
+function buildPhotoSection(node) {
+  let html = '<div class="photo-grid">';
+  for (const dir of ['front', 'right', 'back', 'left']) {
+    const filename = node.photos[dir];
+    html += `<div class="photo-cell">
+      <img src="/test-photo/${node.set}/${filename}" loading="lazy">
+      <span class="dir-label">${DIR_LABELS[dir]}</span>
+      <span class="set-badge" style="background:${SET_COLORS[node.set]}">${node.set}</span>
+    </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function switchSource(primaryId, sourceId, btn) {
+  const src = nodeById(sourceId);
+  if (!src) return;
+  btn.parentElement.querySelectorAll('.source-tab').forEach(t => {
+    t.classList.remove('active'); t.style.background = '';
+  });
+  btn.classList.add('active');
+  btn.style.background = SET_COLORS[src.set];
+  const grid = btn.parentElement.nextElementSibling;
+  if (grid) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = buildPhotoSection(src);
+    grid.replaceWith(tmp.firstElementChild);
+  }
+}
+
+function findNeighbors(node) {
+  if (!mapData) return [];
+  const result = [];
+  for (const e of mapData.edges) {
+    if (e.from === node.id) {
+      const nb = nodeById(e.to);
+      if (nb && absorbedInto[nb.id] == null) result.push(nb);
+    } else if (e.to === node.id) {
+      const nb = nodeById(e.from);
+      if (nb && absorbedInto[nb.id] == null) result.push(nb);
+    }
+  }
+  // Also show neighbors via absorbed nodes' edges
+  for (const ab of getAbsorbedNodes(node.id)) {
+    for (const e of mapData.edges) {
+      let other = null;
+      if (e.from === ab.id) other = nodeById(e.to);
+      else if (e.to === ab.id) other = nodeById(e.from);
+      if (other && other.id !== node.id && absorbedInto[other.id] == null) {
+        if (!result.find(r => r.id === other.id)) result.push(other);
+      }
+    }
+  }
+  return result;
+}
+
+function selectNode(nid) {
+  selection.clear();
+  selection.add(nid);
+  updateMergeBtn();
+  showDetail();
+  draw();
+}
+
+function unmergeNode(primaryId) {
+  // Find and undo the merge
+  const idx = mergeHistory.findIndex(m => m.primary === primaryId);
+  if (idx >= 0) {
+    const m = mergeHistory.splice(idx, 1)[0];
+    for (const nid of m.absorbed) delete absorbedInto[nid];
+  } else {
+    // Direct unmerge
+    const toRemove = [];
+    for (const [nid, pid] of Object.entries(absorbedInto)) {
+      if (pid === primaryId) toRemove.push(Number(nid));
+    }
+    for (const nid of toRemove) delete absorbedInto[nid];
+  }
+  updateStats();
+  showDetail();
+  draw();
+}
+
+// ── Stats ──
+
+function updateStats() {
+  const mergeCount = Object.keys(absorbedInto).length;
+  document.getElementById('stat-merges').innerHTML = `合併 <b>${mergeCount}</b>`;
+}
+
+// ── Confirm ──
+
+async function confirmMap() {
+  const msg = document.getElementById('statusMsg');
+  msg.textContent = '送出中…';
+
+  // Build output: combine merged nodes
+  const outNodes = [];
+  const outEdges = [];
+  const nodeMap = {};
+  for (const n of mapData.nodes) nodeMap[n.id] = n;
+
+  for (const node of visibleNodes()) {
+    const sources = allSourcesOfNode(node);
+    outNodes.push({
+      id: node.id,
+      x: node.x,
+      y: node.y,
+      sources: sources.map(s => ({
+        set: s.set,
+        wp_num: s.wp_num,
+        uuid: s.uuid,
+        photos: s.photos,
+      })),
+      sets_present: allSetsOfNode(node),
+    });
+  }
+
+  // Build edges between visible nodes
+  const visIds = new Set(outNodes.map(n => n.id));
+  const edgeSet = new Set();
+  for (const e of mapData.edges) {
+    let fromId = absorbedInto[e.from] != null ? absorbedInto[e.from] : e.from;
+    let toId = absorbedInto[e.to] != null ? absorbedInto[e.to] : e.to;
+    if (fromId === toId) continue;
+    if (!visIds.has(fromId) || !visIds.has(toId)) continue;
+    const key = Math.min(fromId, toId) + '-' + Math.max(fromId, toId);
+    if (edgeSet.has(key)) continue;
+    edgeSet.add(key);
+    const na = nodeMap[fromId], nb = nodeMap[toId];
+    const dx = na.x - nb.x, dy = na.y - nb.y;
+    outEdges.push({ from: fromId, to: toId, distance: Math.round(Math.sqrt(dx*dx+dy*dy) * 100) / 100 });
+  }
+
+  try {
+    const resp = await fetch('/topomap-confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ place: mapData.place, nodes: outNodes, edges: outEdges }),
+    });
+    const result = await resp.json();
+    msg.textContent = result.message || '已送出';
+  } catch (err) {
+    msg.textContent = '失敗: ' + err.message;
+  }
+}
+
+// ── Init ──
+
+function fitToData() {
+  if (!mapData || !mapData.nodes.length) return;
+  let allXs = mapData.nodes.map(n => n.x);
+  let allYs = mapData.nodes.map(n => n.y);
+  if (refMap) {
+    allXs = allXs.concat(refMap.nodes.map(n => n.x));
+    allYs = allYs.concat(refMap.nodes.map(n => n.y));
+  }
+  camX = (Math.min(...allXs) + Math.max(...allXs)) / 2;
+  camY = (Math.min(...allYs) + Math.max(...allYs)) / 2;
+  const rangeX = Math.max(...allXs) - Math.min(...allXs) || 1;
+  const rangeY = Math.max(...allYs) - Math.min(...allYs) || 1;
+  const W = canvas.width / dpr;
+  const H = canvas.height / dpr;
+  camZoom = Math.min((W - 80) / rangeX, (H - 80) / rangeY);
+  camZoom = Math.max(4, Math.min(40, camZoom));
+}
+
+async function init() {
+  resize();
+  const msg = document.getElementById('statusMsg');
+  try {
+    const [dataResp, refResp] = await Promise.all([
+      fetch('/topomap-data').then(r => r.json()),
+      fetch('/existing-topomap').then(r => r.json()).catch(() => null),
+    ]);
+    mapData = dataResp;
+    refMap = refResp;
+    fitToData();
+    draw();
+
+    const stats = dataResp.stats;
+    document.getElementById('stat-nodes').innerHTML =
+      `<span style="color:var(--set01)">01</span>×${stats.sets?.['01']||0} ` +
+      `<span style="color:var(--set02)">02</span>×${stats.sets?.['02']||0} ` +
+      `<span style="color:var(--set03)">03</span>×${stats.sets?.['03']||0}`;
+    msg.textContent = `${stats.total_nodes} 個獨立節點` + (refMap ? ` · 參考圖 ${refMap.nodes.length} 節點` : '');
+  } catch (err) {
+    msg.textContent = '載入失敗: ' + err.message;
+  }
+}
+
+init();
+window.addEventListener('resize', () => { resize(); draw(); });
+</script>

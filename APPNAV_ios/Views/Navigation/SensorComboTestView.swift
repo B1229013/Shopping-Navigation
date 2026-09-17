@@ -2,16 +2,89 @@ import Combine
 import HealthKit
 import SwiftUI
 
+/// The four directional slots for a waypoint node's reference photos.
+enum DirectionSlot: String, Codable, CaseIterable, Identifiable {
+    case front = "front"
+    case right = "right"
+    case back  = "back"
+    case left  = "left"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .front: return "前"
+        case .right: return "右"
+        case .back:  return "後"
+        case .left:  return "左"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .front: return "arrow.up"
+        case .right: return "arrow.right"
+        case .back:  return "arrow.down"
+        case .left:  return "arrow.left"
+        }
+    }
+}
+
 /// A single "拍照標記" waypoint — records where every heading method thought the user was
 /// standing at the moment they tapped the button (before the camera even opens), plus the
-/// photo they took there. Meant to be cross-referenced later (e.g. in `TopoMapTestView`'s
-/// offline mode) against whichever heading method's trajectory turns out most trustworthy.
+/// four directional photos (前/後/左/右) they took there. Each node MUST have exactly 4
+/// photos to enable heading estimation during navigation.
 struct ComboWaypoint: Codable, Identifiable {
     var id: String
     var index: Int
     var timestamp: Double
+    /// Legacy single photo — kept for backward compatibility with old data.
     var photoFileName: String?
     var positions: [String: PointXY]
+
+    /// Four directional photos: keyed by DirectionSlot.rawValue ("front"/"right"/"back"/"left").
+    /// Added after initial version — decoded with `decodeIfPresent` for backward compat.
+    var directionalPhotos: [String: String]
+
+    /// How many of the 4 directional photos have been captured.
+    var capturedCount: Int {
+        directionalPhotos.count
+    }
+
+    /// Whether all 4 directional photos have been captured.
+    var isComplete: Bool {
+        capturedCount == 4
+    }
+
+    /// Get the filename for a specific direction slot.
+    func photoFile(for slot: DirectionSlot) -> String? {
+        directionalPhotos[slot.rawValue]
+    }
+
+    // Custom Decodable for backward compatibility — old data lacks directionalPhotos
+    private enum CodingKeys: String, CodingKey {
+        case id, index, timestamp, photoFileName, positions, directionalPhotos
+    }
+
+    init(id: String, index: Int, timestamp: Double, photoFileName: String? = nil,
+         positions: [String: PointXY], directionalPhotos: [String: String] = [:]) {
+        self.id = id
+        self.index = index
+        self.timestamp = timestamp
+        self.photoFileName = photoFileName
+        self.positions = positions
+        self.directionalPhotos = directionalPhotos
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        index = try c.decode(Int.self, forKey: .index)
+        timestamp = try c.decode(Double.self, forKey: .timestamp)
+        photoFileName = try c.decodeIfPresent(String.self, forKey: .photoFileName)
+        positions = try c.decodeIfPresent([String: PointXY].self, forKey: .positions) ?? [:]
+        directionalPhotos = try c.decodeIfPresent([String: String].self, forKey: .directionalPhotos) ?? [:]
+    }
 }
 
 /// One "標記回到原點" press — same idea as `SensorTestLap` in `SensorTestView`, but keeps
@@ -119,6 +192,8 @@ struct SensorComboTestView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = SensorComboTestModel()
     @State private var showCamera = false
+    /// Which directional slot is being captured right now (nil = not capturing)
+    @State private var capturingSlot: DirectionSlot?
 
     private static let methodColors: [HeadingMethodID: Color] = [
         .accelMag: .orange,
@@ -156,7 +231,13 @@ struct SensorComboTestView: View {
             }
             .sheet(isPresented: $showCamera) {
                 CameraPickerView { image in
-                    model.finishWaypointCapture(image: image)
+                    if let slot = capturingSlot {
+                        model.finishDirectionalCapture(slot: slot, image: image)
+                        capturingSlot = nil
+                    } else {
+                        // Legacy fallback
+                        model.finishWaypointCapture(image: image)
+                    }
                 }
             }
             // Shared across `waypointsCard` (current round) and `historyCard` (any past
@@ -170,6 +251,108 @@ struct SensorComboTestView: View {
             }
         }
         .onDisappear { model.stopAll() }
+    }
+
+    /// The 4-direction photo capture UI for a waypoint node.
+    /// Creates or continues a waypoint node, showing which directions have been captured.
+    private var directionalCaptureCard: some View {
+        let waypointCount = model.currentBatch?.waypoints.count ?? 0
+        let activeWaypoint = model.activeDirectionalWaypoint
+        let nodeLabel = activeWaypoint != nil
+            ? "節點 \(activeWaypoint!.index) — 已拍 \(activeWaypoint!.capturedCount)/4"
+            : "新節點（第 \(waypointCount + 1) 個）"
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "camera.viewfinder")
+                    .foregroundColor(.orange)
+                Text(nodeLabel)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.appTextPrimary)
+                Spacer()
+                if let wp = activeWaypoint, wp.isComplete {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("完成")
+                        .font(.caption.weight(.bold))
+                        .foregroundColor(.green)
+                }
+            }
+
+            // 4 directional buttons in a 2x2 grid
+            //       [前]
+            //  [左]      [右]
+            //       [後]
+            VStack(spacing: 8) {
+                directionButton(.front)
+                HStack(spacing: 8) {
+                    directionButton(.left)
+                    directionButton(.right)
+                }
+                directionButton(.back)
+            }
+            .frame(maxWidth: .infinity)
+
+            if let wp = activeWaypoint, wp.capturedCount > 0 {
+                Button {
+                    model.finalizeDirectionalWaypoint()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: wp.isComplete ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                            .font(.system(size: 14, weight: .bold))
+                        Text(wp.isComplete
+                             ? "確認完成，準備下一個節點"
+                             : "只拍了 \(wp.capturedCount)/4 張，仍要確認並前進")
+                            .font(.caption.weight(.bold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
+                    .background(wp.isComplete ? Color.green : Color.yellow)
+                    .foregroundColor(wp.isComplete ? .white : .black)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+            }
+
+            Text("每個節點拍 4 張照片（前後左右），用來判斷使用者面朝哪個方向。先面向行走方向按「前」，再依序轉身拍其他三個方向。拍完後按確認，即可前進到下一個節點。已拍的方向可以重按重拍。")
+                .font(.caption2)
+                .foregroundColor(.appTextTertiary)
+        }
+        .padding(16)
+        .background(Color.orange.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+        )
+        .disabled(!model.isTracking)
+        .opacity(model.isTracking ? 1 : 0.5)
+    }
+
+    /// One directional capture button (前/後/左/右).
+    /// Always tappable (even after captured) so the user can retake if a photo came out bad.
+    private func directionButton(_ slot: DirectionSlot) -> some View {
+        let isCaptured = model.activeDirectionalWaypoint?.photoFile(for: slot) != nil
+
+        return Button {
+            if model.activeDirectionalWaypoint == nil {
+                model.beginDirectionalWaypoint()
+            }
+            capturingSlot = slot
+            showCamera = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isCaptured ? "checkmark.circle.fill" : slot.icon)
+                    .font(.system(size: 14, weight: .bold))
+                Text(isCaptured ? "\(slot.label)（重拍）" : slot.label)
+                    .font(.subheadline.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background(isCaptured ? Color.green.opacity(0.8) : Color.orange)
+            .foregroundColor(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .disabled(!model.isTracking)
     }
 
     private var statusCard: some View {
@@ -260,18 +443,8 @@ struct SensorComboTestView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .disabled(!SensorComboTracker.isAvailable)
 
-            Button {
-                model.beginWaypointCapture()
-                showCamera = true
-            } label: {
-                Label("拍照標記點（第 \((model.currentBatch?.waypoints.count ?? 0) + 1) 個）", systemImage: "camera.fill")
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 46)
-            .background(Color.orange)
-            .foregroundColor(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .disabled(!model.isTracking)
+            // ── 四方位拍照標記 ────────────────────────
+            directionalCaptureCard
 
             Button("記錄檢查點（第 \((model.currentBatch?.checkpoints.count ?? 0) + 1) 個）") {
                 model.markCheckpoint()
@@ -376,32 +549,51 @@ struct SensorComboTestView: View {
                         let urls = model.photoShareURLs(batchId: batch.id)
                         if !urls.isEmpty { model.pendingSharePhotoURLs = urls }
                     } label: {
-                        Label("分享照片（\(batch.waypoints.count) 張）", systemImage: "square.and.arrow.up")
+                        let totalPhotos = batch.waypoints.reduce(0) { $0 + max($1.capturedCount, $1.photoFileName != nil && $1.directionalPhotos.isEmpty ? 1 : 0) }
+                        Label("分享全部照片（\(batch.waypoints.count) 節點，\(totalPhotos) 張）", systemImage: "square.and.arrow.up")
                     }
                     .font(.caption.weight(.semibold))
                     .foregroundColor(.blue)
                 }
                 ForEach(batch.waypoints) { waypoint in
-                    HStack(spacing: 10) {
-                        if let fileName = waypoint.photoFileName, let image = model.loadWaypointImage(batchId: batch.id, fileName: fileName) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 44, height: 44)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 10) {
+                            // Show front photo thumbnail if available
+                            if let fileName = waypoint.photoFile(for: .front) ?? waypoint.photoFileName,
+                               let image = model.loadWaypointImage(batchId: batch.id, fileName: fileName) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 44, height: 44)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("第 \(waypoint.index) 點（\(waypoint.capturedCount)/4 張）")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.appTextPrimary)
+                                if let rv = waypoint.positions[HeadingMethodID.rotationVector.rawValue] {
+                                    Text(String(format: "座標 (%.1f, %.1f)", rv.x, rv.y))
+                                        .font(.caption2)
+                                        .foregroundColor(.appTextTertiary)
+                                }
+                            }
+                            Spacer()
                         }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("第 \(waypoint.index) 點")
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.appTextPrimary)
-                            if let rv = waypoint.positions[HeadingMethodID.rotationVector.rawValue] {
-                                Text(String(format: "旋轉向量座標 (%.1f, %.1f)", rv.x, rv.y))
-                                    .font(.caption2)
-                                    .foregroundColor(.appTextTertiary)
+                        // Direction slot indicators
+                        HStack(spacing: 4) {
+                            ForEach(DirectionSlot.allCases) { slot in
+                                HStack(spacing: 2) {
+                                    Image(systemName: waypoint.photoFile(for: slot) != nil ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(waypoint.photoFile(for: slot) != nil ? .green : .gray)
+                                    Text(slot.label)
+                                        .font(.caption2)
+                                        .foregroundColor(waypoint.photoFile(for: slot) != nil ? .appTextPrimary : .appTextTertiary)
+                                }
                             }
                         }
-                        Spacer()
                     }
+                    .padding(.vertical, 2)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1079,6 +1271,80 @@ final class SensorComboTestModel: ObservableObject {
         persist()
     }
 
+    // MARK: - Four-direction waypoint capture
+
+    /// The waypoint node currently being built (not yet finalized with all 4 photos).
+    @Published private(set) var activeDirectionalWaypoint: ComboWaypoint?
+
+    /// Start a new directional waypoint node — captures the position snapshot once,
+    /// then the 4 directional photos are taken one at a time against this same snapshot.
+    func beginDirectionalWaypoint() {
+        guard isTracking, activeDirectionalWaypoint == nil else { return }
+        beginWaypointCapture()
+
+        guard let snapshot = pendingWaypointSnapshot, let index = currentBatchIndex else { return }
+
+        var positions: [String: PointXY] = [:]
+        for (method, pos) in snapshot.positions {
+            positions[method.rawValue] = PointXY(x: pos.x, y: pos.y)
+        }
+
+        let waypointIndex = batches[index].waypoints.count + 1
+        activeDirectionalWaypoint = ComboWaypoint(
+            id: UUID().uuidString,
+            index: waypointIndex,
+            timestamp: snapshot.timestamp.timeIntervalSince1970 * 1000,
+            positions: positions
+        )
+    }
+
+    /// Save one directional photo (front/right/back/left) to the active waypoint.
+    func finishDirectionalCapture(slot: DirectionSlot, image: UIImage?) {
+        guard var waypoint = activeDirectionalWaypoint,
+              let index = currentBatchIndex,
+              let image,
+              let data = image.jpegData(compressionQuality: 0.8) else { return }
+
+        let fileName = "\(waypoint.id)_\(slot.rawValue).jpg"
+        let dir = Self.photosDirectory(batchId: batches[index].id)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: dir.appendingPathComponent(fileName))
+
+        waypoint.directionalPhotos[slot.rawValue] = fileName
+        activeDirectionalWaypoint = waypoint
+
+        // Also set the legacy photoFileName to the front photo for backward compat
+        if slot == .front {
+            activeDirectionalWaypoint?.photoFileName = fileName
+        }
+
+        persist()
+    }
+
+    /// Finalize the current directional waypoint — appends it to the batch's waypoint list
+    /// and clears the active state so a new node can begin.
+    func finalizeDirectionalWaypoint() {
+        guard let waypoint = activeDirectionalWaypoint, let index = currentBatchIndex else { return }
+
+        batches[index].waypoints.append(waypoint)
+
+        // Also create a checkpoint for accuracy tracking
+        if let snapshot = pendingWaypointSnapshot {
+            appendCheckpoint(
+                timestamp: waypoint.timestamp,
+                stepCount: snapshot.stepCount,
+                distanceMeters: snapshot.distanceMeters,
+                positions: waypoint.positions,
+                waypointIndex: waypoint.index,
+                batchIndex: index
+            )
+        }
+
+        activeDirectionalWaypoint = nil
+        pendingWaypointSnapshot = nil
+        persist()
+    }
+
     func loadWaypointImage(batchId: String, fileName: String) -> UIImage? {
         let url = Self.photosDirectory(batchId: batchId).appendingPathComponent(fileName)
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -1092,7 +1358,20 @@ final class SensorComboTestModel: ObservableObject {
     func photoShareURLs(batchId: String) -> [URL] {
         guard let batch = batches.first(where: { $0.id == batchId }) else { return [] }
         let dir = Self.photosDirectory(batchId: batchId)
-        return batch.waypoints.compactMap { $0.photoFileName }.map { dir.appendingPathComponent($0) }
+        var urls: [URL] = []
+        for waypoint in batch.waypoints {
+            // Include all 4 directional photos (front/right/back/left)
+            for slot in DirectionSlot.allCases {
+                if let fileName = waypoint.directionalPhotos[slot.rawValue] {
+                    urls.append(dir.appendingPathComponent(fileName))
+                }
+            }
+            // Fallback: legacy single photo if no directional photos
+            if waypoint.directionalPhotos.isEmpty, let fileName = waypoint.photoFileName {
+                urls.append(dir.appendingPathComponent(fileName))
+            }
+        }
+        return urls
     }
 
     private static func photosDirectory(batchId: String) -> URL {
@@ -1174,7 +1453,10 @@ final class SensorComboTestModel: ObservableObject {
                 let p = waypoint.positions[m.rawValue]
                 return "\(m.rawValue)=(\(String(format: "%.2f", p?.x ?? 0)),\(String(format: "%.2f", p?.y ?? 0)))"
             }.joined(separator: " ")
-            csv += "# waypoint \(waypoint.index): t=\(waypoint.timestamp) photo=\(waypoint.photoFileName ?? "none") \(posText)\n"
+            let dirPhotos = DirectionSlot.allCases.map { slot in
+                "\(slot.rawValue)=\(waypoint.directionalPhotos[slot.rawValue] ?? "none")"
+            }.joined(separator: " ")
+            csv += "# waypoint \(waypoint.index): t=\(waypoint.timestamp) photos={\(dirPhotos)} captured=\(waypoint.capturedCount)/4 \(posText)\n"
         }
         for lap in batch.laps {
             let posText = HeadingMethodID.allCases.map { m -> String in

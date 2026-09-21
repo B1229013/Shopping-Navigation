@@ -492,7 +492,11 @@ def _build_route_context(s, loc_result, detections=None, ocr_results=None) -> tu
         position_desc = "定位中（尚未確認確切位置）"
 
     # Heading description
-    if localized and loc_result.matched_heading is not None and loc_result.heading_confidence > 0.3:
+    heading_ok = (localized
+                  and loc_result.matched_heading is not None
+                  and loc_result.heading_confidence > 0.5
+                  and loc_result.confidence >= 0.55)
+    if heading_ok:
         slot_zh = {"front": "前方（行走方向）", "right": "右方", "back": "後方", "left": "左方"}
         slot_label = slot_zh.get(loc_result.matched_slot or "", "未知方向")
         heading_desc = f"面朝 {slot_label}"
@@ -588,7 +592,8 @@ def _build_route_context(s, loc_result, detections=None, ocr_results=None) -> tu
         heading_reliable = (localized
                             and ref_map
                             and loc_result.matched_heading is not None
-                            and loc_result.heading_confidence > 0.3)
+                            and loc_result.heading_confidence > 0.5
+                            and loc_result.confidence >= 0.55)
 
         if heading_reliable:
             node_positions = {
@@ -769,11 +774,12 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             detected_items=detected_items,
         )
 
+        ref_map = neo4j.load_reference_map(s.place)
+
         if (RERANK_ENABLED and image_path and REF_PHOTO_ROOT
                 and loc_result.matched_nid is not None
                 and loc_result.top_candidates):
             top = loc_result.top_candidates
-            ref_map = neo4j.load_reference_map(s.place)
             log.info("[session %s] rerank triggered (always-on): WP%d %.3f",
                      session_id, top[0][0], top[0][1])
             reranked = _vlm_rerank(
@@ -795,6 +801,64 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                 loc_result.ref_node = new_ref
                 loc_result.method = "grid+rerank"
                 loc_result.reasoning = reranked[0][2]
+
+                # Recompute heading for the NEW node's directional photos
+                if new_ref and new_ref.directional_photos:
+                    from server.heading import estimate_heading, best_matching_slot, DirectionalPhoto
+                    _live_labels = {l.lower().strip() for l in detected_labels if l}
+                    _live_ocr = {t.lower().strip() for t in ocr_texts if t}
+                    _dir_photos = [
+                        DirectionalPhoto(
+                            slot=dp.slot, heading_deg=dp.heading_deg,
+                            photo_file=dp.photo_file,
+                            objects=[{"label": o.label, "ocr_text": o.ocr_text}
+                                     for o in dp.objects],
+                        )
+                        for dp in new_ref.directional_photos
+                    ]
+                    new_heading = estimate_heading(_live_labels, _live_ocr, _dir_photos)
+                    new_slot = best_matching_slot(_live_labels, _live_ocr, _dir_photos)
+                    new_slot_str = new_slot if isinstance(new_slot, str) else (
+                        new_slot.value if new_slot else None)
+                    all_h = [dp.heading_deg for dp in new_ref.directional_photos]
+                    has_real = len(set(all_h)) > 1
+                    if has_real and new_heading is not None:
+                        loc_result.matched_heading = new_heading
+                        loc_result.matched_slot = new_slot_str
+                        unique_sets = len({
+                            frozenset(o.label for o in dp.objects)
+                            for dp in new_ref.directional_photos
+                        })
+                        loc_result.heading_confidence = min(loc_result.confidence, 0.8) if unique_sets > 1 else 0.2
+                        log.info("[session %s] rerank: recomputed heading=%.0f° slot=%s for WP%d",
+                                 session_id, new_heading, new_slot_str, new_nid)
+                    else:
+                        loc_result.matched_heading = None
+                        loc_result.matched_slot = None
+                        loc_result.heading_confidence = 0.0
+                        log.info("[session %s] rerank: WP%d has no reliable heading data", session_id, new_nid)
+
+        # Spatial continuity: penalise jumps that are too large for walking
+        prev_nid = getattr(s, "last_corrected_nid", None)
+        if (loc_result.matched_nid is not None
+                and prev_nid is not None
+                and prev_nid != loc_result.matched_nid
+                and ref_map):
+            prev_ref = ref_map.photos.get(prev_nid)
+            cur_ref = loc_result.ref_node or ref_map.photos.get(loc_result.matched_nid)
+            if prev_ref and cur_ref:
+                import math as _m
+                dx = cur_ref.pdr_x - prev_ref.pdr_x
+                dy = cur_ref.pdr_y - prev_ref.pdr_y
+                jump_m = _m.sqrt(dx * dx + dy * dy)
+                if jump_m > 15 and loc_result.confidence < 0.65:
+                    log.warning("[session %s] spatial jump WP%d→WP%d = %.1fm with conf=%.2f — "
+                                "clearing heading, keeping position for fallback",
+                                session_id, prev_nid, loc_result.matched_nid, jump_m, loc_result.confidence)
+                    loc_result.matched_heading = None
+                    loc_result.matched_slot = None
+                    loc_result.heading_confidence = 0.0
+                    loc_result.confidence *= 0.6
 
         if loc_result.matched_nid is not None:
             s.last_corrected_nid = loc_result.matched_nid

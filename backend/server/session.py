@@ -53,6 +53,8 @@ class Session:
     # Fixed terminal nodes
     checkout_node: Optional[int] = None
     exit_node: Optional[int] = None
+    # Navigation phase: shopping → checkout → exit → done
+    phase: str = "shopping"
 
     @property
     def remaining_targets(self) -> List[int]:

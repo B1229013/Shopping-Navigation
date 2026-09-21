@@ -69,6 +69,8 @@ class TurnResponse(BaseModel):
     # Route-aware navigation context
     next_instruction: Optional[str] = None         # e.g. "右轉，走向第3區"
     remaining_targets: Optional[int] = None        # how many targets left
+    # Navigation phase
+    phase: Optional[str] = None                    # "shopping" | "checkout" | "exit" | "done"
 
 
 class NodeJSON(BaseModel):

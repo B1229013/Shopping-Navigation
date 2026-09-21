@@ -182,22 +182,24 @@ def _label_matches_goal(label: str, goal_objects) -> bool:
     return False
 
 
+def _is_near(box, img_w, img_h) -> bool:
+    """True when the bounding box is large enough to be considered nearby."""
+    if not img_w or not img_h:
+        return False
+    x1, y1, x2, y2 = box
+    area_ratio = (abs(x2 - x1) * abs(y2 - y1)) / (img_w * img_h)
+    return area_ratio >= NEAR_AREA_RATIO
+
+
 def verify_arrival(resp: VLMResponse, detections, ocr_matches, goal_objects,
-                   min_score: float, prior_was_confirm: bool = False,
+                   min_score: float, img_w: int = 0, img_h: int = 0,
+                   prior_was_confirm: bool = False,
                    goal_verified: bool | None = None) -> VLMResponse:
     """Gate ARRIVED on real evidence to prevent false "you've arrived" claims.
 
-    ARRIVED is kept only if a goal-related object was detected at >= ``min_score``
-    or an OCR sign matched the goal (``ocr_matches`` non-empty). Otherwise it is
-    downgraded to an ASK that asks the user to confirm. If the user is already
-    answering a confirm question (``prior_was_confirm``), ARRIVED is trusted so we
-    never loop.
-
-    ``goal_verified`` (TASK 3) is the result of cropping the goal detection and
-    asking the VLM to confirm it: ``True`` is strong evidence (ARRIVED kept even
-    without other signals), ``False`` is an explicit rejection that overrides a
-    borderline detection (ARRIVED downgraded), and ``None`` means no crop check ran
-    (fall back to the detection/OCR evidence test).
+    ARRIVED is kept only when a goal-related object is detected nearby
+    (bbox area >= NEAR_AREA_RATIO) AND confirmed by crop verification.
+    A far detection or OCR-only match is downgraded to a directional MOVE hint.
     """
     if resp.action != VLMAction.ARRIVED or prior_was_confirm:
         return resp
@@ -205,22 +207,59 @@ def verify_arrival(resp: VLMResponse, detections, ocr_matches, goal_objects,
     if goal_verified is True:
         return resp
     if goal_verified is False:
-        return _confirm_question(resp)
+        return _downgrade_to_move(resp)
 
-    detection_ok = any(
-        _attr(d, "score") >= min_score and _label_matches_goal(_attr(d, "label"), goal_objects)
-        for d in detections
-    )
-    if detection_ok or ocr_matches:
+    near_match = False
+    far_match_box = None
+    for d in detections:
+        if _attr(d, "score") >= min_score and _label_matches_goal(_attr(d, "label"), goal_objects):
+            if _is_near(_attr(d, "box"), img_w, img_h):
+                near_match = True
+                break
+            elif far_match_box is None:
+                far_match_box = _attr(d, "box")
+
+    if near_match:
         return resp
 
-    return _confirm_question(resp)
+    if far_match_box is not None:
+        return _goal_visible_but_far(resp, far_match_box, img_w)
+
+    if ocr_matches:
+        return _ocr_hint(resp)
+
+    return _downgrade_to_move(resp)
 
 
-def _confirm_question(resp: VLMResponse) -> VLMResponse:
+def _goal_visible_but_far(resp: VLMResponse, box, img_w: int) -> VLMResponse:
+    """Goal detected in photo but too far — tell user direction and ask to get closer."""
+    x1, _, x2, _ = box
+    cx = (x1 + x2) / 2
+    side = _horizontal_side(cx, img_w) if img_w else "center"
+    side_zh = {"left": "左手邊", "far-left": "左手邊", "center": "正前方",
+               "right": "右手邊", "far-right": "右手邊"}.get(side, "前方")
     return VLMResponse(
-        action=VLMAction.ARRIVED,
-        guidance="看起來可能已經到了，但還不太確定。請確認眼前是否有要找的東西。",
+        action=VLMAction.MOVE,
+        guidance=f"目標就在{side_zh}，請走近後再拍一張照片確認。",
+        question=None,
+        vlm_summary=resp.vlm_summary,
+    )
+
+
+def _ocr_hint(resp: VLMResponse) -> VLMResponse:
+    """OCR matched the goal text but no nearby object detection — ask user to get closer."""
+    return VLMResponse(
+        action=VLMAction.MOVE,
+        guidance="附近有看到目標的標示，請再往前走近一點，拍一張照片讓我確認。",
+        question=None,
+        vlm_summary=resp.vlm_summary,
+    )
+
+
+def _downgrade_to_move(resp: VLMResponse) -> VLMResponse:
+    return VLMResponse(
+        action=VLMAction.MOVE,
+        guidance="請繼續往前走，拍一張照片讓我確認位置。",
         question=None,
         vlm_summary=resp.vlm_summary,
     )

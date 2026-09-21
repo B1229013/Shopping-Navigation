@@ -36,6 +36,8 @@ struct TurnResponse: Codable {
     let correctedNodeId: Int?
     let correctedConfidence: Double?
     let correctedLocation: String?
+    // Navigation phase
+    let phase: String?   // "shopping", "checkout", "exit", "done"
 }
 
 /// Response from the standalone /localize endpoint.

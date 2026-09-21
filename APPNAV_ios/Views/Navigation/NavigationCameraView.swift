@@ -26,6 +26,7 @@ struct NavigationCameraView: View {
     @State private var galleryItem: PhotosPickerItem?
     @State private var loopBanner: String?
     @State private var lastCapturedImage: UIImage?
+    @State private var navPhase: String = "shopping"
 
     init(sessionId: String, goal: String, initialGuidance: String, onExit: @escaping () -> Void) {
         self.sessionId = sessionId
@@ -96,29 +97,58 @@ struct NavigationCameraView: View {
 
     // MARK: - Status card
 
+    private var phaseLabel: String {
+        switch navPhase {
+        case "checkout": return "前往結帳"
+        case "exit": return "前往出口"
+        case "done": return "導航完成"
+        default: return "找商品中"
+        }
+    }
+
+    private var statusTitle: String {
+        if hasArrived { return navPhase == "done" ? "導航完成！" : "已到達！" }
+        if pendingArrival { return "請確認是否到達" }
+        return "導航中"
+    }
+
     private var statusCard: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(hasArrived ? "已到達目標！" : (pendingArrival ? "請確認是否到達目標" : "導航中"))
-                    .font(.headline)
-                    .foregroundColor(.white)
-                Text("目標　\(goal)")
+                HStack(spacing: 6) {
+                    Text(statusTitle)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text(phaseLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(
+                            navPhase == "checkout" ? Color.orange.opacity(0.7) :
+                            navPhase == "exit" ? Color.purple.opacity(0.7) :
+                            navPhase == "done" ? Color.green.opacity(0.7) :
+                            Color.blue.opacity(0.5)
+                        )
+                        .clipShape(Capsule())
+                }
+                Text(navPhase == "checkout" ? "前往收銀台" :
+                     navPhase == "exit" ? "前往出口" :
+                     "目標　\(goal)")
                     .font(.subheadline)
                     .foregroundColor(.white.opacity(0.85))
                     .lineLimit(2)
-                if let currentLocation {
-                    Text("📍 \(currentLocation)")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                        .lineLimit(1)
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             flashButton
         }
         .padding(14)
-        .background(Color.blue.opacity(0.55))
+        .background(
+            navPhase == "checkout" ? Color.orange.opacity(0.45) :
+            navPhase == "exit" ? Color.purple.opacity(0.45) :
+            Color.blue.opacity(0.55)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -207,23 +237,19 @@ struct NavigationCameraView: View {
                     if isConfirming {
                         ProgressView().tint(.white)
                     } else {
-                        Text("確認到達").font(.subheadline.weight(.bold))
+                        Text(navPhase == "checkout" ? "確認已結帳" :
+                             navPhase == "exit" ? "確認已到出口" :
+                             "確認到達").font(.subheadline.weight(.bold))
                     }
                 }
                 .frame(maxWidth: .infinity).frame(height: 46)
                 .buttonStyle(.borderedProminent).tint(.green)
                 .disabled(isConfirming)
 
-                HStack(spacing: 8) {
-                    Button("不是目標") { confirmArrival(kind: "false_positive") }
-                        .frame(maxWidth: .infinity).frame(height: 42)
-                        .buttonStyle(.borderedProminent).tint(.gray)
-                        .disabled(isConfirming)
-                    Button("同類非目標") { confirmArrival(kind: "wrong_instance") }
-                        .frame(maxWidth: .infinity).frame(height: 42)
-                        .buttonStyle(.borderedProminent).tint(.purple)
-                        .disabled(isConfirming)
-                }
+                Button("不是目標") { confirmArrival(kind: "false_positive") }
+                    .frame(maxWidth: .infinity).frame(height: 42)
+                    .buttonStyle(.borderedProminent).tint(.gray)
+                    .disabled(isConfirming)
             }
         } else {
             HStack(spacing: 8) {
@@ -276,18 +302,21 @@ struct NavigationCameraView: View {
     @State private var currentLocation: String?
 
     private func applyTurn(_ response: TurnResponse) {
-        // Show friendly location if localization succeeded
         if let loc = response.correctedLocation {
             currentLocation = loc
         }
-        if let loc = currentLocation {
-            guidance = "📍 目前位置：\(loc)\n\n\(response.guidance)"
-        } else {
-            guidance = response.guidance
+        if let phase = response.phase {
+            navPhase = phase
         }
+        guidance = response.guidance
         switch response.action {
         case "ARRIVED":
-            pendingArrival = true
+            if navPhase == "done" {
+                hasArrived = true
+                pendingArrival = false
+            } else {
+                pendingArrival = true
+            }
             pendingQuestion = nil
         case "ASK":
             pendingQuestion = response.question

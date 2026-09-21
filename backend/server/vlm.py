@@ -114,6 +114,61 @@ def _parse(text: str) -> Optional[VLMResponse]:
         return None
 
 
+_HALLUCINATION_LANDMARKS = [
+    "收銀區", "收銀台", "結帳區", "結帳台", "自助結帳",
+    "玻璃隔板", "玻璃門", "玻璃櫃", "電扶梯", "手扶梯", "停車場",
+    "洗手間", "廁所", "服務台", "客服", "美食街", "餐飲區",
+    "藥妝區", "化妝品區", "服飾區", "家電區", "文具區",
+]
+
+
+def _validate_guidance(resp: VLMResponse, detections_summary: str,
+                       ocr_summary: str | None) -> VLMResponse:
+    """Check guidance/vlm_summary for landmarks not in the detection list.
+
+    If a known landmark term appears in guidance but NOT in the detections or
+    OCR, remove that phrase from guidance to prevent hallucination.
+    """
+    if not resp or not detections_summary:
+        return resp
+
+    ref_text = (detections_summary + " " + (ocr_summary or "")).lower()
+    guidance = resp.guidance
+    summary = resp.vlm_summary
+    flagged = []
+
+    for term in _HALLUCINATION_LANDMARKS:
+        if term in guidance.lower() or term in summary.lower():
+            if term.lower() not in ref_text:
+                flagged.append(term)
+
+    if not flagged:
+        return resp
+
+    log.warning("VLM hallucination detected — terms not in detections: %s", flagged)
+
+    for term in flagged:
+        for pattern in [
+            f"先經過[右左前後]手?邊?的?[^，。、]*{term}[^，。、]*[，、]?",
+            f"前方[是的有][^，。、]*{term}[^，。、]*[，、]?",
+            f"[經過往向朝]?[^，。、]*{term}[^，。、]*[，、]?",
+        ]:
+            guidance = re.sub(pattern, "", guidance)
+            summary = re.sub(pattern, "", summary)
+        guidance = guidance.replace(term, "")
+        summary = summary.replace(term, "")
+
+    guidance = re.sub(r"[，、]{2,}", "，", guidance).strip("，、 ")
+    summary = re.sub(r"[，、]{2,}", "，", summary).strip("，、 ")
+
+    return VLMResponse(
+        action=resp.action,
+        guidance=guidance,
+        question=resp.question,
+        vlm_summary=summary,
+    )
+
+
 # ── OpenAI GPT-4o ──────────────────────────────────────────────────────
 
 def _generate(prompt: str, image_b64: Optional[str] = None) -> str:
@@ -175,7 +230,8 @@ def decide(
     ocr_summary: Optional[str] = None,
     route_context: Optional[str] = None,
 ) -> VLMResponse:
-    """本輪導航的主要入口：讀圖 → 建提示詞 → 呼叫 VLM → 解析 JSON，並在失敗時重試一次。
+    """本輪導航的主要入口：讀圖 → 建提示詞 → 呼叫 VLM → 解析 JSON → 驗證幻覺，
+    並在失敗時重試一次。
 
     任何一步失敗（金鑰缺失、圖片讀取失敗、呼叫例外、回覆無法解析）都回傳
     _FALLBACK，讓 server.py 的狀態機可以安全地繼續（視為 MOVE，請使用者
@@ -188,7 +244,6 @@ def decide(
     prompt = _build_prompt(goal, goal_objects, topomap_summary, detections_summary, prior_question, prior_answer, ocr_summary=ocr_summary, route_context=route_context)
     try:
         img = Image.open(image_path).convert("RGB")
-        # 縮圖降低上傳流量與模型延遲，1024px 已足夠模型辨識場景與物件
         max_dim = 1024
         if max(img.size) > max_dim:
             img.thumbnail((max_dim, max_dim))
@@ -200,8 +255,6 @@ def decide(
         log.warning("VLM could not read image %s: %s", image_path, e)
         return _FALLBACK
 
-    # 最多重試一次：模型偶爾會回傳無法解析的格式，重試一次通常就能拿到合法 JSON，
-    # 兩次都失敗才真的放棄、回傳保底回覆。
     for attempt in (1, 2):
         try:
             text = _generate(prompt, image_b64=img_b64)
@@ -210,7 +263,7 @@ def decide(
             continue
         parsed = _parse(text)
         if parsed is not None:
-            return parsed
+            return _validate_guidance(parsed, detections_summary, ocr_summary)
         log.warning("VLM unparseable response (attempt %d/2): %.200s", attempt, text)
     return _FALLBACK
 

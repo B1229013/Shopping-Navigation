@@ -73,6 +73,8 @@ SAM_WEIGHTS = _LOCAL_MODELS / "sam_vit_h_4b8939.pth"
 
 # Output
 OUTPUT_ROOT = PROJECT_ROOT / "output" / "sessions"
+# Hand-corrected PDR waypoint maps (see server/editor_map.py); one *.json per place
+EDITOR_MAP_DIR = PROJECT_ROOT / "maps"
 
 # LLM service — OpenAI GPT-4o
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")

@@ -71,6 +71,58 @@ class TurnResponse(BaseModel):
     remaining_targets: Optional[int] = None        # how many targets left
 
 
+class PathStart(BaseModel):
+    wp: int
+    x: float
+    y: float
+    source: str                      # "phone" | "photo" | "entrance"
+
+
+class PathTarget(BaseModel):
+    wp: int
+    x: float
+    y: float
+    products: List[str] = []
+    neo_nid: Optional[int] = None
+
+
+class PathTurn(BaseModel):
+    direction: str                   # heading.RelativeDirection value
+    text_zh: str
+    at: List[float]                  # [x, y] where the step starts
+    to: List[float]                  # [x, y] where the step ends
+    distance_m: float
+    passed_nodes: int
+
+
+class PathNode(BaseModel):
+    id: int
+    x: float
+    y: float
+
+
+class PathEdge(BaseModel):
+    from_id: int = Field(..., alias="from")
+    to: int
+    length: float
+
+    model_config = {"populate_by_name": True}
+
+
+class PathResponse(BaseModel):
+    """Route on the editor map for the phone's PathFollower + mini-map."""
+    place: str
+    goal_item: str
+    start: PathStart
+    target: PathTarget
+    path: List[int]                  # waypoint ids
+    polyline: List[List[float]]      # [[x, y], ...] the phone walks along
+    turns: List[PathTurn]
+    distance_m: float
+    nodes: List[PathNode]            # whole map, for drawing
+    edges: List[PathEdge]
+
+
 class NodeJSON(BaseModel):
     id: int
     photo: str

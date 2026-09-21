@@ -26,7 +26,9 @@ from server.graph_renderer import (
     render_goal_graph, render_scene_graph, assign_detection_ids,
     postprocess_detections, augment_goal_classes,
 )
+from server import editor_map as editor_map_mod
 from server.config import (
+    EDITOR_MAP_DIR,
     PERCEPTION_ENABLED, OCR_ENABLED, OCR_LANGUAGES,
     OCR_MIN_CONFIDENCE, OCR_MAX_RESULTS, ARRIVED_MIN_DETECTION_SCORE,
     GOAL_CROP_VERIFY, GENERIC_INDOOR_OBJECTS, ensure_output_dir, OUTPUT_ROOT,
@@ -41,6 +43,7 @@ from server.models import (
     ModifyRouteRequest,
     PlanRouteRequest,
     PlanRouteResponse,
+    PathResponse,
     StartSessionRequest,
     StartSessionResponse,
     TurnResponse,
@@ -1943,6 +1946,103 @@ def get_reference_map(place: str = Query(default="")):
 
 from server.navigator import resolve_targets, plan_multi_target_route, replan_route
 from server.store_map import get_store_topomap
+
+
+# ── Editor-map path following ──────────────────────────────────────────
+_editor_graphs: dict = {}
+
+
+def _editor_graph_for(place: Optional[str]):
+    """The walkable editor graph for ``place`` (cached), with Neo4j product labels
+    merged in on first use; None when no ``maps/*.json`` declares that place."""
+    if not place:
+        return None
+    if place in _editor_graphs:
+        return _editor_graphs[place]
+    graph = None
+    for path in sorted(EDITOR_MAP_DIR.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:  # a broken map file must not take the server down
+            log.warning("editor map %s unreadable: %s", path.name, e)
+            continue
+        if data.get("place") != place:
+            continue
+        graph = editor_map_mod.build_graph(data)
+        neo4j = get_neo4j()
+        ref_map = neo4j.load_reference_map(place) if neo4j else None
+        if ref_map and ref_map.photos:
+            unmapped = editor_map_mod.merge_from_ref_map(graph, ref_map)
+            log.info("editor map %s: %d waypoints, %d edges; %d/%d Neo4j nodes attached (unmapped: %s)",
+                     path.name, graph.graph.number_of_nodes(), graph.graph.number_of_edges(),
+                     len(ref_map.photos) - len(unmapped), len(ref_map.photos), unmapped)
+        else:
+            log.warning("editor map %s loaded without Neo4j labels — goals cannot be resolved", path.name)
+        break
+    _editor_graphs[place] = graph
+    return graph
+
+
+@app.get("/session/{session_id}/path", response_model=PathResponse,
+         responses={404: {"model": ErrorResponse}})
+def get_session_path(session_id: str,
+                     x: Optional[float] = Query(default=None),
+                     y: Optional[float] = Query(default=None),
+                     heading: Optional[float] = Query(default=None)):
+    """Route on the hand-corrected editor map for the phone to follow.
+
+    Start = the phone's dead-reckoned position (``x``/``y``) when given, else the
+    waypoint of the last photo localization, else the entrance. Target = the
+    current route leg's Neo4j node mapped onto the editor map, else the waypoint
+    whose product/sign labels name the current goal item.
+    """
+    s = _store.get(session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
+    g = _editor_graph_for(s.place)
+    if g is None:
+        raise HTTPException(status_code=404, detail={
+            "error": "no_editor_map",
+            "detail": f"no editor map for place {s.place!r} in {EDITOR_MAP_DIR}"})
+
+    goals = _current_goal_objects(s)
+    goal_item = goals[0] if goals else (s.target_objects[0] if s.target_objects else s.goal)
+
+    # Sign-weighted label search first (a "牛奶區" category sign beats scattered
+    # product mentions); the session's Neo4j route leg is the fallback.
+    target_wp = editor_map_mod.find_goal_waypoint(g, goal_item)
+    if target_wp is None and s.route_plan and getattr(s.route_plan, "legs", None):
+        leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
+        target_wp = g.waypoint_for_neo(leg.to_node)
+    if target_wp is None:
+        raise HTTPException(status_code=404, detail={
+            "error": "goal_not_on_map",
+            "detail": f"no waypoint on the editor map mentions {goal_item!r}"})
+
+    if x is not None and y is not None:
+        start_wp, source = editor_map_mod.nearest_waypoint(g, x, y), "phone"
+    elif s.last_corrected_nid is not None and g.waypoint_for_neo(s.last_corrected_nid) is not None:
+        start_wp, source = g.waypoint_for_neo(s.last_corrected_nid), "photo"
+    else:
+        start_wp, source = g.entrance, "entrance"
+
+    path = editor_map_mod.plan(g, start_wp, target_wp)
+    route = editor_map_mod.route_payload(g, path, user_heading=heading)
+    sx, sy = g.position(start_wp)
+    tx, ty = g.position(target_wp)
+    log.info("[session %s] editor path: %s wp%d → wp%d (%s), %.1f m, %d turns",
+             session_id, source, start_wp, target_wp, goal_item, route["distance_m"], len(route["turns"]))
+    return PathResponse(
+        place=g.place, goal_item=goal_item,
+        start={"wp": start_wp, "x": sx, "y": sy, "source": source},
+        target={"wp": target_wp, "x": tx, "y": ty,
+                "neo_nid": (g.graph.nodes[target_wp]["neo_nids"] or [None])[0],
+                "products": g.graph.nodes[target_wp]["products"][:8]},
+        path=route["path"], polyline=route["polyline"], turns=route["turns"],
+        distance_m=route["distance_m"],
+        nodes=[{"id": n["id"], "x": n["x"], "y": n["y"]} for n in g.nodes_payload()],
+        edges=g.edges_payload(),
+    )
 
 
 @app.post("/session/{session_id}/plan-route", response_model=PlanRouteResponse)

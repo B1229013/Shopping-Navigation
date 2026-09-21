@@ -479,6 +479,8 @@ def _build_route_context(s, loc_result, detections=None,
                             break
                     if goal_item != "target":
                         break
+        if goal_item in ("target", "checkout", "exit") and _targets:
+            goal_item = _targets[0]
 
         # --- Priority 1: check if goal is visible in the user's photo ---
         goal_kws = [goal_item] + (_targets or [])
@@ -524,13 +526,30 @@ def _build_route_context(s, loc_result, detections=None,
         heading_reliable = (ref_map
                             and loc_result.matched_heading is not None
                             and loc_result.heading_confidence > 0.3)
+        user_heading = loc_result.matched_heading if heading_reliable else None
 
-        if heading_reliable:
-            node_positions = {
-                nid: (node.pdr_x, node.pdr_y)
-                for nid, node in ref_map.photos.items()
-            }
-
+        # Steps are computed on the hand-corrected editor map when one exists —
+        # the same route the phone's PathFollower walks — so the 🗺 line and the
+        # VLM prompt agree with the mini-map. The Neo4j walkway graph (duplicate
+        # coordinates, a "路口" at every node) is only the fallback.
+        steps_zh: list[str] = []
+        next_zh: Optional[str] = None
+        editor = _editor_graph_for(s.place)
+        if editor is not None:
+            start_wp = editor.waypoint_for_neo(loc_result.matched_nid)
+            if start_wp is None and ref_node is not None:
+                start_wp = editor_map_mod.nearest_waypoint(editor, ref_node.pdr_x, ref_node.pdr_y)
+            goal_wp = editor_map_mod.find_goal_waypoint(editor, goal_item)
+            if goal_wp is None:
+                goal_wp = editor.waypoint_for_neo(current_leg.to_node)
+            if start_wp is not None and goal_wp is not None:
+                at_target = at_target or start_wp == goal_wp
+                route = editor_map_mod.route_payload(
+                    editor, editor_map_mod.plan(editor, start_wp, goal_wp), user_heading=user_heading)
+                steps_zh = [t["text_zh"] for t in route["turns"][:3]]
+                next_zh = route.get("next_instruction_zh") or None
+        elif heading_reliable:
+            node_positions = {nid: (node.pdr_x, node.pdr_y) for nid, node in ref_map.photos.items()}
             rel_instructions = convert_leg_to_relative(
                 _path_from_current(ref_map, loc_result.matched_nid,
                                    current_leg.path, current_leg.to_node),
@@ -542,45 +561,29 @@ def _build_route_context(s, loc_result, detections=None,
             # number of intersections passed, so "右轉" becomes "直走約 12 公尺
             # （經過 1 個路口），然後右轉" when two aisles both open to the right.
             steps = merge_instructions(rel_instructions)
+            steps_zh = [f"{st.text_zh}，往{_node_area_name(st.to_node, ref_map)}方向" for st in steps[:3]]
+            next_zh = next_instruction_text(steps) or None
 
-            if at_target:
-                next_instruction = f"地圖顯示您就在「{goal_item}」附近（{target_area}），請環顧四周找找看"
-                route_desc = (
-                    f"目前要找的商品：「{goal_item}」\n"
-                    f"該商品位於：{target_area}\n"
-                    f"地圖定位顯示使用者已在目標節點（信心 {loc_result.confidence:.0%}），"
-                    f"請依照片判斷商品是否就在附近；若照片中沒有，請引導使用者環顧或往前幾步再拍。\n"
-                    f"{direction_hint}"
-                    f"還有 {len(remaining)} 項商品待尋找"
-                )
-            elif steps:
-                next_instruction = f"{next_instruction_text(steps)}，前往{target_area}找「{goal_item}」"
-
-                path_steps = []
-                for st in steps[:3]:
-                    step_area = _node_area_name(st.to_node, ref_map)
-                    path_steps.append(f"{st.text_zh}，往{step_area}方向")
-
-                route_desc = (
-                    f"目前要找的商品：「{goal_item}」\n"
-                    f"該商品位於：{target_area}\n"
-                    f"{direction_hint}"
-                    f"建議走法：{'；'.join(path_steps)}\n"
-                    f"還有 {len(remaining)} 項商品待尋找"
-                )
-            else:
-                route_desc = (
-                    f"目前要找的商品：「{goal_item}」\n"
-                    f"該商品位於：{target_area}\n"
-                    f"{direction_hint}"
-                    f"還有 {len(remaining)} 項商品待尋找"
-                )
+        if at_target:
+            next_instruction = f"地圖顯示您就在「{goal_item}」附近（{target_area}），請環顧四周找找看"
+            route_desc = (
+                f"目前要找的商品：「{goal_item}」\n"
+                f"該商品位於：{target_area}\n"
+                f"地圖定位顯示使用者已在目標節點（信心 {loc_result.confidence:.0%}），"
+                f"請依照片判斷商品是否就在附近；若照片中沒有，請引導使用者環顧或往前幾步再拍。\n"
+                f"{direction_hint}"
+                f"還有 {len(remaining)} 項商品待尋找"
+            )
+        elif next_zh:
+            next_instruction = f"{next_zh}，前往{target_area}找「{goal_item}」"
+            route_desc = (
+                f"目前要找的商品：「{goal_item}」\n"
+                f"該商品位於：{target_area}\n"
+                f"{direction_hint}"
+                f"建議走法：{'；'.join(steps_zh)}\n"
+                f"還有 {len(remaining)} 項商品待尋找"
+            )
         else:
-            if at_target:
-                next_instruction = f"地圖顯示您就在「{goal_item}」附近（{target_area}），請環顧四周找找看"
-                direction_hint = (
-                    f"地圖定位顯示使用者已在目標節點（信心 {loc_result.confidence:.0%}）。\n"
-                    + direction_hint)
             route_desc = (
                 f"目前要找的商品：「{goal_item}」\n"
                 f"該商品位於：{target_area}\n"
@@ -1184,6 +1187,10 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     verified_labels: list[str] = []
     if GOAL_CROP_VERIFY and vlm_resp.action == VLMAction.ARRIVED:
         candidates = _top_goal_detections(detections, s.target_objects)
+        if not has_grounding:
+            # VLM-only mode: the "detection" and the crop verdict come from the same
+            # model, so a yes cannot rescue a detection it scored below the floor.
+            candidates = [(g, d) for g, d in candidates if d.score >= ARRIVED_MIN_DETECTION_SCORE]
         any_checked = False
         any_true = False
         for goal_label, cand in candidates:

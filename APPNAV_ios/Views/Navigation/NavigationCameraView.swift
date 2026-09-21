@@ -353,10 +353,13 @@ struct NavigationCameraView: View {
         }
         // The map's own verdict for this photo, independent of the VLM prose
         mapInstruction = response.nextInstruction
-        // A localized photo is a fresh fix: re-plan from that waypoint and re-anchor
-        // the dead-reckoned position there, cancelling drift.
+        // A confident photo fix re-anchors the dead-reckoned position at that
+        // waypoint (cancelling drift). A weak fix (keyword localization can jump
+        // between nodes on the same photo) only re-plans from where the phone
+        // thinks it is, so the dot isn't teleported to a wrong node.
         if response.correctedNodeId != nil {
-            Task { await routeModel.load(sessionId: sessionId) }
+            let confident = (response.correctedConfidence ?? 0) >= 0.6
+            Task { await routeModel.load(sessionId: sessionId, fromPhone: !confident) }
         }
         if let loc = currentLocation {
             guidance = "📍 目前位置：\(loc)\n\n\(response.guidance)"

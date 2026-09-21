@@ -129,3 +129,25 @@ def test_vlm_prompt_receives_context_landmarks_separately():
     kwargs = decide.call_args.kwargs
     assert kwargs["goal_objects"] == ["milk", "milk carton"]
     assert kwargs["context_objects"] == ["dairy section", "cooler"]
+
+
+def test_vlm_only_mode_weak_goal_detection_is_not_rescued_by_crop_verify():
+    # Mode B: the VLM perceives a low-score "泡麵" (0.41) and would confirm its own
+    # crop; that self-confirmation must not turn into ARRIVED.
+    from server.vlm import VLMPerception, VLMDetectedObject
+    client = TestClient(app)
+    sid = _start_session_with_objects(client, "泡麵 x1", ["泡麵", "零食區"])
+    perception = VLMPerception(scene_description="snack aisle", detections=[
+        VLMDetectedObject(label="泡麵", bbox=[516, 832, 792, 1152], score=0.41),
+        VLMDetectedObject(label="left shelf", bbox=[0, 288, 516, 1520], score=0.98),
+    ], ocr_texts=[])
+    arrived = VLMResponse(action=VLMAction.ARRIVED, guidance="泡麵就在您前方", question=None, vlm_summary="")
+    with patch("server.server.get_perception", return_value=None), \
+         patch("server.server._vlm_perceive", return_value=perception), \
+         patch("server.server.vlm_decide", return_value=arrived), \
+         patch("server.server.GOAL_CROP_VERIFY", True), \
+         patch("server.server.verify_goal_detection", return_value=True) as crop:
+        r = client.post(f"/session/{sid}/photo", files={"photo": ("p.jpg", _make_jpg(), "image/jpeg")})
+    assert r.status_code == 200
+    assert r.json()["action"] == "ASK"
+    crop.assert_not_called()        # below the score floor → not even worth asking

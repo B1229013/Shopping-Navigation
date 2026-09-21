@@ -168,3 +168,43 @@ def test_failed_localization_is_reported_when_a_map_is_in_use():
 def test_no_map_session_stays_silent():
     s = Session(id="t", goal="milk", goal_objects=["milk"], target_objects=["milk"], place=None)
     assert srv._build_route_context(s, None, detections=[]) == (None, None)
+
+
+# ---- when an editor map exists, the 🗺 line follows it (same route as the phone) ----
+
+from server import editor_map as em
+
+
+def _editor_graph():
+    g = em.build_graph({"place": "test", "walks": [
+        {"name": "A", "points": [[0, 0], [0, 6], [0, 12]]},
+        {"name": "B", "points": [[-6, 6.3], [0.2, 6.1], [6, 6]]},
+    ]})
+    # Neo4j node 13 (the session's target) sits by B2 (6,6); node 10 (where the
+    # user is) sits by A2 (0,12)
+    em.merge_labels(g, [{"nid": 13, "x": 5.5, "y": 6.4, "labels": ["牛奶區吊牌 milk sign"]},
+                        {"nid": 10, "x": 0.3, "y": 11.8, "labels": ["door"]}])
+    return g
+
+
+def test_next_instruction_comes_from_editor_map_when_available():
+    ref_map = _two_aisle_map()
+    s = _session_with_route(ref_map, [10, 11, 12, 13])
+    s.goal = "牛奶"; s.target_objects = ["牛奶"]
+    # facing south (180°) at A2: south 6 m to A1, then east to B2 = a left turn
+    loc = _localized_at(ref_map, 10, heading=180.0)
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
+         patch("server.server._editor_graph_for", return_value=_editor_graph()):
+        ctx, next_instr = srv._build_route_context(s, loc, detections=[])
+    assert next_instr.startswith("直走約 6 公尺，然後左轉")
+    assert "左轉後直走約 6 公尺" in ctx
+
+
+def test_editor_map_at_target_is_reported():
+    ref_map = _two_aisle_map()
+    s = _session_with_route(ref_map, [10, 11, 12, 13])
+    s.goal = "牛奶"; s.target_objects = ["牛奶"]
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
+         patch("server.server._editor_graph_for", return_value=_editor_graph()):
+        _, next_instr = srv._build_route_context(s, _localized_at(ref_map, 13), detections=[])
+    assert "附近" in next_instr and "牛奶" in next_instr

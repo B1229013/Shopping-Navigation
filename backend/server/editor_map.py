@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 
 import networkx as nx
 
-from server.heading import convert_leg_to_relative, merge_instructions
+from server.heading import convert_leg_to_relative, merge_instructions, next_instruction_text
 
 LINK_RADIUS_M = 1.5        # walks passing within this distance are joined
 DEDUPE_EPS_M = 0.05        # consecutive points closer than this are one waypoint
@@ -257,7 +257,7 @@ def route_payload(g: EditorGraph, path: List[int], user_heading: Optional[float]
     """Polyline + turn list + total distance for a planned path."""
     if len(path) < 2:
         pos = [list(g.position(path[0]))] if path else []
-        return {"path": path, "polyline": pos, "turns": [], "distance_m": 0.0}
+        return {"path": path, "polyline": pos, "turns": [], "distance_m": 0.0, "next_instruction_zh": ""}
 
     distance = sum(g.graph.edges[a, b]["length"] for a, b in zip(path, path[1:]))
     simple = _simplified(g, path)
@@ -286,6 +286,7 @@ def route_payload(g: EditorGraph, path: List[int], user_heading: Optional[float]
         "polyline": [[round(x, 2), round(y, 2)] for x, y in (positions[wp] for wp in simple)],
         "turns": turns,
         "distance_m": round(distance, 2),
+        "next_instruction_zh": next_instruction_text(steps),
     }
 
 

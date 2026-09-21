@@ -100,5 +100,7 @@ Rules:
 - detections: list every object relevant to the goal or useful as a landmark (shelves, signs, doors, counters, appliances, furniture). Include the goal item itself if visible.
 - ocr_texts: list every piece of readable text (signs, labels, aisle markers, room names), transcribed exactly as shown, in its original language.
 - Do not invent objects or text that are not actually visible.
+- Include the goal item ONLY if its packaging or label is clearly readable in the photo; a shelf that merely
+  "looks like it could hold" the goal is NOT the goal. When unsure, leave it out.
 - Keep "label" and "text" values short.
 """

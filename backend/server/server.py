@@ -436,10 +436,23 @@ def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, st
             if dir_zh:
                 lm_text = ""
                 if dir_landmarks:
-                    lm_text = f"往那個方向看，你應該能看到：{'、'.join(dir_landmarks[:4])}\n"
+                    lm_text = f"附近會看到：{'、'.join(dir_landmarks[:4])}\n"
+                if dir_zh == "後方":
+                    direction_hint = (
+                        f"根據地圖資料，「{goal_item}」在使用者來的方向。"
+                        f"請引導使用者掉頭，沿著走道往回走。\n{lm_text}"
+                    )
+                else:
+                    direction_hint = (
+                        f"根據地圖資料，「{goal_item}」在使用者的「{dir_zh}」方向。\n"
+                        f"{lm_text}"
+                    )
+            else:
                 direction_hint = (
-                    f"根據地圖資料，「{goal_item}」在使用者的「{dir_zh}」方向。\n"
-                    f"{lm_text}"
+                    f"目前無法判斷「{goal_item}」的確切方向。"
+                    f"請用照片中偵測到的具體物件當地標來描述目前位置，"
+                    f"引導使用者繼續沿走道前進。不要猜測目標在左或右，"
+                    f"不要提供具體距離，也不要叫使用者自己去找標示。\n"
                 )
 
         heading_reliable = (ref_map
@@ -801,14 +814,12 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                     # Build networkx graph from Neo4j walkway edges
                     import networkx as _nx
                     from server.path_planner import plan_route as _plan_route
-                    neo4j_graph = _nx.DiGraph()
+                    neo4j_graph = _nx.Graph()
                     for nid in ref_map.photos:
                         neo4j_graph.add_node(nid)
                     for edge in ref_map.walkway_edges:
-                        neo4j_graph.add_edge(
-                            edge["from"], edge["to"],
-                            weight=edge.get("distance_m", 1.0) or 1.0,
-                        )
+                        w = edge.get("distance_m", 1.0) or 1.0
+                        neo4j_graph.add_edge(edge["from"], edge["to"], weight=w)
                     if neo4j_graph.number_of_nodes() > 0:
                         # Use node 0 as default start; if missing, use smallest nid
                         start_nid = 0 if 0 in neo4j_graph else min(neo4j_graph.nodes())

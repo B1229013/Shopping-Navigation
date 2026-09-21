@@ -21,7 +21,7 @@ PER_TURN_PROMPT = """\
 
 目標：{goal}
 要找的物品特徵：{goal_objects}
-
+{context_block}
 到目前為止的探索紀錄：
 {topomap_summary}
 
@@ -55,6 +55,11 @@ PER_TURN_PROMPT = """\
 - 用照片中的 OCR 文字來辨認區域（走道編號、區域標示等）
 - 不要使用任何內部編號、節點 ID 或技術術語
 - guidance 和 question 一律用繁體中文
+"""
+
+
+CONTEXT_OBJECTS_BLOCK = """\
+附近可能出現的地標（只是線索，看到這些不代表已到達，不能因此回 ARRIVED）：{context_objects}
 """
 
 

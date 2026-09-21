@@ -24,7 +24,7 @@ from server.config import (
     VLM_TIMEOUT_S,
 )
 from server.models import VLMAction, VLMResponse
-from server.prompts import PER_TURN_PROMPT, PRIOR_ANSWER_BLOCK, PERCEIVE_PROMPT, ROUTE_CONTEXT_BLOCK
+from server.prompts import PER_TURN_PROMPT, PRIOR_ANSWER_BLOCK, PERCEIVE_PROMPT, ROUTE_CONTEXT_BLOCK, CONTEXT_OBJECTS_BLOCK
 
 log = logging.getLogger(__name__)
 
@@ -74,15 +74,21 @@ def _build_prompt(
     prior_answer: Optional[str],
     ocr_summary: Optional[str] = None,
     route_context: Optional[str] = None,
+    context_objects: Optional[List[str]] = None,
 ) -> str:
     """組合本輪要送給 VLM 的完整提示詞（目標、地圖摘要、偵測結果、OCR 文字、路徑上下文）。"""
     if prior_question and prior_answer:
         block = PRIOR_ANSWER_BLOCK.format(previous_question=prior_question, user_answer=prior_answer)
     else:
         block = ""
+    # Section/landmark words are listed apart from the product so the VLM does
+    # not treat "cooler" or "dairy sign" as the thing being looked for.
+    context_block = (CONTEXT_OBJECTS_BLOCK.format(context_objects=", ".join(context_objects))
+                     if context_objects else "")
     return PER_TURN_PROMPT.format(
         goal=goal,
         goal_objects=", ".join(goal_objects) or "(none)",
+        context_block=context_block,
         topomap_summary=topomap_summary or "(starting location)",
         detections_summary=detections_summary or "(no detections)",
         ocr_summary=ocr_summary or "(no text detected)",
@@ -229,6 +235,7 @@ def decide(
     prior_answer: Optional[str],
     ocr_summary: Optional[str] = None,
     route_context: Optional[str] = None,
+    context_objects: Optional[List[str]] = None,
 ) -> VLMResponse:
     """本輪導航的主要入口：讀圖 → 建提示詞 → 呼叫 VLM → 解析 JSON → 驗證幻覺，
     並在失敗時重試一次。
@@ -241,7 +248,8 @@ def decide(
         log.error("OPENAI_API_KEY not set — cannot call VLM")
         return _FALLBACK
 
-    prompt = _build_prompt(goal, goal_objects, topomap_summary, detections_summary, prior_question, prior_answer, ocr_summary=ocr_summary, route_context=route_context)
+    prompt = _build_prompt(goal, goal_objects, topomap_summary, detections_summary, prior_question, prior_answer,
+                           ocr_summary=ocr_summary, route_context=route_context, context_objects=context_objects)
     try:
         img = Image.open(image_path).convert("RGB")
         max_dim = 1024
@@ -375,6 +383,7 @@ def perceive_and_decide(
     prior_answer: Optional[str],
     ocr_formatter: Callable[[List[VLMDetectedText]], str],
     route_context: Optional[str] = None,
+    context_objects: Optional[List[str]] = None,
 ) -> Tuple[VLMPerception, VLMResponse]:
     """VLM-only mode: perceive then decide (legacy combined call)."""
     perception = perceive(image_path, goal, goal_objects, img_w, img_h)
@@ -395,5 +404,6 @@ def perceive_and_decide(
         prior_answer=prior_answer,
         ocr_summary=ocr_summary,
         route_context=route_context,
+        context_objects=context_objects,
     )
     return perception, decision

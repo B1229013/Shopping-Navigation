@@ -75,6 +75,18 @@ def test_match_ocr_to_goal_no_match():
     assert match_ocr_to_goal([_ocr_at("Exit")], ["milk"]) == []
 
 
+def test_match_ocr_to_goal_ignores_single_char_fragment():
+    # OCR often emits stray single characters ("奶", "m"); a 1-char fragment that
+    # merely happens to be *inside* a goal term is not evidence of the goal.
+    assert match_ocr_to_goal([_ocr_at("奶")], ["牛奶"]) == []
+    assert match_ocr_to_goal([_ocr_at("m")], ["milk"]) == []
+
+
+def test_match_ocr_to_goal_short_text_inside_term_still_matches_when_two_chars():
+    # "鮮奶" is a real word inside "鮮奶油"; two or more characters still count.
+    assert match_ocr_to_goal([_ocr_at("鮮奶")], ["鮮奶油"])
+
+
 def test_format_detections_accepts_dicts():
     # the answer handler caches detections as dicts (Detection.__dict__)
     det = {"label": "freezer", "box": [70, 10, 95, 90], "score": 0.8}

@@ -115,3 +115,30 @@ def test_warm_up_posts_to_openai():
 def test_warm_up_swallows_errors():
     with patch("server.vlm.requests.post", side_effect=Exception("api down")):
         warm_up()  # must not raise
+
+
+# ---- prompt separates the product from nearby-landmark context -------------
+
+from server.vlm import _build_prompt
+
+
+def _prompt(**kw):
+    base = dict(goal="找到：milk", goal_objects=["milk", "milk carton"],
+                topomap_summary="", detections_summary="cooler (85%) - right middle, near",
+                prior_question=None, prior_answer=None)
+    base.update(kw)
+    return _build_prompt(**base)
+
+
+def test_prompt_lists_context_landmarks_as_not_the_target():
+    text = _prompt(context_objects=["dairy section", "cooler"])
+    # product line carries only the product words...
+    assert "要找的物品特徵：milk, milk carton" in text
+    # ...and landmarks are named separately, explicitly marked as not-arrival evidence
+    assert "dairy section, cooler" in text
+    assert "不代表已到達" in text
+
+
+def test_prompt_without_context_has_no_landmark_line():
+    text = _prompt()
+    assert "不代表已到達" not in text

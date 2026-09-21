@@ -15,6 +15,13 @@ class Session:
     goal: str
     goal_objects: List[str]
     place: Optional[str] = None  # which map/place this session navigates in
+    # Product words only (goal_objects minus section/landmark context). This is
+    # what the arrival gate, crop-verify and "goal visible" checks match against;
+    # goal_objects (the superset) is still what the detector is prompted with.
+    target_objects: List[str] = field(default_factory=list)
+    # The rest of goal_objects: section / landmark words shown to the VLM as
+    # "clues near the target", never as the target itself.
+    context_objects: List[str] = field(default_factory=list)
     topomap: TopoMap = field(default_factory=TopoMap)
     history: List[dict] = field(default_factory=list)
     pending_question: Optional[str] = None
@@ -82,9 +89,13 @@ class SessionStore:
     def __init__(self) -> None:
         self._sessions: Dict[str, Session] = {}
 
-    def create(self, goal: str, goal_objects: List[str], place: Optional[str] = None) -> Session:
+    def create(self, goal: str, goal_objects: List[str], place: Optional[str] = None,
+               target_objects: Optional[List[str]] = None,
+               context_objects: Optional[List[str]] = None) -> Session:
         sid = uuid.uuid4().hex[:8]
-        s = Session(id=sid, goal=goal, goal_objects=goal_objects, place=place)
+        s = Session(id=sid, goal=goal, goal_objects=goal_objects, place=place,
+                    target_objects=list(target_objects if target_objects is not None else goal_objects),
+                    context_objects=list(context_objects or []))
         self._sessions[sid] = s
         return s
 

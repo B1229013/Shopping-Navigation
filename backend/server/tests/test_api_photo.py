@@ -65,3 +65,66 @@ def test_post_photo_after_arrived_409(tmp_path):
         r2 = client.post(f"/session/{sid}/photo",
                          files={"photo": ("p.jpg", _make_jpg(), "image/jpeg")})
     assert r2.status_code == 409
+
+
+# ---- landmark words in goal_objects must not count as "arrived" ------------
+
+def _start_session_with_objects(client, goal, objects) -> str:
+    with patch("server.server.decompose_goal", return_value=objects):
+        r = client.post("/session", json={"goal": goal})
+    return r.json()["session_id"]
+
+
+def _post_arrived_photo(client, sid, detections):
+    fake_perception = MagicMock()
+    fake_perception.detect.return_value = detections
+    arrived_resp = VLMResponse(action=VLMAction.ARRIVED, guidance="就在您的右手邊",
+                               question=None, vlm_summary="")
+    with patch("server.server.get_perception", return_value=fake_perception), \
+         patch("server.server.vlm_decide", return_value=arrived_resp):
+        return client.post(f"/session/{sid}/photo",
+                           files={"photo": ("p.jpg", _make_jpg(), "image/jpeg")})
+
+
+def test_arrived_on_landmark_only_is_downgraded_to_ask():
+    # decompose_goal returns section/landmark words alongside the product; a
+    # confident "cooler" is NOT evidence that the milk is in view.
+    client = TestClient(app)
+    sid = _start_session_with_objects(
+        client, "find the milk", ["milk", "milk carton", "dairy section", "cooler"])
+    r = _post_arrived_photo(client, sid, [
+        Detection(label="cooler", box=[10, 10, 60, 60], score=0.9),
+        Detection(label="shelf", box=[0, 0, 50, 50], score=0.9),
+    ])
+    assert r.status_code == 200
+    body = r.json()
+    assert body["action"] == "ASK"
+    assert body["question"]
+
+
+def test_arrived_on_product_variant_stays_arrived():
+    # ...but a confident detection of the product itself (or a variant) does count.
+    client = TestClient(app)
+    sid = _start_session_with_objects(
+        client, "find the milk", ["milk", "milk carton", "dairy section", "cooler"])
+    r = _post_arrived_photo(client, sid, [
+        Detection(label="milk carton", box=[10, 10, 60, 60], score=0.9),
+    ])
+    assert r.status_code == 200
+    assert r.json()["action"] == "ARRIVED"
+
+
+def test_vlm_prompt_receives_context_landmarks_separately():
+    client = TestClient(app)
+    sid = _start_session_with_objects(
+        client, "find the milk", ["milk", "milk carton", "dairy section", "cooler"])
+    fake_perception = MagicMock()
+    fake_perception.detect.return_value = [Detection(label="shelf", box=[0, 0, 50, 50], score=0.7)]
+    move = VLMResponse(action=VLMAction.MOVE, guidance="walk", question=None, vlm_summary="")
+    with patch("server.server.get_perception", return_value=fake_perception), \
+         patch("server.server.vlm_decide", return_value=move) as decide:
+        client.post(f"/session/{sid}/photo",
+                    files={"photo": ("p.jpg", _make_jpg(), "image/jpeg")})
+    kwargs = decide.call_args.kwargs
+    assert kwargs["goal_objects"] == ["milk", "milk carton"]
+    assert kwargs["context_objects"] == ["dairy section", "cooler"]

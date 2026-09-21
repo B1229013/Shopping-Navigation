@@ -378,6 +378,59 @@ CONFIDENT_THRESHOLD = 0.05
 AMBIGUITY_GAP = 0.10
 
 
+def estimate_node_heading(matched_ref, detected_labels, ocr_texts, confidence: float):
+    """(heading_deg, slot, heading_confidence) of the user's view at ``matched_ref``.
+
+    Matches the live labels/OCR against the node's four directional photos.
+    Kept separate from :func:`localize` so the caller can re-run it whenever the
+    matched node changes afterwards (e.g. VLM re-ranking) — a heading carried
+    over from a different node would make every relative turn wrong.
+    """
+    matched_heading: Optional[float] = None
+    matched_slot: Optional[str] = None
+    heading_conf = 0.0
+
+    if matched_ref and matched_ref.directional_photos:
+        from server.heading import estimate_heading, best_matching_slot, DirectionalPhoto
+
+        live_labels_lower = {l.lower().strip() for l in detected_labels if l}
+        live_ocr_lower = {t.lower().strip() for t in ocr_texts if t}
+
+        dir_photos = [
+            DirectionalPhoto(
+                slot=dp.slot,
+                heading_deg=dp.heading_deg,
+                photo_file=dp.photo_file,
+                objects=[{"label": o.label, "ocr_text": o.ocr_text}
+                         for o in dp.objects],
+            )
+            for dp in matched_ref.directional_photos
+        ]
+
+        matched_heading = estimate_heading(live_labels_lower, live_ocr_lower, dir_photos)
+        slot_result = best_matching_slot(live_labels_lower, live_ocr_lower, dir_photos)
+        matched_slot = slot_result if isinstance(slot_result, str) else (
+            slot_result.value if slot_result else None)
+
+        # Detect if heading data is actually calibrated (not all zeros)
+        all_headings = [dp.heading_deg for dp in matched_ref.directional_photos]
+        has_real_headings = len(set(all_headings)) > 1
+
+        unique_obj_sets = len({
+            frozenset(o.label for o in dp.objects)
+            for dp in matched_ref.directional_photos
+        })
+        if not has_real_headings:
+            heading_conf = 0.0
+            matched_heading = None
+        elif unique_obj_sets > 1:
+            heading_conf = min(confidence, 0.8)
+        else:
+            heading_conf = 0.2
+
+    return matched_heading, matched_slot, heading_conf
+
+
 def localize(
     detected_labels: List[str],
     ocr_texts: List[str],
@@ -459,48 +512,9 @@ def localize(
         )
 
     # ── Heading estimation via directional photos ────────────────────
-    matched_heading: Optional[float] = None
-    matched_slot: Optional[str] = None
-    heading_conf = 0.0
-
     matched_ref = ref_map.photos.get(best_nid)
-    if matched_ref and matched_ref.directional_photos:
-        from server.heading import estimate_heading, best_matching_slot, DirectionalPhoto
-
-        live_labels_lower = {l.lower().strip() for l in detected_labels if l}
-        live_ocr_lower = {t.lower().strip() for t in ocr_texts if t}
-
-        dir_photos = [
-            DirectionalPhoto(
-                slot=dp.slot,
-                heading_deg=dp.heading_deg,
-                photo_file=dp.photo_file,
-                objects=[{"label": o.label, "ocr_text": o.ocr_text}
-                         for o in dp.objects],
-            )
-            for dp in matched_ref.directional_photos
-        ]
-
-        matched_heading = estimate_heading(live_labels_lower, live_ocr_lower, dir_photos)
-        slot_result = best_matching_slot(live_labels_lower, live_ocr_lower, dir_photos)
-        matched_slot = slot_result if isinstance(slot_result, str) else (
-            slot_result.value if slot_result else None)
-
-        # Detect if heading data is actually calibrated (not all zeros)
-        all_headings = [dp.heading_deg for dp in matched_ref.directional_photos]
-        has_real_headings = len(set(all_headings)) > 1
-
-        unique_obj_sets = len({
-            frozenset(o.label for o in dp.objects)
-            for dp in matched_ref.directional_photos
-        })
-        if not has_real_headings:
-            heading_conf = 0.0
-            matched_heading = None
-        elif unique_obj_sets > 1:
-            heading_conf = min(confidence, 0.8)
-        else:
-            heading_conf = 0.2
+    matched_heading, matched_slot, heading_conf = estimate_node_heading(
+        matched_ref, detected_labels, ocr_texts, confidence)
 
     return LocalizationResult(
         matched_nid=best_nid,

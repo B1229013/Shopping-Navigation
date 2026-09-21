@@ -270,3 +270,72 @@ class TestConvertLeg:
             [1, 2], positions, user_heading=0.0, distances=distances
         )
         assert result[0].distance_m == pytest.approx(5.5)
+
+
+# ---------------------------------------------------------------------------
+# Merging per-edge instructions into human steps (with distance)
+# ---------------------------------------------------------------------------
+
+from server.heading import merge_instructions, next_instruction_text
+
+
+# Corridor heading north with two aisles on the right; target is in the 2nd aisle.
+_POS = {10: (0, 0), 11: (0, 6), 12: (0, 12), 13: (5, 12)}
+_DIST = {(10, 11): 6.0, (11, 12): 6.0, (12, 13): 5.0}
+
+
+class TestMergeInstructions:
+    def test_straight_run_is_collapsed_with_summed_distance_and_passed_nodes(self):
+        raw = convert_leg_to_relative([10, 11, 12, 13], _POS, user_heading=0.0, distances=_DIST)
+        steps = merge_instructions(raw)
+        assert len(steps) == 2
+        assert steps[0].direction == RelativeDirection.STRAIGHT
+        assert steps[0].distance_m == pytest.approx(12.0)
+        assert steps[0].passed_nodes == 1          # went through node 11
+        assert steps[0].to_node == 12
+        assert steps[1].direction == RelativeDirection.RIGHT
+        assert steps[1].distance_m == pytest.approx(5.0)
+        assert steps[1].passed_nodes == 0
+
+    def test_turn_absorbs_following_straight_edges(self):
+        pos = {12: (0, 12), 13: (5, 12), 14: (9, 12)}
+        raw = convert_leg_to_relative([12, 13, 14], pos, user_heading=0.0,
+                                      distances={(12, 13): 5.0, (13, 14): 4.0})
+        steps = merge_instructions(raw)
+        assert len(steps) == 1
+        assert steps[0].direction == RelativeDirection.RIGHT
+        assert steps[0].distance_m == pytest.approx(9.0)
+        assert steps[0].passed_nodes == 1
+
+    def test_step_text_mentions_distance_and_intersections(self):
+        raw = convert_leg_to_relative([10, 11, 12, 13], _POS, user_heading=0.0, distances=_DIST)
+        steps = merge_instructions(raw)
+        assert steps[0].text_zh == "直走約 12 公尺（經過 1 個路口）"
+        assert steps[1].text_zh == "右轉後直走約 5 公尺"
+
+    def test_step_text_without_distance_is_plain(self):
+        raw = convert_leg_to_relative([10, 11, 12, 13], _POS, user_heading=0.0)  # no distances
+        steps = merge_instructions(raw)
+        assert steps[0].text_zh == "直走（經過 1 個路口）"
+        assert steps[1].text_zh == "右轉"
+
+    def test_empty(self):
+        assert merge_instructions([]) == []
+
+
+class TestNextInstructionText:
+    def test_straight_then_turn_tells_how_far_before_turning(self):
+        raw = convert_leg_to_relative([10, 11, 12, 13], _POS, user_heading=0.0, distances=_DIST)
+        assert next_instruction_text(merge_instructions(raw)) == \
+            "直走約 12 公尺（經過 1 個路口），然後右轉"
+
+    def test_turn_first(self):
+        raw = convert_leg_to_relative([12, 13], _POS, user_heading=0.0, distances=_DIST)
+        assert next_instruction_text(merge_instructions(raw)) == "右轉後直走約 5 公尺"
+
+    def test_single_straight_without_distance(self):
+        raw = convert_leg_to_relative([10, 11], _POS, user_heading=0.0)
+        assert next_instruction_text(merge_instructions(raw)) == "直走"
+
+    def test_empty(self):
+        assert next_instruction_text([]) == ""

@@ -301,3 +301,74 @@ def convert_leg_to_relative(
         current_heading = edge_heading
 
     return instructions
+
+
+# ---------------------------------------------------------------------------
+# Merge per-edge instructions into human-sized steps
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RouteStep:
+    """One human step: a turn (or straight) plus every straight edge after it.
+
+    ``distance_m`` is the summed length of all edges in the step (0 when the map
+    has no distances); ``passed_nodes`` counts the intermediate waypoints walked
+    through, i.e. how many intersections/aisle entrances to pass before the step
+    ends. This is what lets guidance say "直走約 12 公尺（經過 1 個路口）後右轉"
+    instead of a bare "右轉" that is ambiguous when two aisles both open to the right.
+    """
+    direction: RelativeDirection
+    from_node: int
+    to_node: int
+    distance_m: float
+    passed_nodes: int
+    text_zh: str
+
+
+def _distance_zh(distance_m: float) -> str:
+    return f"約 {max(1, round(distance_m))} 公尺" if distance_m > 0 else ""
+
+
+def _step_text_zh(direction: RelativeDirection, distance_m: float, passed_nodes: int) -> str:
+    dist = _distance_zh(distance_m)
+    passed = f"（經過 {passed_nodes} 個路口）" if passed_nodes > 0 else ""
+    if direction == RelativeDirection.STRAIGHT:
+        return f"直走{dist}{passed}"
+    turn = relative_direction_text(direction, "zh")
+    return f"{turn}後直走{dist}{passed}" if dist else f"{turn}{passed}"
+
+
+def merge_instructions(instructions: List[RelativeInstruction]) -> List[RouteStep]:
+    """Collapse a per-edge instruction list into steps.
+
+    A new step starts at every non-straight edge (and at the first edge);
+    straight edges are folded into the current step, adding their distance and
+    counting the node they leave from as a passed intersection.
+    """
+    steps: List[RouteStep] = []
+    for ri in instructions:
+        if steps and ri.direction == RelativeDirection.STRAIGHT:
+            cur = steps[-1]
+            cur.distance_m += ri.distance_m
+            cur.passed_nodes += 1
+            cur.to_node = ri.to_node
+        else:
+            steps.append(RouteStep(
+                direction=ri.direction, from_node=ri.from_node, to_node=ri.to_node,
+                distance_m=ri.distance_m, passed_nodes=0, text_zh="",
+            ))
+    for st in steps:
+        st.text_zh = _step_text_zh(st.direction, st.distance_m, st.passed_nodes)
+    return steps
+
+
+def next_instruction_text(steps: List[RouteStep]) -> str:
+    """The one-line instruction for the app: the first step, and — when that step
+    is a straight run — the turn that ends it, so the user knows how far to walk
+    before turning."""
+    if not steps:
+        return ""
+    first = steps[0]
+    if first.direction == RelativeDirection.STRAIGHT and len(steps) > 1:
+        return f"{first.text_zh}，然後{relative_direction_text(steps[1].direction, 'zh')}"
+    return first.text_zh

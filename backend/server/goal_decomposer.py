@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List
+from typing import Iterable, List, Tuple
 
 import requests
 
@@ -61,3 +61,54 @@ def decompose_goal(goal: str) -> List[str]:
         log.warning("goal decompose produced %d items — falling back", len(items))
         return _fallback(goal)
     return items
+
+
+_QTY_SUFFIX = re.compile(r"\s*x\s*\d+\s*$", re.IGNORECASE)
+
+
+def _goal_items(goal: str) -> List[str]:
+    """Product words from the raw goal string, e.g. "牛奶 x2, find the milk" ->
+    ["牛奶", "milk"]. Splits on commas/、, strips the iOS " xN" quantity suffix and
+    drops stop words via the same tokenizer as the LLM fallback."""
+    items: List[str] = []
+    for part in re.split(r"[,，、]", goal):
+        part = _QTY_SUFFIX.sub("", part).strip().lower()
+        if not part:
+            continue
+        for tok in _fallback(part):
+            tok = tok.lower()
+            if tok and tok not in items:
+                items.append(tok)
+    return items
+
+
+def split_goal_objects(
+    goal: str,
+    goal_objects: List[str],
+    extra_target_terms: Iterable[str] = (),
+) -> Tuple[List[str], List[str]]:
+    """Split decomposed ``goal_objects`` into (targets, context).
+
+    ``decompose_goal`` intentionally mixes the product with its section and nearby
+    landmarks ("dairy section", "cooler") so the detector has context to look for.
+    Only the product and its variants may count as *the target* (for the arrival
+    gate, crop verification and "goal visible in photo" hints); everything else
+    is context. A decomposed object is a target when it contains, or is contained
+    in, one of the goal's own product words (or ``extra_target_terms``, e.g. the
+    GOAL_CLASS_MAP synonyms). The goal's own product words are always targets,
+    listed first, even if the LLM omitted them.
+    """
+    items = _goal_items(goal)
+    seeds = [t.lower().strip() for t in extra_target_terms if t and t.strip()]
+
+    targets: List[str] = list(items)
+    context: List[str] = []
+    for g in goal_objects:
+        gl = g.lower().strip()
+        if not gl:
+            continue
+        if gl in targets:
+            continue
+        is_target = gl in seeds or any(it in gl or gl in it for it in items)
+        (targets if is_target else context).append(gl)
+    return targets, context

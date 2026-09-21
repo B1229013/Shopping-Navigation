@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 import uuid
@@ -31,7 +32,7 @@ from server.config import (
     GOAL_CROP_VERIFY, GENERIC_INDOOR_OBJECTS, ensure_output_dir, OUTPUT_ROOT,
 )
 from server.sensor_test_render import render_sensor_test_png
-from server.goal_decomposer import decompose_goal
+from server.goal_decomposer import decompose_goal, split_goal_objects
 from server.ocr import OCR
 from server.models import (
     AnswerRequest,
@@ -91,11 +92,15 @@ from server.vlm import (
     ask_about_image as _vlm_ask_about_image,
 )
 from server.neo4j_client import get_neo4j
-from server.visual_localization import localize as _localize_photo, vlm_rerank as _vlm_rerank
+from server.visual_localization import (
+    localize as _localize_photo, vlm_rerank as _vlm_rerank,
+    estimate_node_heading as _estimate_node_heading,
+)
 from server.heading import (
     convert_leg_to_relative,
     relative_direction_text,
     heading_between_nodes,
+    merge_instructions, next_instruction_text,
 )
 from server.prompts import ROUTE_CONTEXT_BLOCK
 
@@ -217,13 +222,13 @@ def _detect_goal_in_photo(detections, goal_keywords, img_w=1, img_h=1):
         box = det.box if hasattr(det, 'box') else det.get('box')
         if not box or len(box) < 4:
             continue
+        # boxes are absolute pixels; the 0.35/0.65 thresholds below are fractions
+        cx = (box[0] + box[2]) / 2 / (img_w or 1)
         for kw in keywords:
             if kw in label or label in kw:
-                cx = (box[0] + box[2]) / 2
                 matches.append((cx, det.label if isinstance(det.label, str) else str(det.label)))
                 break
             elif len(kw) >= 2 and label[:2] == kw[:2] and _re.search(r'[一-鿿]', kw[:2]):
-                cx = (box[0] + box[2]) / 2
                 matches.append((cx, det.label if isinstance(det.label, str) else str(det.label)))
                 break
 
@@ -360,7 +365,60 @@ def _infer_target_direction(matched_node, target_nid, ref_map,
     return rel_zh.get(diff), target_slot, landmarks
 
 
-def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, str | None]:
+def _walkway_distances(ref_map) -> dict[tuple[int, int], float]:
+    """{(a, b): metres} for both directions of every walkway edge.
+
+    The map stores distance_m on each WALKWAY relationship; an edge that was
+    never measured (0/None) falls back to the straight-line distance between
+    the two waypoints' PDR coordinates so guidance can still say "約 N 公尺".
+    """
+    out: dict[tuple[int, int], float] = {}
+    if not ref_map:
+        return out
+    for edge in getattr(ref_map, "walkway_edges", None) or []:
+        a, b = edge.get("from"), edge.get("to")
+        if a is None or b is None:
+            continue
+        d = float(edge.get("distance_m") or 0.0)
+        if d <= 0:
+            na, nb = ref_map.photos.get(a), ref_map.photos.get(b)
+            if na and nb:
+                d = math.hypot(nb.pdr_x - na.pdr_x, nb.pdr_y - na.pdr_y)
+        out[(a, b)] = d
+        out[(b, a)] = d
+    return out
+
+
+def _path_from_current(ref_map, current_nid, leg_path: list[int], target_nid: int) -> list[int]:
+    """The part of the route still ahead of the user.
+
+    The leg was planned once from the route's start node, but every photo
+    re-localizes the user. If the localized node lies on the planned leg, drop
+    the nodes already walked; if it lies off the leg (wrong aisle, overshoot),
+    re-plan on the walkway graph from there; otherwise fall back to the leg as
+    planned. Without this, "右轉" keeps describing the turn at the leg's origin
+    no matter how far the user has walked.
+    """
+    if current_nid is None:
+        return leg_path
+    if current_nid in leg_path:
+        return leg_path[leg_path.index(current_nid):]
+    distances = _walkway_distances(ref_map)
+    if distances and current_nid in ref_map.photos and target_nid in ref_map.photos:
+        import networkx as _nx
+        from server.path_planner import astar as _astar
+        g = _nx.Graph()
+        g.add_nodes_from(ref_map.photos)
+        for (a, b), d in distances.items():
+            g.add_edge(a, b, weight=d or 1.0)
+        replanned = _astar(g, current_nid, target_nid)
+        if replanned and len(replanned) > 1:
+            return replanned
+    return leg_path
+
+
+def _build_route_context(s, loc_result, detections=None,
+                         img_w: int = 0, img_h: int = 0) -> tuple[str | None, str | None]:
     """Build a route context string for the VLM prompt + a one-line next instruction.
 
     Returns (route_context_block, next_instruction).
@@ -402,9 +460,10 @@ def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, st
 
         # Which goal item is at this target?
         goal_item = current_leg.purpose
-        if goal_item == "target" and s.goal_objects:
+        _targets = s.target_objects or s.goal_objects
+        if goal_item == "target" and _targets:
             # Try to find which goal object maps to this target node
-            for g in s.goal_objects:
+            for g in _targets:
                 if ref_map and current_leg.to_node in ref_map.photos:
                     for obj in ref_map.photos[current_leg.to_node].objects:
                         if (obj.ocr_text and g.lower() in obj.ocr_text.lower()) or \
@@ -415,9 +474,9 @@ def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, st
                         break
 
         # --- Priority 1: check if goal is visible in the user's photo ---
-        goal_kws = [goal_item] + (s.goal_objects or [])
+        goal_kws = [goal_item] + (_targets or [])
         photo_dir_zh, photo_obj_names = _detect_goal_in_photo(
-            detections, goal_kws)
+            detections, goal_kws, img_w=img_w or 1, img_h=img_h or 1)
 
         direction_hint = ""
         if photo_dir_zh:
@@ -466,20 +525,24 @@ def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, st
             }
 
             rel_instructions = convert_leg_to_relative(
-                current_leg.path,
+                _path_from_current(ref_map, loc_result.matched_nid,
+                                   current_leg.path, current_leg.to_node),
                 node_positions,
                 loc_result.matched_heading,
+                distances=_walkway_distances(ref_map),
             )
+            # Fold straight runs into one step with the summed distance and the
+            # number of intersections passed, so "右轉" becomes "直走約 12 公尺
+            # （經過 1 個路口），然後右轉" when two aisles both open to the right.
+            steps = merge_instructions(rel_instructions)
 
-            if rel_instructions:
-                first = rel_instructions[0]
-                dist_text = f"，約 {first.distance_m:.0f} 公尺" if first.distance_m > 0 else ""
-                next_instruction = f"{first.text_zh}{dist_text}，前往{target_area}找「{goal_item}」"
+            if steps:
+                next_instruction = f"{next_instruction_text(steps)}，前往{target_area}找「{goal_item}」"
 
                 path_steps = []
-                for ri in rel_instructions[:3]:
-                    step_area = _node_area_name(ri.to_node, ref_map)
-                    path_steps.append(f"{ri.text_zh}往{step_area}方向走")
+                for st in steps[:3]:
+                    step_area = _node_area_name(st.to_node, ref_map)
+                    path_steps.append(f"{st.text_zh}，往{step_area}方向")
 
                 route_desc = (
                     f"目前要找的商品：「{goal_item}」\n"
@@ -519,8 +582,9 @@ def _current_goal_objects(s) -> list[str]:
     When a route plan exists, we guide the user one item at a time.
     When there's no route plan, fall back to all goal objects.
     """
-    if not s.route_plan or not s.route_plan.legs or not s.goal_objects:
-        return s.goal_objects
+    goal_objects = s.target_objects or s.goal_objects
+    if not s.route_plan or not s.route_plan.legs or not goal_objects:
+        return goal_objects
 
     leg_idx = min(s.current_leg_index, len(s.route_plan.legs) - 1)
     current_leg = s.route_plan.legs[leg_idx]
@@ -529,15 +593,15 @@ def _current_goal_objects(s) -> list[str]:
     neo4j = get_neo4j()
     ref_map = neo4j.load_reference_map(s.place) if neo4j and s.place else None
     if not ref_map or target_nid not in ref_map.photos:
-        return s.goal_objects
+        return goal_objects
 
     node = ref_map.photos[target_nid]
-    for g in s.goal_objects:
+    for g in goal_objects:
         for obj in node.objects:
             if (obj.ocr_text and g.lower() in obj.ocr_text.lower()) or \
                g.lower() in obj.label.lower():
                 return [g]
-    return s.goal_objects[:1]
+    return goal_objects[:1]
 
 
 def _build_localization_items(detections, ocr_results, img_w, img_h):
@@ -625,6 +689,11 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                 loc_result.ref_node = new_ref
                 loc_result.method = "grid+rerank"
                 loc_result.reasoning = reranked[0][2]
+                # The heading was estimated against the OLD node's directional
+                # photos; redo it for the node we actually ended up on.
+                (loc_result.matched_heading, loc_result.matched_slot,
+                 loc_result.heading_confidence) = _estimate_node_heading(
+                    new_ref, detected_labels, ocr_texts, loc_result.confidence)
 
         if loc_result.matched_nid is not None:
             s.last_corrected_nid = loc_result.matched_nid
@@ -717,6 +786,11 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
         g for g in goal_objects
         if g.lower() not in _generic_lower or g.lower() in _goal_mapped
     ]
+    # Product words vs. section/landmark context: only the former may ever
+    # count as "the target is in view" (arrival gate, crop-verify, photo hint).
+    target_objects, context_objects = split_goal_objects(
+        req.goal, goal_objects, extra_target_terms=_goal_mapped)
+    log.info("goal split | targets: %s | context: %s", target_objects, context_objects)
     # Resolve place: empty string "" = explore mode (no reference map);
     # None/missing = fall back to .env default; otherwise use client's selection
     from server.config import NEO4J_PLACE
@@ -727,7 +801,8 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
     else:
         selected_place = req.place or NEO4J_PLACE or None
         log.info("New session | goal: %s | place: %s | goal_objects: %s", req.goal, selected_place, goal_objects)
-    s = _store.create(goal=req.goal, goal_objects=goal_objects, place=selected_place)
+    s = _store.create(goal=req.goal, goal_objects=goal_objects, place=selected_place,
+                      target_objects=target_objects, context_objects=context_objects)
 
     # Generate goal graph
     out_dir = ensure_output_dir(s.id)
@@ -912,7 +987,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         ocr_results = easyocr_results
         ocr_text_summary = scene.format_ocr(ocr_results, img_w, img_h) if ocr_results else "(no text detected)"
 
-        ocr_matches = scene.match_ocr_to_goal(ocr_results, s.goal_objects)
+        ocr_matches = scene.match_ocr_to_goal(ocr_results, s.target_objects)
         if ocr_matches:
             ocr_text_summary += "  SIGN MATCH: " + "; ".join(ocr_matches)
 
@@ -936,7 +1011,8 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
                                              image_path=str(photo_path))
-        _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections)
+        _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
+                                                       img_w=img_w, img_h=img_h)
 
         t_vlm_start = time.time()
         _active_goals = _current_goal_objects(s)
@@ -951,6 +1027,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
             prior_answer=None,
             ocr_summary=ocr_text_summary,
             route_context=_route_ctx,
+            context_objects=s.context_objects,
         )
         t_vlm = time.time()
         log.info("[session %s] VLM → %s | %s", session_id, vlm_resp.action.value, vlm_resp.guidance[:120])
@@ -976,7 +1053,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
                 if not easyocr_results:
                     return "(no text detected)"
                 summary = scene.format_ocr(easyocr_results, img_w, img_h)
-                matches = scene.match_ocr_to_goal(easyocr_results, s.goal_objects)
+                matches = scene.match_ocr_to_goal(easyocr_results, s.target_objects)
                 if matches:
                     summary += "  SIGN MATCH: " + "; ".join(matches)
                 return summary
@@ -986,7 +1063,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
             if not cleaned:
                 return "(no text detected)"
             summary = scene.format_ocr(cleaned, img_w, img_h)
-            matches = scene.match_ocr_to_goal(cleaned, s.goal_objects)
+            matches = scene.match_ocr_to_goal(cleaned, s.target_objects)
             if matches:
                 summary += "  SIGN MATCH: " + "; ".join(matches)
             return summary
@@ -1027,11 +1104,12 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
                                              image_path=str(photo_path))
-        _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections)
+        _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
+                                                       img_w=img_w, img_h=img_h)
 
         # ── Stage 2: VLM decide (with map-aware route context) ────────
         ocr_text_summary = scene.format_ocr(ocr_results, img_w, img_h) if ocr_results else "(no text detected)"
-        ocr_matches = scene.match_ocr_to_goal(ocr_results, s.goal_objects)
+        ocr_matches = scene.match_ocr_to_goal(ocr_results, s.target_objects)
         if ocr_matches:
             ocr_text_summary += "  SIGN MATCH: " + "; ".join(ocr_matches)
 
@@ -1052,6 +1130,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
             prior_answer=None,
             ocr_summary=ocr_text_summary,
             route_context=_route_ctx,
+            context_objects=s.context_objects,
         )
         t_vlm = time.time()
 
@@ -1082,7 +1161,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     goal_verified = None
     verified_labels: list[str] = []
     if GOAL_CROP_VERIFY and vlm_resp.action == VLMAction.ARRIVED:
-        candidates = _top_goal_detections(detections, s.goal_objects)
+        candidates = _top_goal_detections(detections, s.target_objects)
         any_checked = False
         any_true = False
         for goal_label, cand in candidates:
@@ -1104,7 +1183,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     # Gate ARRIVED on real evidence (a fresh photo can't be answering a confirm).
     _raw_action = vlm_resp.action
     vlm_resp = scene.verify_arrival(
-        vlm_resp, detections, ocr_matches=ocr_matches, goal_objects=s.goal_objects,
+        vlm_resp, detections, ocr_matches=ocr_matches, goal_objects=s.target_objects,
         min_score=ARRIVED_MIN_DETECTION_SCORE, goal_verified=goal_verified,
     )
     arrival_downgraded = _raw_action == VLMAction.ARRIVED and vlm_resp.action == VLMAction.ASK
@@ -1352,6 +1431,7 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
         prior_answer=req.answer,
         ocr_summary=getattr(s, "last_ocr_summary", None),
         route_context=_answer_route_ctx,
+        context_objects=s.context_objects,
     )
 
     log.info("[session %s] VLM → %s | %s", session_id, vlm_resp.action.value, vlm_resp.guidance[:120])

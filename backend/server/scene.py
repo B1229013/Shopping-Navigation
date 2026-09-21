@@ -142,7 +142,9 @@ def match_ocr_to_goal(ocr_results, goal_objects) -> list[str]:
         if not text:
             continue
         for term in terms:
-            hit = term in text or text in term or \
+            # `text in term` only for 2+ chars: a stray single OCR character
+            # ("奶", "m") inside a goal word is noise, not a sign match.
+            hit = term in text or (len(text) >= 2 and text in term) or \
                 difflib.SequenceMatcher(None, term, text).ratio() >= OCR_MATCH_RATIO
             if hit:
                 if r.text not in seen:
@@ -218,10 +220,13 @@ def verify_arrival(resp: VLMResponse, detections, ocr_matches, goal_objects,
 
 
 def _confirm_question(resp: VLMResponse) -> VLMResponse:
+    # Downgrade to ASK (not ARRIVED): an uncorroborated ARRIVED must not put the
+    # app into the arrival-confirm state. server.post_answer recognises this
+    # question via pending_is_confirm and routes "沒有/不是" straight to MOVE.
     return VLMResponse(
-        action=VLMAction.ARRIVED,
-        guidance="看起來可能已經到了，但還不太確定。請確認眼前是否有要找的東西。",
-        question=None,
+        action=VLMAction.ASK,
+        guidance="看起來可能已經到了，但還不太確定。",
+        question="請確認：眼前有沒有看到要找的東西？（有／沒有）",
         vlm_summary=resp.vlm_summary,
     )
 

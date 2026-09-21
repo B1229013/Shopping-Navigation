@@ -177,7 +177,15 @@ def _validate_guidance(resp: VLMResponse, detections_summary: str,
 
 # ── OpenAI GPT-4o ──────────────────────────────────────────────────────
 
-def _generate(prompt: str, image_b64: Optional[str] = None) -> str:
+# Token budgets. The decide reply is one short JSON object; the perceive reply
+# lists every object and sign in the photo and easily runs past 512 tokens on a
+# busy aisle — a truncated reply used to be thrown away wholesale.
+DECIDE_MAX_TOKENS = 512
+PERCEIVE_MAX_TOKENS = 2000
+
+
+def _generate(prompt: str, image_b64: Optional[str] = None,
+              max_tokens: int = DECIDE_MAX_TOKENS) -> str:
     url = f"{OPENAI_BASE_URL}/chat/completions"
     content: list = []
     if image_b64:
@@ -187,7 +195,7 @@ def _generate(prompt: str, image_b64: Optional[str] = None) -> str:
         "model": OPENAI_MODEL,
         "messages": [{"role": "user", "content": content}],
         "temperature": 0.2,
-        "max_completion_tokens": 512,
+        "max_completion_tokens": max_tokens,
     }
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     r = requests.post(url, json=body, headers=headers, timeout=VLM_TIMEOUT_S)
@@ -276,17 +284,47 @@ def decide(
     return _FALLBACK
 
 
+def _load_json_or_salvage(text: str) -> Optional[dict]:
+    """json.loads, or — when the reply was cut off by the token cap — the longest
+    prefix that ends on a complete list item, with the open list/object closed.
+    Losing the tail of the object list is far better than losing the whole photo."""
+    end = text.rfind("}")
+    if end >= 0:
+        try:
+            return json.loads(text[:end + 1])
+        except json.JSONDecodeError:
+            pass
+    cut = text.rfind("},")
+    while cut > 0:
+        for closer in ("]}", "]}]}"):
+            try:
+                return json.loads(text[:cut + 1] + closer)
+            except json.JSONDecodeError:
+                continue
+        cut = text.rfind("},", 0, cut)
+    for closer in ("]}", "]}]}", "}"):   # truncated inside the very first item
+        head = text.rfind("[")
+        if head > 0:
+            try:
+                return json.loads(text[:head + 1] + closer)
+            except json.JSONDecodeError:
+                continue
+    log.warning("VLM perception JSON parse failed even after salvage: %.120s", text)
+    return None
+
+
 def _parse_perception(text: str, img_w: int, img_h: int) -> Optional[VLMPerception]:
     """Parse the PERCEIVE_PROMPT JSON reply, converting its 0-1 fractional boxes
     to absolute pixel coordinates (matching what GroundingDINO/EasyOCR produce,
     so downstream code — scene.py formatting, annotator.py drawing — doesn't
     need to know whether detections came from a real detector or the VLM)."""
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
+    start = text.find("{")
+    if start < 0:
+        return None
+    obj = _load_json_or_salvage(text[start:])
+    if obj is None:
         return None
     try:
-        obj = json.loads(match.group(0))
-
         detections: List[VLMDetectedObject] = []
         for d in obj.get("detections", []):
             box = d.get("box")
@@ -360,7 +398,7 @@ def perceive(
     perception = _EMPTY_PERCEPTION
     for attempt in (1, 2):
         try:
-            text = _generate(prompt, image_b64=img_b64)
+            text = _generate(prompt, image_b64=img_b64, max_tokens=PERCEIVE_MAX_TOKENS)
         except Exception as e:
             log.warning("VLM perception call failed (attempt %d/2): %s", attempt, e)
             continue

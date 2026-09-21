@@ -142,3 +142,37 @@ def test_prompt_lists_context_landmarks_as_not_the_target():
 def test_prompt_without_context_has_no_landmark_line():
     text = _prompt()
     assert "不代表已到達" not in text
+
+
+# ---- perception must survive a truncated reply ------------------------------
+
+from server.vlm import _parse_perception, perceive
+
+
+def test_parse_perception_salvages_complete_items_from_truncated_json():
+    # A rich scene overflowed the token cap: the reply stops mid-object.
+    text = ('{"scene_description":"aisle","detections":['
+            '{"label":"aisle sign 3","box":[0.38,0.24,0.52,0.39],"score":0.98},'
+            '{"label":"aisle sign 4","box":[0.62,0.24,0.82,0.42],"score":0.97},'
+            '{"label":"left shelf","box":[0.0,0.34,0.3')
+    p = _parse_perception(text, 1000, 1000)
+    assert p is not None
+    assert [d.label for d in p.detections] == ["aisle sign 3", "aisle sign 4"]
+
+
+def test_parse_perception_salvages_when_truncated_inside_ocr():
+    text = ('{"scene_description":"aisle","detections":[{"label":"sign","box":[0.1,0.1,0.2,0.2],"score":0.9}],'
+            '"ocr_texts":[{"text":"3","box":[0.4,0.3,0.45,0.35],"score":0.9},{"text":"4","box":[0.6')
+    p = _parse_perception(text, 1000, 1000)
+    assert p is not None
+    assert [d.label for d in p.detections] == ["sign"]
+    assert [t.text for t in p.ocr_texts] == ["3"]
+
+
+def test_perceive_requests_a_larger_token_budget_than_decide(tmp_path):
+    img = _make_jpeg(tmp_path)
+    reply = '{"scene_description":"x","detections":[],"ocr_texts":[]}'
+    with patch("server.vlm.requests.post", return_value=_mock_openai(reply)) as post:
+        perceive(str(img), "找到：泡麵", ["泡麵"], 8, 8)
+    body = post.call_args.kwargs["json"]
+    assert body["max_completion_tokens"] >= 1500

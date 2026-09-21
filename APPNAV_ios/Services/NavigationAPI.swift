@@ -41,6 +41,53 @@ struct TurnResponse: Codable {
     let nextInstruction: String?
 }
 
+/// Route on the hand-corrected editor map (GET /session/{id}/path): the polyline the
+/// phone's PathFollower walks, its turn list, and the whole map for the mini-map.
+struct PathResponse: Codable {
+    struct Start: Codable {
+        let wp: Int
+        let x: Double
+        let y: Double
+        let source: String          // "phone" | "photo" | "entrance"
+    }
+    struct Target: Codable {
+        let wp: Int
+        let x: Double
+        let y: Double
+        let products: [String]
+        let neoNid: Int?
+    }
+    struct Turn: Codable {
+        let direction: String       // straight / right / left / slight_* / sharp_* / behind
+        let textZh: String
+        let at: [Double]            // [x, y] where this step starts
+        let to: [Double]
+        let distanceM: Double
+        let passedNodes: Int
+    }
+    struct Node: Codable {
+        let id: Int
+        let x: Double
+        let y: Double
+    }
+    struct Edge: Codable {
+        let from: Int
+        let to: Int
+        let length: Double
+    }
+
+    let place: String
+    let goalItem: String
+    let start: Start
+    let target: Target
+    let path: [Int]
+    let polyline: [[Double]]        // metres; origin = entrance, +y = heading 0°
+    let turns: [Turn]
+    let distanceM: Double
+    let nodes: [Node]
+    let edges: [Edge]
+}
+
 /// Response from the standalone /localize endpoint.
 struct LocalizationResponse: Codable {
     let matchedNid: Int?
@@ -186,6 +233,29 @@ final class NavigationAPI {
             throw NavigationAPIError.serverError(body)
         }
         return try decoder.decode(T.self, from: data)
+    }
+
+    /// Route on the editor map. Pass the phone's dead-reckoned position to re-plan from
+    /// where the user actually is; omit it to start from the last photo localization
+    /// (or the entrance).
+    func getPath(sessionId: String, x: Double? = nil, y: Double? = nil,
+                 heading: Double? = nil) async throws -> PathResponse {
+        guard let baseURL else { throw NavigationAPIError.missingBackendURL }
+        var components = URLComponents(url: baseURL.appendingPathComponent("session/\(sessionId)/path"),
+                                       resolvingAgainstBaseURL: false)!
+        var items: [URLQueryItem] = []
+        if let x, let y {
+            items.append(URLQueryItem(name: "x", value: String(format: "%.2f", x)))
+            items.append(URLQueryItem(name: "y", value: String(format: "%.2f", y)))
+        }
+        if let heading {
+            items.append(URLQueryItem(name: "heading", value: String(format: "%.1f", heading)))
+        }
+        if !items.isEmpty { components.queryItems = items }
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 30
+        return try await send(request)
     }
 
     func getPlaces() async throws -> [PlaceInfo] {

@@ -11,7 +11,9 @@ struct NavigationCameraView: View {
     let onExit: () -> Void
 
     @StateObject private var camera = CameraController()
+    @StateObject private var routeModel = RouteFollowerModel()
     @ObservedObject private var sensorSession = NavigationSessionManager.shared
+    @State private var showFullMap = false
 
     @State private var hasCameraPermission = false
     @State private var guidance: String
@@ -66,6 +68,7 @@ struct NavigationCameraView: View {
                         .background(Color.orange.opacity(0.85))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
+                routePanel
                 guidancePanel
                 actionButtons
             }
@@ -83,6 +86,31 @@ struct NavigationCameraView: View {
             // positives that confuse users during normal navigation.
             sensorSession.onLoopDetected = nil
             sensorSession.start()
+            Task { await routeModel.load(sessionId: sessionId) }
+        }
+        .onReceive(sensorSession.$currentPoint) { point in
+            guard let point else { return }
+            routeModel.ingest(point)
+            if routeModel.shouldReplan() {
+                Task { await routeModel.load(sessionId: sessionId, fromPhone: true) }
+            }
+        }
+        .sheet(isPresented: $showFullMap) {
+            if let route = routeModel.route {
+                VStack(spacing: 8) {
+                    Text("路線：找「\(route.goalItem)」 · 共 \(Int(route.distanceM.rounded())) 公尺")
+                        .font(.headline)
+                    RouteMapView(route: route, state: routeModel.state)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ForEach(Array(route.turns.enumerated()), id: \.offset) { _, turn in
+                        Text("• \(turn.textZh)").font(.subheadline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding()
+                .background(Color.black)
+                .foregroundColor(.white)
+            }
         }
         .onDisappear {
             camera.stop()
@@ -148,6 +176,38 @@ struct NavigationCameraView: View {
                     .stroke(Color.white.opacity(0.5), lineWidth: 1)
             )
             .shadow(radius: 3)
+    }
+
+    // MARK: - Route panel (editor-map path following)
+
+    @ViewBuilder
+    private var routePanel: some View {
+        if let route = routeModel.route {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("🧭 \(routeModel.state?.prompt ?? "定位中…")")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.white)
+                    Spacer()
+                    if let st = routeModel.state {
+                        Text("剩 \(Int(st.remainingM.rounded())) m")
+                            .font(.caption.monospacedDigit())
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                }
+                RouteMapView(route: route, state: routeModel.state)
+                    .frame(height: 150)
+                    .onTapGesture { showFullMap = true }
+            }
+            .padding(10)
+            .background(Color.cyan.opacity(0.18))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        } else if let msg = routeModel.statusMessage {
+            Text("🗺 \(msg)")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.8))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     // MARK: - Guidance panel
@@ -293,6 +353,11 @@ struct NavigationCameraView: View {
         }
         // The map's own verdict for this photo, independent of the VLM prose
         mapInstruction = response.nextInstruction
+        // A localized photo is a fresh fix: re-plan from that waypoint and re-anchor
+        // the dead-reckoned position there, cancelling drift.
+        if response.correctedNodeId != nil {
+            Task { await routeModel.load(sessionId: sessionId) }
+        }
         if let loc = currentLocation {
             guidance = "📍 目前位置：\(loc)\n\n\(response.guidance)"
         } else {

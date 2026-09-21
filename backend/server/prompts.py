@@ -104,5 +104,7 @@ Rules:
 - Do not invent objects or text that are not actually visible.
 - Include the goal item ONLY if its packaging or label is clearly readable in the photo; a shelf that merely
   "looks like it could hold" the goal is NOT the goal. When unsure, leave it out.
+- When the goal item IS visible, label it exactly as one of the goal names listed above (same language, same
+  wording, e.g. "{goal_label_example}"), not a translation or paraphrase — downstream matching is literal.
 - Keep "label" and "text" values short.
 """

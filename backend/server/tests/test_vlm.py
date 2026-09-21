@@ -176,3 +176,14 @@ def test_perceive_requests_a_larger_token_budget_than_decide(tmp_path):
         perceive(str(img), "找到：泡麵", ["泡麵"], 8, 8)
     body = post.call_args.kwargs["json"]
     assert body["max_completion_tokens"] >= 1500
+
+
+def test_perceive_prompt_asks_for_goal_label_in_goal_language(tmp_path):
+    # goal words are Chinese; a "yogurt cups" label would never match 優格 in the gate
+    img = _make_jpeg(tmp_path)
+    reply = '{"scene_description":"x","detections":[],"ocr_texts":[]}'
+    with patch("server.vlm.requests.post", return_value=_mock_openai(reply)) as post:
+        perceive(str(img), "找到：優格", ["優格", "優酪乳"], 8, 8)
+    text = post.call_args.kwargs["json"]["messages"][0]["content"][-1]["text"]
+    assert "label it exactly as one of the goal names" in text
+    assert "優格" in text

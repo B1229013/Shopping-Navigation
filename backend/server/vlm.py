@@ -394,7 +394,8 @@ def perceive(
         log.warning("VLM could not read image %s: %s", image_path, e)
         return _EMPTY_PERCEPTION
 
-    prompt = PERCEIVE_PROMPT.format(goal=goal, goal_objects=", ".join(goal_objects) or "(none)")
+    prompt = PERCEIVE_PROMPT.format(goal=goal, goal_objects=", ".join(goal_objects),
+                                     goal_label_example=(goal_objects[0] if goal_objects else "milk") or "(none)")
     perception = _EMPTY_PERCEPTION
     for attempt in (1, 2):
         try:

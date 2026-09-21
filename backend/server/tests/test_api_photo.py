@@ -14,8 +14,9 @@ def _make_jpg() -> bytes:
 
 
 def _start_session(client) -> str:
+    # place="" = explore mode: never touch a live Neo4j map from unit tests
     with patch("server.server.decompose_goal", return_value=["milk"]):
-        r = client.post("/session", json={"goal": "find the milk"})
+        r = client.post("/session", json={"goal": "find the milk", "place": ""})
     return r.json()["session_id"]
 
 
@@ -71,7 +72,7 @@ def test_post_photo_after_arrived_409(tmp_path):
 
 def _start_session_with_objects(client, goal, objects) -> str:
     with patch("server.server.decompose_goal", return_value=objects):
-        r = client.post("/session", json={"goal": goal})
+        r = client.post("/session", json={"goal": goal, "place": ""})
     return r.json()["session_id"]
 
 

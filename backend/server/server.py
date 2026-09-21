@@ -426,6 +426,9 @@ def _build_route_context(s, loc_result, detections=None,
     next_instruction is a short Chinese instruction for the iOS app (or None).
     """
     if not loc_result or loc_result.matched_nid is None:
+        # Say so when a map is in use — silence looks like "the map was ignored".
+        if s.place:
+            return None, "這張照片對不到地圖上的位置，請換個角度、拍到走道標示牌或招牌再試一次"
         return None, None
 
     ref_node = loc_result.ref_node
@@ -457,6 +460,7 @@ def _build_route_context(s, loc_result, detections=None,
 
         # Friendly name for the target area
         target_area = _node_area_name(current_leg.to_node, ref_map)
+        at_target = loc_result.matched_nid == current_leg.to_node
 
         # Which goal item is at this target?
         goal_item = current_leg.purpose
@@ -536,7 +540,17 @@ def _build_route_context(s, loc_result, detections=None,
             # （經過 1 個路口），然後右轉" when two aisles both open to the right.
             steps = merge_instructions(rel_instructions)
 
-            if steps:
+            if at_target:
+                next_instruction = f"地圖顯示您就在「{goal_item}」附近（{target_area}），請環顧四周找找看"
+                route_desc = (
+                    f"目前要找的商品：「{goal_item}」\n"
+                    f"該商品位於：{target_area}\n"
+                    f"地圖定位顯示使用者已在目標節點（信心 {loc_result.confidence:.0%}），"
+                    f"請依照片判斷商品是否就在附近；若照片中沒有，請引導使用者環顧或往前幾步再拍。\n"
+                    f"{direction_hint}"
+                    f"還有 {len(remaining)} 項商品待尋找"
+                )
+            elif steps:
                 next_instruction = f"{next_instruction_text(steps)}，前往{target_area}找「{goal_item}」"
 
                 path_steps = []
@@ -559,6 +573,11 @@ def _build_route_context(s, loc_result, detections=None,
                     f"還有 {len(remaining)} 項商品待尋找"
                 )
         else:
+            if at_target:
+                next_instruction = f"地圖顯示您就在「{goal_item}」附近（{target_area}），請環顧四周找找看"
+                direction_hint = (
+                    f"地圖定位顯示使用者已在目標節點（信心 {loc_result.confidence:.0%}）。\n"
+                    + direction_hint)
             route_desc = (
                 f"目前要找的商品：「{goal_item}」\n"
                 f"該商品位於：{target_area}\n"

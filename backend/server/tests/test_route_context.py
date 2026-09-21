@@ -142,3 +142,29 @@ def test_instruction_replans_when_localized_off_the_leg():
         _, next_instr = srv._build_route_context(s, _localized_at(ref_map, 14, heading=180.0), detections=[])
     # 14 -> 12 is straight ahead (south) for 6 m, then 12 -> 13 (east) is a left turn
     assert next_instr.startswith("直走約 6 公尺，然後左轉")
+
+
+# ---- the map's verdict must always be reported, not silently dropped -------
+
+def test_at_target_node_says_so_instead_of_nothing():
+    ref_map = _two_aisle_map()
+    s = _session_with_route(ref_map, [10, 11, 12, 13])
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)):
+        ctx, next_instr = srv._build_route_context(s, _localized_at(ref_map, 13), detections=[])
+    assert next_instr is not None
+    assert "milk" in next_instr and "附近" in next_instr
+    assert "已在目標節點" in ctx
+
+
+def test_failed_localization_is_reported_when_a_map_is_in_use():
+    ref_map = _two_aisle_map()
+    s = _session_with_route(ref_map, [10, 11, 12, 13])
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)):
+        ctx, next_instr = srv._build_route_context(s, None, detections=[])
+    assert ctx is None
+    assert next_instr and "對不到地圖" in next_instr
+
+
+def test_no_map_session_stays_silent():
+    s = Session(id="t", goal="milk", goal_objects=["milk"], target_objects=["milk"], place=None)
+    assert srv._build_route_context(s, None, detections=[]) == (None, None)

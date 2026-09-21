@@ -36,6 +36,9 @@ struct TurnResponse: Codable {
     let correctedNodeId: Int?
     let correctedConfidence: Double?
     let correctedLocation: String?
+    // Map-derived turn-by-turn line (path with distance / "you're at the target" /
+    // "photo could not be localized"); shown verbatim so the map's verdict is visible.
+    let nextInstruction: String?
 }
 
 /// Response from the standalone /localize endpoint.

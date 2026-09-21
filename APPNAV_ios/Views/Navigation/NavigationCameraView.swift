@@ -162,6 +162,12 @@ struct NavigationCameraView: View {
                     .font(.subheadline)
                     .foregroundColor(.white)
 
+                if let mapInstruction {
+                    Text("🗺 \(mapInstruction)")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(.cyan)
+                }
+
                 if let pendingQuestion, !hasArrived {
                     Text(pendingQuestion)
                         .font(.subheadline.weight(.medium))
@@ -274,12 +280,19 @@ struct NavigationCameraView: View {
     }
 
     @State private var currentLocation: String?
+    @State private var mapInstruction: String?
 
     private func applyTurn(_ response: TurnResponse) {
-        // Show friendly location if localization succeeded
+        // Show friendly location (with match confidence) if localization succeeded
         if let loc = response.correctedLocation {
-            currentLocation = loc
+            if let conf = response.correctedConfidence {
+                currentLocation = "\(loc)（比對信心 \(Int((conf * 100).rounded()))%）"
+            } else {
+                currentLocation = loc
+            }
         }
+        // The map's own verdict for this photo, independent of the VLM prose
+        mapInstruction = response.nextInstruction
         if let loc = currentLocation {
             guidance = "📍 目前位置：\(loc)\n\n\(response.guidance)"
         } else {

@@ -271,13 +271,21 @@ final class NavigationAPI {
         return try await send(request)
     }
 
-    func uploadPhoto(sessionId: String, imageData: Data) async throws -> TurnResponse {
+    /// `heading` is the phone's own compass/gyro heading (degrees, 0° = map +y). The
+    /// server prefers it over the heading guessed from reference photos.
+    func uploadPhoto(sessionId: String, imageData: Data, heading: Double? = nil) async throws -> TurnResponse {
         var request = try request(path: "session/\(sessionId)/photo", method: "POST")
         let boundary = "Boundary-\(UUID().uuidString)"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 300
 
         var body = Data()
+        if let heading {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"heading\"\r\n\r\n".data(using: .utf8)!)
+            body.append(String(format: "%.1f", heading).data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+        }
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"photo\"; filename=\"photo.jpg\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)

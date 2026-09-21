@@ -15,7 +15,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
-from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from PIL import Image, ImageOps
@@ -209,17 +209,28 @@ _BASE_SLOT_ORDER = ["front", "right", "back", "left"]
 _SLOT_ZH = {"front": "前方", "right": "右手邊", "back": "後方", "left": "左手邊"}
 
 
-def _detect_goal_in_photo(detections, goal_keywords, img_w=1, img_h=1):
+def _detect_goal_in_photo(detections, goal_keywords, img_w=1, img_h=1, ocr_results=None):
     """Check if goal-related objects are visible in the user's photo.
 
-    Uses bounding box position to determine left/center/right.
+    Uses bounding box position to determine left/center/right. Text read off
+    hanging aisle signs ("泡麵 12") counts too — in a store that is the most
+    reliable cue of all, and it is often visible before the product itself.
     Returns (direction_zh, object_names) or (None, []).
     """
-    if not detections or not goal_keywords:
+    if not goal_keywords or not (detections or ocr_results):
         return None, []
 
     keywords = [kw.lower().strip() for kw in goal_keywords if kw]
     matches = []
+    for r in ocr_results or []:
+        text = (r.text if isinstance(r.text, str) else str(r.text)).lower().strip()
+        bbox = getattr(r, "bbox", None)
+        if not text or not bbox:
+            continue
+        if any(kw in text or (len(text) >= 2 and text in kw) for kw in keywords):
+            cx = sum(pt[0] for pt in bbox) / len(bbox) / (img_w or 1)
+            matches.append((cx, r.text))
+    detections = detections or []
     for det in detections:
         label = (det.label if isinstance(det.label, str) else str(det.label)).lower()
         box = det.box if hasattr(det, 'box') else det.get('box')
@@ -368,6 +379,27 @@ def _infer_target_direction(matched_node, target_nid, ref_map,
     return rel_zh.get(diff), target_slot, landmarks
 
 
+PHONE_HEADING_CONFIDENCE = 0.85
+
+
+def _apply_phone_heading(s, loc_result, heading: Optional[float]) -> None:
+    """Prefer the phone's own compass/gyro heading over the reference-photo guess.
+
+    The slot match inherits whatever compass value the map recorder had when the
+    reference photos were taken — one node tagged 90° off turns "直走" into
+    "右轉". The phone's PDR tracker reports heading in the same frame as the map
+    (0° = +y), so when the app sends it, it wins.
+    """
+    if heading is None:
+        return
+    h = float(heading) % 360.0
+    s.user_heading = h
+    s.heading_confidence = max(s.heading_confidence or 0.0, PHONE_HEADING_CONFIDENCE)
+    if loc_result is not None and loc_result.matched_nid is not None:
+        loc_result.matched_heading = h
+        loc_result.heading_confidence = max(loc_result.heading_confidence, PHONE_HEADING_CONFIDENCE)
+
+
 def _walkway_distances(ref_map) -> dict[tuple[int, int], float]:
     """{(a, b): metres} for both directions of every walkway edge.
 
@@ -421,7 +453,7 @@ def _path_from_current(ref_map, current_nid, leg_path: list[int], target_nid: in
 
 
 def _build_route_context(s, loc_result, detections=None,
-                         img_w: int = 0, img_h: int = 0) -> tuple[str | None, str | None]:
+                         img_w: int = 0, img_h: int = 0, ocr_results=None) -> tuple[str | None, str | None]:
     """Build a route context string for the VLM prompt + a one-line next instruction.
 
     Returns (route_context_block, next_instruction).
@@ -485,7 +517,7 @@ def _build_route_context(s, loc_result, detections=None,
         # --- Priority 1: check if goal is visible in the user's photo ---
         goal_kws = [goal_item] + (_targets or [])
         photo_dir_zh, photo_obj_names = _detect_goal_in_photo(
-            detections, goal_kws, img_w=img_w or 1, img_h=img_h or 1)
+            detections, goal_kws, img_w=img_w or 1, img_h=img_h or 1, ocr_results=ocr_results)
 
         direction_hint = ""
         if photo_dir_zh:
@@ -950,7 +982,8 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
 
 
 @app.post("/session/{session_id}/photo", response_model=TurnResponse)
-async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnResponse:
+async def upload_photo(session_id: str, photo: UploadFile = File(...),
+                       heading: Optional[float] = Form(default=None)) -> TurnResponse:
     s = _store.get(session_id)
     if s is None:
         raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
@@ -1036,8 +1069,9 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
                                              image_path=str(photo_path))
+        _apply_phone_heading(s, _early_loc, heading)
         _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
-                                                       img_w=img_w, img_h=img_h)
+                                                       img_w=img_w, img_h=img_h, ocr_results=ocr_results)
 
         t_vlm_start = time.time()
         _active_goals = _current_goal_objects(s)
@@ -1129,8 +1163,9 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
                                              image_path=str(photo_path))
+        _apply_phone_heading(s, _early_loc, heading)
         _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
-                                                       img_w=img_w, img_h=img_h)
+                                                       img_w=img_w, img_h=img_h, ocr_results=ocr_results)
 
         # ── Stage 2: VLM decide (with map-aware route context) ────────
         ocr_text_summary = scene.format_ocr(ocr_results, img_w, img_h) if ocr_results else "(no text detected)"

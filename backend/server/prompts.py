@@ -99,6 +99,8 @@ Rules:
 - box coordinates are FRACTIONS of the image (0.0 to 1.0), [left, top, right, bottom].
 - detections: list every object relevant to the goal or useful as a landmark (shelves, signs, doors, counters, appliances, furniture). Include the goal item itself if visible.
 - ocr_texts: list every piece of readable text (signs, labels, aisle markers, room names), transcribed exactly as shown, in its original language.
+- Hanging aisle signs are the most important text: for EACH one, transcribe the aisle number AND its full category
+  text as separate entries (e.g. "12" and "泡麵 Instant Noodles"), even when the sign is small or far away.
 - Do not invent objects or text that are not actually visible.
 - Include the goal item ONLY if its packaging or label is clearly readable in the photo; a shelf that merely
   "looks like it could hold" the goal is NOT the goal. When unsure, leave it out.

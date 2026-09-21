@@ -151,3 +151,27 @@ def test_vlm_only_mode_weak_goal_detection_is_not_rescued_by_crop_verify():
     assert r.status_code == 200
     assert r.json()["action"] == "ASK"
     crop.assert_not_called()        # below the score floor → not even worth asking
+
+
+# ---- the phone's own heading beats the reference-photo guess ----------------
+
+def test_phone_heading_overrides_reference_photo_heading():
+    from server.visual_localization import LocalizationResult
+    client = TestClient(app)
+    sid = _start_session_with_objects(client, "泡麵 x1", ["泡麵"])
+    # a node whose reference photos were tagged 90° off: slot match says 272°
+    loc = LocalizationResult(matched_nid=50, confidence=0.6, method="grid", reasoning="",
+                             ref_node=None, matched_heading=272.0, matched_slot="front",
+                             heading_confidence=0.6)
+    fake_perception = MagicMock()
+    fake_perception.detect.return_value = [Detection(label="shelf", box=[0, 0, 50, 50], score=0.7)]
+    move = VLMResponse(action=VLMAction.MOVE, guidance="walk", question=None, vlm_summary="")
+    with patch("server.server.get_perception", return_value=fake_perception), \
+         patch("server.server.vlm_decide", return_value=move), \
+         patch("server.server._run_early_localization", return_value=loc):
+        r = client.post(f"/session/{sid}/photo",
+                        files={"photo": ("p.jpg", _make_jpg(), "image/jpeg")},
+                        data={"heading": "3.5"})
+    body = r.json()
+    assert body["heading_deg"] == 3.5
+    assert body["heading_confidence"] >= 0.8

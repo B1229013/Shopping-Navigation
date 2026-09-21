@@ -208,3 +208,18 @@ def test_editor_map_at_target_is_reported():
          patch("server.server._editor_graph_for", return_value=_editor_graph()):
         _, next_instr = srv._build_route_context(s, _localized_at(ref_map, 13), detections=[])
     assert "附近" in next_instr and "牛奶" in next_instr
+
+
+# ---- goal named on an aisle sign in the photo gives the direction -----------
+
+def _ocr(text, x1, x2):
+    return SimpleNamespace(text=text, confidence=0.9, bbox=[[x1, 300], [x2, 300], [x2, 340], [x1, 340]])
+
+
+def test_detect_goal_in_photo_uses_aisle_sign_text():
+    # no detection is labelled 泡麵, but the "泡麵 12" hanging sign was read on the left
+    d, names = srv._detect_goal_in_photo([_px_det("aisle sign", 300, 500)], ["泡麵"],
+                                         img_w=1000, img_h=800,
+                                         ocr_results=[_ocr("泡麵", 120, 240), _ocr("12", 250, 300)])
+    assert d == "左手邊"
+    assert names == ["泡麵"]

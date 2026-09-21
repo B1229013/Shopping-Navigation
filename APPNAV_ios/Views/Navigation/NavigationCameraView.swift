@@ -416,7 +416,9 @@ struct NavigationCameraView: View {
 
     private func upload(imageData: Data) async {
         do {
-            let response = try await NavigationAPI.shared.uploadPhoto(sessionId: sessionId, imageData: imageData)
+            let heading = sensorSession.currentPoint?.headingDegrees
+            let response = try await NavigationAPI.shared.uploadPhoto(
+                sessionId: sessionId, imageData: imageData, heading: heading)
             await MainActor.run {
                 applyTurn(response)
                 isUploading = false

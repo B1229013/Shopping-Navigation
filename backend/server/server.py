@@ -161,13 +161,42 @@ def vlm_decide(*args, **kwargs):
     return _vlm_decide_impl(*args, **kwargs)
 
 
-def _node_area_name(nid: int, ref_map) -> str:
-    """Generate a human-friendly area name for a map node from its OCR/objects."""
+_USELESS_LANDMARK = frozenset({
+    "促銷立牌", "紅色促銷立牌", "寵物食品促銷立牌",
+    "立牌", "促銷", "紙箱", "塑膠袋", "購物車", "推車",
+    "柱子", "天花板", "地板", "白色地磚走道",
+})
+
+def _is_useless_name(name: str) -> bool:
+    n = name.strip().lower()
+    return n in _USELESS_LANDMARK or "促銷立牌" in n or "promotional sign" in n
+
+
+def _node_area_name(nid: int, ref_map, goal_keywords=None) -> str:
+    """Generate a human-friendly area name for a map node from its OCR/objects.
+
+    When *goal_keywords* is provided (for the target node), prioritize objects
+    whose label or OCR text matches the goal so the area name is relevant.
+    """
     if not ref_map or nid not in ref_map.photos:
-        return f"未知區域"
+        return "未知區域"
     node = ref_map.photos[nid]
     if not node.objects:
-        return f"未知區域"
+        return "未知區域"
+
+    kws = [k.lower() for k in (goal_keywords or []) if k]
+
+    if kws:
+        for obj in node.objects:
+            lbl = obj.label.lower()
+            ocr = (obj.ocr_text or "").lower()
+            for k in kws:
+                if k in lbl or k in ocr or lbl in k or \
+                   (len(k) >= 2 and k[:2] in lbl) or \
+                   (len(k) >= 2 and k[:2] in ocr):
+                    name = obj.ocr_text.strip() if obj.ocr_text else obj.label.split("/")[0].strip()
+                    if name and not _is_useless_name(name):
+                        return f"「{name}」區"
 
     ocr_texts = []
     seen = set()
@@ -175,6 +204,8 @@ def _node_area_name(nid: int, ref_map) -> str:
         if obj.ocr_text and obj.ocr_text.strip():
             t = obj.ocr_text.strip()
             if len(t) < 2 or t.isdigit() or t.lower() in seen or len(t) > 20:
+                continue
+            if _is_useless_name(t):
                 continue
             ocr_texts.append(t)
             seen.add(t.lower())
@@ -188,6 +219,8 @@ def _node_area_name(nid: int, ref_map) -> str:
     for obj in node.objects:
         l = obj.label.strip()
         if l.lower() not in seen and l.lower() not in ("shelf", "shelves", "wall", "floor", "ceiling"):
+            if _is_useless_name(l):
+                continue
             labels.append(l)
             seen.add(l.lower())
         if len(labels) >= 2:
@@ -200,19 +233,64 @@ def _node_area_name(nid: int, ref_map) -> str:
 _BASE_SLOT_ORDER = ["front", "right", "back", "left"]
 _SLOT_ZH = {"front": "前方", "right": "右手邊", "back": "後方", "left": "左手邊"}
 
+_CHECKOUT_KW = ['收銀台', '收銀機', '結帳機', 'pos', 'cashier counter', 'cash register',
+                '自助結帳機', 'self-checkout kiosk']
+_CHECKOUT_SIGN_KW = ['結帳', '收銀', 'cashier', 'checkout']
+_EXIT_DOOR_KW = ['出口門', '玻璃門', 'entrance door', 'exit door']
+_EXIT_SIGN_KW = ['出口', 'exit']
 
-def _detect_goal_in_photo(detections, goal_keywords, img_w=1, img_h=1):
+
+def _find_checkout_exit_nodes(ref_map) -> tuple[int | None, int | None]:
+    """Auto-detect best checkout and exit nodes from reference map objects."""
+    if not ref_map or not ref_map.photos:
+        return None, None
+
+    checkout_scores: dict[int, float] = {}
+    exit_scores: dict[int, float] = {}
+
+    for nid, node in ref_map.photos.items():
+        cs = 0.0
+        es = 0.0
+        for o in node.objects:
+            txt = (o.label + ' ' + (o.ocr_text or '')).lower()
+            if any(kw in txt for kw in _CHECKOUT_KW):
+                cs += o.score * 2.0
+            elif any(kw in txt for kw in _CHECKOUT_SIGN_KW):
+                cs += o.score * 0.5
+            if any(kw in txt for kw in _EXIT_DOOR_KW):
+                es += o.score * 3.0
+            elif any(kw in txt for kw in _EXIT_SIGN_KW):
+                es += o.score * 0.3
+        if cs > 0:
+            checkout_scores[nid] = cs
+        if es > 0:
+            exit_scores[nid] = es
+
+    checkout_nid = max(checkout_scores, key=checkout_scores.get) if checkout_scores else None
+    exit_nid = max(exit_scores, key=exit_scores.get) if exit_scores else None
+
+    if checkout_nid is not None:
+        log.info("Auto-detected checkout node: WP%d (score=%.1f)", checkout_nid, checkout_scores[checkout_nid])
+    if exit_nid is not None:
+        log.info("Auto-detected exit node: WP%d (score=%.1f)", exit_nid, exit_scores[exit_nid])
+
+    return checkout_nid, exit_nid
+
+
+def _detect_goal_in_photo(detections, goal_keywords, img_w=1, img_h=1, ocr_results=None):
     """Check if goal-related objects are visible in the user's photo.
 
     Uses bounding box position to determine left/center/right.
+    Also checks OCR text for goal keyword matches.
     Returns (direction_zh, object_names) or (None, []).
     """
-    if not detections or not goal_keywords:
+    if not goal_keywords:
         return None, []
 
     keywords = [kw.lower().strip() for kw in goal_keywords if kw]
     matches = []
-    for det in detections:
+
+    for det in (detections or []):
         label = (det.label if isinstance(det.label, str) else str(det.label)).lower()
         box = det.box if hasattr(det, 'box') else det.get('box')
         if not box or len(box) < 4:
@@ -225,6 +303,23 @@ def _detect_goal_in_photo(detections, goal_keywords, img_w=1, img_h=1):
             elif len(kw) >= 2 and label[:2] == kw[:2] and _re.search(r'[一-鿿]', kw[:2]):
                 cx = (box[0] + box[2]) / 2
                 matches.append((cx, det.label if isinstance(det.label, str) else str(det.label)))
+                break
+
+    for ocr in (ocr_results or []):
+        text = getattr(ocr, 'text', '') or ''
+        text_lower = text.lower().strip()
+        bbox = getattr(ocr, 'bbox', None)
+        if not text_lower or not bbox:
+            continue
+        if isinstance(bbox[0], (list, tuple)):
+            cx = sum(p[0] for p in bbox) / len(bbox)
+        elif len(bbox) >= 4:
+            cx = (bbox[0] + bbox[2]) / 2
+        else:
+            continue
+        for kw in keywords:
+            if kw in text_lower or text_lower in kw:
+                matches.append((cx, text))
                 break
 
     if not matches:
@@ -360,30 +455,44 @@ def _infer_target_direction(matched_node, target_nid, ref_map,
     return rel_zh.get(diff), target_slot, landmarks
 
 
-def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, str | None]:
+def _build_route_context(s, loc_result, detections=None, ocr_results=None) -> tuple[str | None, str | None]:
     """Build a route context string for the VLM prompt + a one-line next instruction.
 
     Returns (route_context_block, next_instruction).
     route_context_block is the full text block for the VLM prompt (or None).
     next_instruction is a short Chinese instruction for the iOS app (or None).
     """
-    if not loc_result or loc_result.matched_nid is None:
+    localized = (loc_result
+                 and loc_result.matched_nid is not None
+                 and loc_result.ref_node is not None)
+    has_route = (s.route_plan
+                 and hasattr(s.route_plan, 'legs')
+                 and s.route_plan.legs)
+
+    if not localized and not has_route:
+        log.warning("🔴 [session %s] _build_route_context: no localization AND no route plan → skipping", s.id)
         return None, None
 
-    ref_node = loc_result.ref_node
-    if not ref_node:
-        return None, None
+    if localized:
+        log.info("🟡 [session %s] _build_route_context: localized to node #%s (conf=%.2f, heading=%s, slot=%s)",
+                 s.id, loc_result.matched_nid, loc_result.confidence,
+                 loc_result.matched_heading, loc_result.matched_slot)
+    else:
+        log.warning("🟡 [session %s] _build_route_context: localization failed but route plan exists — providing degraded context", s.id)
 
     # Load reference map once for area name lookups
     neo4j = get_neo4j()
     ref_map = neo4j.load_reference_map(s.place) if neo4j and s.place else None
 
-    # Position description — friendly area name
-    friendly_loc = _ref_location_name(loc_result) or "未知區域"
-    position_desc = f"{friendly_loc}（信心 {loc_result.confidence:.0%}）"
+    # Position description
+    if localized:
+        friendly_loc = _ref_location_name(loc_result) or "未知區域"
+        position_desc = f"{friendly_loc}（信心 {loc_result.confidence:.0%}）"
+    else:
+        position_desc = "定位中（尚未確認確切位置）"
 
     # Heading description
-    if loc_result.matched_heading is not None and loc_result.heading_confidence > 0.3:
+    if localized and loc_result.matched_heading is not None and loc_result.heading_confidence > 0.3:
         slot_zh = {"front": "前方（行走方向）", "right": "右方", "back": "後方", "left": "左方"}
         slot_label = slot_zh.get(loc_result.matched_slot or "", "未知方向")
         heading_desc = f"面朝 {slot_label}"
@@ -392,18 +501,33 @@ def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, st
 
     # Route description: only the CURRENT leg — guide one step at a time
     next_instruction = None
-    if s.route_plan and hasattr(s.route_plan, 'legs') and s.route_plan.legs:
+    log.info("🟡 [session %s] route_plan exists=%s, legs=%d, current_leg_index=%d, phase=%s",
+             s.id, bool(s.route_plan), len(s.route_plan.legs) if has_route else 0,
+             s.current_leg_index, s.phase)
+    if has_route:
         remaining = s.remaining_targets
         leg_idx = min(s.current_leg_index, len(s.route_plan.legs) - 1)
         current_leg = s.route_plan.legs[leg_idx]
 
-        # Friendly name for the target area
-        target_area = _node_area_name(current_leg.to_node, ref_map)
+        # Friendly name for the target area — depends on current phase
+        if s.phase == "checkout":
+            target_area = "收銀台"
+        elif s.phase == "exit":
+            target_area = "出口"
+        else:
+            target_area = _node_area_name(current_leg.to_node, ref_map,
+                                           goal_keywords=s.goal_objects)
 
         # Which goal item is at this target?
-        goal_item = current_leg.purpose
+        if s.phase == "checkout":
+            goal_item = "收銀台"
+        elif s.phase == "exit":
+            goal_item = "出口"
+        elif current_leg.purpose in ("checkout", "exit"):
+            goal_item = "收銀台" if current_leg.purpose == "checkout" else "出口"
+        else:
+            goal_item = current_leg.purpose
         if goal_item == "target" and s.goal_objects:
-            # Try to find which goal object maps to this target node
             for g in s.goal_objects:
                 if ref_map and current_leg.to_node in ref_map.photos:
                     for obj in ref_map.photos[current_leg.to_node].objects:
@@ -417,7 +541,7 @@ def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, st
         # --- Priority 1: check if goal is visible in the user's photo ---
         goal_kws = [goal_item] + (s.goal_objects or [])
         photo_dir_zh, photo_obj_names = _detect_goal_in_photo(
-            detections, goal_kws)
+            detections, goal_kws, ocr_results=ocr_results)
 
         direction_hint = ""
         if photo_dir_zh:
@@ -426,8 +550,8 @@ def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, st
                 f"重要：使用者的照片中已經可以看到目標相關物件（{obj_text}），"
                 f"位於畫面的「{photo_dir_zh}」。請直接引導使用者往那個方向走。\n"
             )
-        else:
-            # --- Priority 2: infer from directional reference photos ---
+        elif localized:
+            # --- Priority 2: infer from directional reference photos (needs localization) ---
             matched_node = ref_map.photos.get(loc_result.matched_nid) if ref_map else None
             dir_zh, dir_slot, dir_landmarks = _infer_target_direction(
                 matched_node, current_leg.to_node, ref_map, loc_result.matched_slot,
@@ -454,8 +578,15 @@ def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, st
                     f"引導使用者繼續沿走道前進。不要猜測目標在左或右，"
                     f"不要提供具體距離，也不要叫使用者自己去找標示。\n"
                 )
+        else:
+            # Not localized — can't infer direction from map, but still guide toward target
+            direction_hint = (
+                f"目前尚未精確定位，無法從地圖推斷方向。"
+                f"請根據照片中的標示和地標引導使用者前往「{goal_item}」所在的「{target_area}」。\n"
+            )
 
-        heading_reliable = (ref_map
+        heading_reliable = (localized
+                            and ref_map
                             and loc_result.matched_heading is not None
                             and loc_result.heading_confidence > 0.3)
 
@@ -474,37 +605,68 @@ def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, st
             if rel_instructions:
                 first = rel_instructions[0]
                 dist_text = f"，約 {first.distance_m:.0f} 公尺" if first.distance_m > 0 else ""
-                next_instruction = f"{first.text_zh}{dist_text}，前往{target_area}找「{goal_item}」"
+                if s.phase in ("checkout", "exit"):
+                    next_instruction = f"{first.text_zh}{dist_text}，前往{target_area}"
+                else:
+                    next_instruction = f"{first.text_zh}{dist_text}，前往{target_area}找「{goal_item}」"
 
                 path_steps = []
                 for ri in rel_instructions[:3]:
                     step_area = _node_area_name(ri.to_node, ref_map)
                     path_steps.append(f"{ri.text_zh}往{step_area}方向走")
 
+                if s.phase == "checkout":
+                    phase_status = "所有商品已找到，正前往收銀台"
+                elif s.phase == "exit":
+                    phase_status = "已結帳完成，正前往出口"
+                else:
+                    phase_status = f"還有 {len(remaining)} 項商品待尋找"
+
                 route_desc = (
-                    f"目前要找的商品：「{goal_item}」\n"
-                    f"該商品位於：{target_area}\n"
+                    f"目前目標：「{goal_item}」\n"
+                    f"位於：{target_area}\n"
                     f"{direction_hint}"
                     f"建議走法：{'；'.join(path_steps)}\n"
-                    f"還有 {len(remaining)} 項商品待尋找"
+                    f"{phase_status}"
                 )
             else:
+                if s.phase == "checkout":
+                    phase_status = "所有商品已找到，正前往收銀台"
+                elif s.phase == "exit":
+                    phase_status = "已結帳完成，正前往出口"
+                else:
+                    phase_status = f"還有 {len(remaining)} 項商品待尋找"
                 route_desc = (
-                    f"目前要找的商品：「{goal_item}」\n"
-                    f"該商品位於：{target_area}\n"
+                    f"目前目標：「{goal_item}」\n"
+                    f"位於：{target_area}\n"
                     f"{direction_hint}"
-                    f"還有 {len(remaining)} 項商品待尋找"
+                    f"{phase_status}"
                 )
         else:
+            if s.phase == "checkout":
+                phase_status = "所有商品已找到，正前往收銀台"
+            elif s.phase == "exit":
+                phase_status = "已結帳完成，正前往出口"
+            else:
+                phase_status = f"還有 {len(remaining)} 項商品待尋找"
             route_desc = (
-                f"目前要找的商品：「{goal_item}」\n"
-                f"該商品位於：{target_area}\n"
+                f"目前目標：「{goal_item}」\n"
+                f"位於：{target_area}\n"
                 f"{direction_hint}"
-                f"還有 {len(remaining)} 項商品待尋找"
+                f"{phase_status}"
             )
+
+        # Fallback next_instruction when heading is unreliable but route exists
+        if not next_instruction:
+            if s.phase in ("checkout", "exit"):
+                next_instruction = f"前往{target_area}"
+            else:
+                next_instruction = f"前往{target_area}找「{goal_item}」"
     else:
         route_desc = "尚未規劃路線，請根據照片中的標示和商品引導使用者。"
+        log.warning("🔴 [session %s] _build_route_context: NO route plan → VLM will navigate by photo only", s.id)
 
+    log.info("🟢 [session %s] _build_route_context: route_desc=%s", s.id, route_desc[:120])
     context_block = ROUTE_CONTEXT_BLOCK.format(
         position_description=position_desc,
         heading_description=heading_desc,
@@ -517,8 +679,14 @@ def _current_goal_objects(s) -> list[str]:
     """Return only the goal object(s) for the current route leg.
 
     When a route plan exists, we guide the user one item at a time.
+    In checkout/exit phases, return checkout/exit related objects.
     When there's no route plan, fall back to all goal objects.
     """
+    if s.phase == "checkout":
+        return ["收銀台", "結帳", "cashier", "checkout"]
+    if s.phase == "exit":
+        return ["出口", "exit"]
+
     if not s.route_plan or not s.route_plan.legs or not s.goal_objects:
         return s.goal_objects
 
@@ -585,9 +753,11 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
         OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_BACKUP_KEY,
     )
     if not s.place:
+        log.warning("🔴 [session %s] _run_early_localization: s.place is empty — skipped", session_id)
         return None
     neo4j = get_neo4j()
     if not neo4j:
+        log.warning("🔴 [session %s] _run_early_localization: Neo4j not connected — skipped", session_id)
         return None
     try:
         loc_result = _localize_photo(
@@ -743,7 +913,18 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
     if selected_place:
         try:
             neo4j = get_neo4j()
+            if neo4j is None:
+                log.warning("🔴 [session %s] NEO4J NOT CONNECTED — all map/route features disabled", s.id)
+            else:
+                log.info("🟢 [session %s] Neo4j connected, loading ref_map for '%s'", s.id, selected_place)
             ref_map = neo4j.load_reference_map(selected_place) if neo4j else None
+            if ref_map and ref_map.photos:
+                log.info("🟢 [session %s] ref_map loaded: %d nodes, %d edges",
+                         s.id, len(ref_map.photos), len(ref_map.walkway_edges))
+            elif ref_map:
+                log.warning("🔴 [session %s] ref_map loaded but EMPTY (0 photo nodes) for '%s'", s.id, selected_place)
+            else:
+                log.warning("🔴 [session %s] ref_map is None for '%s'", s.id, selected_place)
             if ref_map and ref_map.photos:
                 # Extract individual goal items from the goal string
                 import re as _re_auto
@@ -810,7 +991,10 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                             log.info("[session %s] Goal object '%s' → node #%d (score=%.2f)",
                                      s.id, item, best_nid, best_score)
 
+                if not target_nodes:
+                    log.warning("🔴 [session %s] NO goal items matched any Neo4j node — route planning SKIPPED", s.id)
                 if target_nodes:
+                    log.info("🟢 [session %s] %d goal items matched nodes: %s", s.id, len(target_nodes), target_nodes)
                     # Build networkx graph from Neo4j walkway edges
                     import networkx as _nx
                     from server.path_planner import plan_route as _plan_route
@@ -825,8 +1009,21 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                         start_nid = 0 if 0 in neo4j_graph else min(neo4j_graph.nodes())
                         # Filter targets to only nodes that exist in graph
                         valid_targets = [t for t in target_nodes if t in neo4j_graph]
+
+                        # Auto-detect checkout and exit nodes
+                        checkout_nid, exit_nid = _find_checkout_exit_nodes(ref_map)
+                        if checkout_nid and checkout_nid not in neo4j_graph:
+                            checkout_nid = None
+                        if exit_nid and exit_nid not in neo4j_graph:
+                            exit_nid = None
+                        s.checkout_node = checkout_nid
+                        s.exit_node = exit_nid
+
                         if valid_targets:
-                            route = _plan_route(neo4j_graph, start_nid, valid_targets)
+                            route = _plan_route(
+                                neo4j_graph, start_nid, valid_targets,
+                                checkout=checkout_nid, exit_node=exit_nid,
+                            )
                             s.target_nodes = valid_targets
                             s.visited_targets = set()
                             s.route_plan = route
@@ -835,9 +1032,12 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                                 "visit_order": route.visit_order,
                                 "total_cost": route.total_cost,
                                 "legs": len(route.legs),
+                                "checkout_node": checkout_nid,
+                                "exit_node": exit_nid,
                             }
-                            log.info("[session %s] Auto route: %d targets, cost=%.1f, order=%s",
-                                     s.id, len(valid_targets), route.total_cost, route.visit_order)
+                            log.info("[session %s] Auto route: %d targets, cost=%.1f, order=%s, checkout=WP%s, exit=WP%s",
+                                     s.id, len(valid_targets), route.total_cost, route.visit_order,
+                                     checkout_nid, exit_nid)
         except Exception as e:
             log.warning("[session %s] Auto route planning failed: %s", s.id, e)
 
@@ -936,7 +1136,13 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
                                              image_path=str(photo_path))
-        _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections)
+        _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections, ocr_results=ocr_results)
+
+        if _route_ctx:
+            log.info("🟢 [session %s] VLM will receive route context (%d chars), next_instr=%s",
+                     session_id, len(_route_ctx), _next_instr[:80] if _next_instr else "(none)")
+        else:
+            log.warning("🔴 [session %s] VLM will receive NO route context — navigating blind", session_id)
 
         t_vlm_start = time.time()
         _active_goals = _current_goal_objects(s)
@@ -1027,7 +1233,13 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
                                              image_path=str(photo_path))
-        _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections)
+        _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections, ocr_results=ocr_results)
+
+        if _route_ctx:
+            log.info("🟢 [session %s] Mode B: VLM will receive route context (%d chars), next_instr=%s",
+                     session_id, len(_route_ctx), _next_instr[:80] if _next_instr else "(none)")
+        else:
+            log.warning("🔴 [session %s] Mode B: VLM will receive NO route context — navigating blind", session_id)
 
         # ── Stage 2: VLM decide (with map-aware route context) ────────
         ocr_text_summary = scene.format_ocr(ocr_results, img_w, img_h) if ocr_results else "(no text detected)"
@@ -1105,9 +1317,14 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     _raw_action = vlm_resp.action
     vlm_resp = scene.verify_arrival(
         vlm_resp, detections, ocr_matches=ocr_matches, goal_objects=s.goal_objects,
-        min_score=ARRIVED_MIN_DETECTION_SCORE, goal_verified=goal_verified,
+        min_score=ARRIVED_MIN_DETECTION_SCORE, img_w=img_w, img_h=img_h,
+        goal_verified=goal_verified,
     )
-    arrival_downgraded = _raw_action == VLMAction.ARRIVED and vlm_resp.action == VLMAction.ASK
+    arrival_downgraded = _raw_action == VLMAction.ARRIVED and vlm_resp.action != VLMAction.ARRIVED
+    if _raw_action == VLMAction.ARRIVED:
+        log.info("[session %s] verify_arrival: %s → %s | goal_verified=%s ocr_matches=%s",
+                 session_id, _raw_action.value, vlm_resp.action.value,
+                 goal_verified, bool(ocr_matches))
     if verified_labels:
         log.info("[session %s] confirmed goal items in this photo: %s", session_id, verified_labels)
 
@@ -1215,6 +1432,17 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
     # the decide step. Mode A ran it with GroundingDINO labels earlier.
     loc_result = _early_loc
 
+    # ── Route-first: override VLM MOVE guidance with path planner ─────
+    # The path planner's next_instruction is the primary navigation text.
+    # VLM guidance is only used when: (1) VLM says ARRIVED, or (2) no
+    # route instruction available.
+    _final_guidance = vlm_resp.guidance
+    if vlm_resp.action == VLMAction.MOVE and _next_instr:
+        _final_guidance = _next_instr
+        log.info("[session %s] route-first: overriding VLM guidance with next_instruction", session_id)
+    elif vlm_resp.action == VLMAction.MOVE and not _next_instr:
+        log.info("[session %s] route-first: no next_instruction, using VLM guidance as fallback", session_id)
+
     if vlm_resp.action == VLMAction.ARRIVED:
         s.pending_arrival = True
         s.goal_node = nid
@@ -1223,11 +1451,11 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         s.pending_question = vlm_resp.question
         s.pending_is_confirm = arrival_downgraded
     else:  # MOVE
-        s.last_planned_action = vlm_resp.guidance
+        s.last_planned_action = _final_guidance
 
     return TurnResponse(
         action=vlm_resp.action,
-        guidance=vlm_resp.guidance,
+        guidance=_final_guidance,
         question=vlm_resp.question,
         node_id=nid,
         annotated_photo_url=f"/session/{session_id}/photo/{nid}.jpg",
@@ -1239,6 +1467,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         heading_confidence=round(loc_result.heading_confidence, 3) if loc_result else None,
         next_instruction=_next_instr,
         remaining_targets=len(s.remaining_targets) if s.target_nodes else None,
+        phase=s.phase,
     )
 
 
@@ -1317,6 +1546,7 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
             question=vlm_resp.question,
             node_id=nid,
             remaining_targets=len(s.remaining_targets) if s.target_nodes else None,
+            phase=s.phase,
         )
 
     # Normal answer flow (not a confirm question)
@@ -1360,9 +1590,10 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
     _raw_action = vlm_resp.action
     vlm_resp = scene.verify_arrival(
         vlm_resp, s.last_detections, ocr_matches=s.last_ocr_matches, goal_objects=_active_goals,
-        min_score=ARRIVED_MIN_DETECTION_SCORE, prior_was_confirm=False,
+        min_score=ARRIVED_MIN_DETECTION_SCORE, img_w=img_w, img_h=img_h,
+        prior_was_confirm=False,
     )
-    arrival_downgraded = _raw_action == VLMAction.ARRIVED and vlm_resp.action == VLMAction.ASK
+    arrival_downgraded = _raw_action == VLMAction.ARRIVED and vlm_resp.action != VLMAction.ARRIVED
 
     s.history.append({
         "kind": "answer",
@@ -1389,6 +1620,7 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
         question=vlm_resp.question,
         node_id=s.last_node_id,
         annotated_photo_url=f"/session/{session_id}/photo/{s.last_node_id}.jpg",
+        phase=s.phase,
     )
 
 
@@ -1405,7 +1637,6 @@ def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
     s.pending_arrival = False
 
     if req.kind == "confirmed":
-        s.arrived = True
         # Mark goal detections as arrived in scene graph
         if arrived_node == s.last_node_id and s.last_detections:
             for d in s.last_detections:
@@ -1420,26 +1651,64 @@ def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
                                   for g in s.goal_objects)]
             if arrived_ocr:
                 node_data["arrived_ocr"] = arrived_ocr
-        # Advance route: mark current target as visited and move to next leg
-        _active_goals = _current_goal_objects(s)
-        if s.route_plan and s.target_nodes:
-            current_leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
-            s.mark_target_visited(current_leg.to_node)
-            s.current_leg_index = min(s.current_leg_index + 1, len(s.route_plan.legs) - 1)
-            log.info("[session %s] route advanced: visited node #%d, leg %d/%d, remaining=%s",
-                     session_id, current_leg.to_node, s.current_leg_index,
-                     len(s.route_plan.legs), s.remaining_targets)
 
-        remaining = len(s.remaining_targets) if s.target_nodes else 0
-        if remaining > 0:
-            next_goals = _current_goal_objects(s)
-            msg = f"已找到「{'、'.join(_active_goals)}」！接下來找「{'、'.join(next_goals)}」，請拍一張照片讓我定位。"
-            s.arrived = False
-        else:
-            msg = f"已找到「{'、'.join(_active_goals)}」！所有商品都找到了！"
+        _active_goals = _current_goal_objects(s)
+
+        if s.phase == "shopping":
+            # Advance route: mark current target as visited and move to next leg
+            if s.route_plan and s.target_nodes:
+                current_leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
+                s.mark_target_visited(current_leg.to_node)
+                s.current_leg_index = min(s.current_leg_index + 1, len(s.route_plan.legs) - 1)
+                log.info("[session %s] route advanced: visited node #%d, leg %d/%d, remaining=%s",
+                         session_id, current_leg.to_node, s.current_leg_index,
+                         len(s.route_plan.legs), s.remaining_targets)
+
+            remaining = len(s.remaining_targets) if s.target_nodes else 0
+            if remaining > 0:
+                next_goals = _current_goal_objects(s)
+                msg = f"已找到「{'、'.join(_active_goals)}」！接下來找「{'、'.join(next_goals)}」，請拍一張照片讓我定位。"
+                s.arrived = False
+            else:
+                # All items found — transition to checkout or exit phase
+                if s.checkout_node is not None:
+                    s.phase = "checkout"
+                    msg = f"已找到所有商品！現在帶您前往收銀台結帳，請拍一張照片讓我定位。"
+                    s.arrived = False
+                    log.info("[session %s] phase → checkout (WP%d)", session_id, s.checkout_node)
+                elif s.exit_node is not None:
+                    s.phase = "exit"
+                    msg = f"已找到所有商品！現在帶您前往出口，請拍一張照片讓我定位。"
+                    s.arrived = False
+                    log.info("[session %s] phase → exit (WP%d)", session_id, s.exit_node)
+                else:
+                    msg = f"已找到「{'、'.join(_active_goals)}」！所有商品都找到了！"
+                    s.arrived = True
+                    s.phase = "done"
+        elif s.phase == "checkout":
+            # Confirmed at checkout — transition to exit phase
+            if s.exit_node is not None:
+                s.phase = "exit"
+                s.current_leg_index = min(s.current_leg_index + 1, len(s.route_plan.legs) - 1) if s.route_plan else 0
+                msg = "結帳完成！現在帶您前往出口，請拍一張照片讓我定位。"
+                s.arrived = False
+                log.info("[session %s] phase → exit (WP%d)", session_id, s.exit_node)
+            else:
+                msg = "結帳完成！導航結束。"
+                s.arrived = True
+                s.phase = "done"
+        elif s.phase == "exit":
+            # Confirmed at exit — done
+            msg = "已到達出口，導航完成！感謝使用。"
             s.arrived = True
-        log.info("[session %s] confirmed arrival at node %s, remaining=%d", session_id, arrived_node, remaining)
-        s.history.append({"kind": "confirm", "node_id": arrived_node, "message": msg})
+            s.phase = "done"
+            log.info("[session %s] phase → done", session_id)
+        else:
+            msg = "導航已完成。"
+            s.arrived = True
+
+        log.info("[session %s] confirmed arrival at node %s, phase=%s", session_id, arrived_node, s.phase)
+        s.history.append({"kind": "confirm", "node_id": arrived_node, "phase": s.phase, "message": msg})
         action = VLMAction.ARRIVED if s.arrived else VLMAction.MOVE
 
     elif req.kind == "repeated_misidentification":
@@ -1510,6 +1779,7 @@ def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
         question=s.pending_question,
         node_id=arrived_node,
         annotated_photo_url=f"/session/{session_id}/photo/{arrived_node}.jpg",
+        phase=s.phase,
     )
 
 

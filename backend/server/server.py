@@ -167,9 +167,41 @@ _USELESS_LANDMARK = frozenset({
     "柱子", "天花板", "地板", "白色地磚走道",
 })
 
+def _build_nav_graph(ref_map) -> "nx.Graph":
+    """Build a networkx graph from the reference map, auto-adding proximity edges."""
+    import networkx as _nx
+    import math as _m
+    g = _nx.Graph()
+    for nid in ref_map.photos:
+        g.add_node(nid)
+    for edge in ref_map.walkway_edges:
+        w = edge.get("distance_m", 1.0) or 1.0
+        g.add_edge(edge["from"], edge["to"], weight=w)
+    # Auto-connect nearby nodes that aren't already linked (< 6m)
+    nodes = list(ref_map.photos.items())
+    added = 0
+    for i in range(len(nodes)):
+        for j in range(i + 1, len(nodes)):
+            a_id, a = nodes[i]
+            b_id, b = nodes[j]
+            if g.has_edge(a_id, b_id):
+                continue
+            dx = a.pdr_x - b.pdr_x
+            dy = a.pdr_y - b.pdr_y
+            dist = _m.sqrt(dx * dx + dy * dy)
+            if dist < 6.0:
+                g.add_edge(a_id, b_id, weight=max(dist, 0.5))
+                added += 1
+    if added:
+        log.info("Auto-added %d proximity edges (< 6m)", added)
+    return g
+
+
 def _is_useless_name(name: str) -> bool:
     n = name.strip().lower()
-    return n in _USELESS_LANDMARK or "促銷立牌" in n or "promotional sign" in n
+    return (n in _USELESS_LANDMARK
+            or "促銷" in n or "promotional" in n
+            or "海報" in n or "poster" in n)
 
 
 def _node_area_name(nid: int, ref_map, goal_keywords=None) -> str:
@@ -184,20 +216,35 @@ def _node_area_name(nid: int, ref_map, goal_keywords=None) -> str:
     if not node.objects:
         return "未知區域"
 
-    kws = [k.lower() for k in (goal_keywords or []) if k]
+    # Priority 1: aisle/section signs with actual aisle numbers — most useful for navigation
+    import re as _re
+    for obj in node.objects:
+        lbl = obj.label
+        raw = obj.ocr_text.strip() if obj.ocr_text else lbl
+        # Match "走道N" with category info (e.g. "走道14／調味／沖泡食品標示牌")
+        _m = _re.search(r'走道\s*\d+[／/][^A-Za-z]+', raw) or _re.search(r'走道\s*\d+[／/][^A-Za-z]+', lbl)
+        if _m:
+            aisle_name = _m.group(0).rstrip("標示牌 ／/")
+            if aisle_name:
+                return f"「{aisle_name}」"
+        # Match "Aisle N" style with category
+        _m2 = _re.search(r'走道\s*\d+', raw) or _re.search(r'走道\s*\d+', lbl)
+        if _m2:
+            return f"「{_m2.group(0)}」"
 
+    # Priority 2: goal-keyword matched objects
+    kws = [k.lower() for k in (goal_keywords or []) if k]
     if kws:
         for obj in node.objects:
             lbl = obj.label.lower()
             ocr = (obj.ocr_text or "").lower()
             for k in kws:
-                if k in lbl or k in ocr or lbl in k or \
-                   (len(k) >= 2 and k[:2] in lbl) or \
-                   (len(k) >= 2 and k[:2] in ocr):
+                if k in lbl or k in ocr or lbl in k:
                     name = obj.ocr_text.strip() if obj.ocr_text else obj.label.split("/")[0].strip()
                     if name and not _is_useless_name(name):
                         return f"「{name}」區"
 
+    # Priority 3: OCR texts
     ocr_texts = []
     seen = set()
     for obj in node.objects:
@@ -215,6 +262,7 @@ def _node_area_name(nid: int, ref_map, goal_keywords=None) -> str:
     if ocr_texts:
         return "「" + "」「".join(ocr_texts) + "」附近"
 
+    # Priority 4: object labels
     labels = []
     for obj in node.objects:
         l = obj.label.strip()
@@ -513,6 +561,31 @@ def _build_route_context(s, loc_result, detections=None, ocr_results=None) -> tu
         leg_idx = min(s.current_leg_index, len(s.route_plan.legs) - 1)
         current_leg = s.route_plan.legs[leg_idx]
 
+        # Re-plan route when user is localized but NOT on the current leg's path
+        if (localized and ref_map
+                and loc_result.matched_nid not in current_leg.path):
+            try:
+                from server.path_planner import plan_route as _plan_route
+                _g = _build_nav_graph(ref_map)
+                if loc_result.matched_nid in _g:
+                    _remaining_targets = [t for t in (s.target_nodes or [])
+                                          if t not in (s.visited_targets or set())]
+                    if not _remaining_targets and current_leg.purpose == "target":
+                        _remaining_targets = [current_leg.to_node]
+                    new_route = _plan_route(
+                        _g, loc_result.matched_nid, _remaining_targets,
+                        checkout=getattr(s, "checkout_node", None),
+                        exit_node=getattr(s, "exit_node", None),
+                    )
+                    s.route_plan = new_route
+                    s.current_leg_index = 0
+                    leg_idx = 0
+                    current_leg = new_route.legs[0]
+                    log.info("🔄 [session %s] re-planned route from WP%d (was not on leg path %s)",
+                             s.id, loc_result.matched_nid, current_leg.path[:5])
+            except Exception as e:
+                log.warning("[session %s] route re-plan failed: %s", s.id, e)
+
         # Friendly name for the target area — depends on current phase
         if s.phase == "checkout":
             target_area = "收銀台"
@@ -522,7 +595,7 @@ def _build_route_context(s, loc_result, detections=None, ocr_results=None) -> tu
             target_area = _node_area_name(current_leg.to_node, ref_map,
                                            goal_keywords=s.goal_objects)
 
-        # Which goal item is at this target?
+        # Which goal item is at this target? Use user's original input language
         if s.phase == "checkout":
             goal_item = "收銀台"
         elif s.phase == "exit":
@@ -530,17 +603,10 @@ def _build_route_context(s, loc_result, detections=None, ocr_results=None) -> tu
         elif current_leg.purpose in ("checkout", "exit"):
             goal_item = "收銀台" if current_leg.purpose == "checkout" else "出口"
         else:
-            goal_item = current_leg.purpose
-        if goal_item == "target" and s.goal_objects:
-            for g in s.goal_objects:
-                if ref_map and current_leg.to_node in ref_map.photos:
-                    for obj in ref_map.photos[current_leg.to_node].objects:
-                        if (obj.ocr_text and g.lower() in obj.ocr_text.lower()) or \
-                           g.lower() in obj.label.lower():
-                            goal_item = g
-                            break
-                    if goal_item != "target":
-                        break
+            # Use the user's original goal text (e.g., "泡麵") not English decomposed labels
+            goal_item = s.goal.split(",")[0].strip() if s.goal else current_leg.purpose
+            import re as _re_goal
+            goal_item = _re_goal.sub(r'\s*x\d+\s*$', '', goal_item).strip() or goal_item
 
         # --- Priority 1: check if goal is visible in the user's photo ---
         goal_kws = [goal_item] + (s.goal_objects or [])
@@ -608,15 +674,48 @@ def _build_route_context(s, loc_result, detections=None, ocr_results=None) -> tu
             )
 
             if rel_instructions:
-                first = rel_instructions[0]
-                dist_text = f"，約 {first.distance_m:.0f} 公尺" if first.distance_m > 0 else ""
-                if s.phase in ("checkout", "exit"):
-                    next_instruction = f"{first.text_zh}{dist_text}，前往{target_area}"
-                else:
-                    next_instruction = f"{first.text_zh}{dist_text}，前往{target_area}找「{goal_item}」"
+                # Build condensed multi-step instruction:
+                # merge consecutive 直走, mention only useful landmarks at turns
+                _steps = []
+                _straight_count = 0
+                _straight_areas = []
+                for ri in rel_instructions:
+                    area = _node_area_name(ri.to_node, ref_map)
+                    is_useful_area = ("走道" in area or "結帳" in area or "出口" in area
+                                      or "收銀" in area)
+                    if ri.text_zh == "直走":
+                        _straight_count += 1
+                        if is_useful_area:
+                            _straight_areas.append(area.strip("「」"))
+                    else:
+                        if _straight_count > 0:
+                            if _straight_areas:
+                                _steps.append(f"直走經過{'、'.join(_straight_areas[-2:])}")
+                            else:
+                                _steps.append("直走")
+                            _straight_count = 0
+                            _straight_areas = []
+                        if is_useful_area:
+                            # Simplify area for turn instructions: strip brackets, keep first term
+                            _clean = area.replace("「", "").replace("」", "").split("附近")[0].strip()
+                            _steps.append(f"{ri.text_zh}往{_clean}")
+                        else:
+                            _steps.append(ri.text_zh)
+                if _straight_count > 0:
+                    if _straight_areas:
+                        _steps.append(f"直走經過{'、'.join(_straight_areas[-2:])}")
+                    else:
+                        _steps.append("直走")
 
+                steps_text = "→".join(_steps[:6])
+                if s.phase in ("checkout", "exit"):
+                    next_instruction = f"{steps_text}，到{target_area}"
+                else:
+                    next_instruction = f"{steps_text}，到{target_area}找「{goal_item}」"
+
+                # Also build path_steps for VLM context
                 path_steps = []
-                for ri in rel_instructions[:3]:
+                for ri in rel_instructions[:5]:
                     step_area = _node_area_name(ri.to_node, ref_map)
                     path_steps.append(f"{ri.text_zh}往{step_area}方向走")
 
@@ -661,8 +760,9 @@ def _build_route_context(s, loc_result, detections=None, ocr_results=None) -> tu
                 f"{phase_status}"
             )
 
-        # Fallback next_instruction when heading is unreliable but route exists
-        if not next_instruction:
+        # Fallback next_instruction: only when localized (we know where the user is)
+        # Without localization, the fallback is meaningless — let VLM guide by photo
+        if not next_instruction and localized:
             if s.phase in ("checkout", "exit"):
                 next_instruction = f"前往{target_area}"
             else:
@@ -1059,15 +1159,9 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                     log.warning("🔴 [session %s] NO goal items matched any Neo4j node — route planning SKIPPED", s.id)
                 if target_nodes:
                     log.info("🟢 [session %s] %d goal items matched nodes: %s", s.id, len(target_nodes), target_nodes)
-                    # Build networkx graph from Neo4j walkway edges
-                    import networkx as _nx
+                    # Build networkx graph from Neo4j walkway edges + proximity
                     from server.path_planner import plan_route as _plan_route
-                    neo4j_graph = _nx.Graph()
-                    for nid in ref_map.photos:
-                        neo4j_graph.add_node(nid)
-                    for edge in ref_map.walkway_edges:
-                        w = edge.get("distance_m", 1.0) or 1.0
-                        neo4j_graph.add_edge(edge["from"], edge["to"], weight=w)
+                    neo4j_graph = _build_nav_graph(ref_map)
                     if neo4j_graph.number_of_nodes() > 0:
                         # Use node 0 as default start; if missing, use smallest nid
                         start_nid = 0 if 0 in neo4j_graph else min(neo4j_graph.nodes())

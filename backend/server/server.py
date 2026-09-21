@@ -91,7 +91,7 @@ from server.vlm import (
     ask_about_image as _vlm_ask_about_image,
 )
 from server.neo4j_client import get_neo4j
-from server.visual_localization import localize as _localize_photo
+from server.visual_localization import localize as _localize_photo, vlm_rerank as _vlm_rerank
 from server.heading import (
     convert_leg_to_relative,
     relative_direction_text,
@@ -197,6 +197,102 @@ def _node_area_name(nid: int, ref_map) -> str:
     return "未知區域"
 
 
+_BASE_SLOT_ORDER = ["front", "right", "back", "left"]
+_SLOT_ZH = {"front": "前方", "right": "右手邊", "back": "後方", "left": "左手邊"}
+
+
+def _infer_target_direction(matched_node, target_nid, ref_map,
+                            user_slot: str | None,
+                            goal_keywords: list[str] | None = None):
+    """Infer which direction the target is from the current node.
+
+    Strategy: check which directional reference photos at the current node
+    contain objects matching the goal keywords or the target node's objects.
+    Uses substring matching for robustness (e.g. "寵物食品包" matches "寵物").
+
+    Returns (direction_zh, slot_name, landmarks_in_direction) or (None, None, []).
+    """
+    if not matched_node or not matched_node.directional_photos or not ref_map:
+        return None, None, []
+
+    target_node = ref_map.photos.get(target_nid)
+
+    # Build search keywords: goal keywords + target node's distinctive objects
+    keywords = set()
+    if goal_keywords:
+        for kw in goal_keywords:
+            keywords.add(kw.lower().strip())
+    if target_node:
+        for obj in target_node.objects:
+            if obj.role in ("landmark", "sign", "equipment"):
+                keywords.add(obj.label.lower().strip())
+                if obj.ocr_text:
+                    keywords.add(obj.ocr_text.lower().strip())
+
+    if not keywords:
+        return None, None, []
+
+    def _keyword_score(text: str) -> float:
+        text_lower = text.lower()
+        score = 0.0
+        for kw in keywords:
+            if kw in text_lower or text_lower in kw:
+                score += 1.0
+            elif len(kw) >= 2 and text_lower[:2] == kw[:2] and _re.search(r'[一-鿿]', kw[:2]):
+                score += 0.6
+        return score
+
+    # Score each base slot
+    slot_scores: dict[str, float] = {}
+    slot_landmarks: dict[str, list[str]] = {}
+    for dp in matched_node.directional_photos:
+        base_slot = dp.slot
+        if "_" in base_slot:
+            base_slot = base_slot.split("_", 1)[1]
+        if base_slot not in _BASE_SLOT_ORDER:
+            continue
+
+        score = 0.0
+        landmarks = []
+        for obj in dp.objects:
+            obj_text = obj.label + " " + (obj.ocr_text or "")
+            s = _keyword_score(obj_text)
+            if s > 0:
+                score += s
+                name = obj.ocr_text or obj.label
+                if name and name not in landmarks:
+                    landmarks.append(name)
+
+        slot_scores[base_slot] = slot_scores.get(base_slot, 0) + score
+        if base_slot not in slot_landmarks:
+            slot_landmarks[base_slot] = []
+        slot_landmarks[base_slot].extend(landmarks)
+
+    if not slot_scores or max(slot_scores.values()) == 0:
+        return None, None, []
+
+    target_slot = max(slot_scores, key=slot_scores.get)
+    landmarks = slot_landmarks.get(target_slot, [])
+
+    # Compute relative direction from user's facing to target_slot
+    if not user_slot:
+        return _SLOT_ZH.get(target_slot), target_slot, landmarks
+
+    user_base = user_slot
+    if "_" in user_base:
+        user_base = user_base.split("_", 1)[1]
+
+    if user_base not in _BASE_SLOT_ORDER or target_slot not in _BASE_SLOT_ORDER:
+        return _SLOT_ZH.get(target_slot), target_slot, landmarks
+
+    user_idx = _BASE_SLOT_ORDER.index(user_base)
+    target_idx = _BASE_SLOT_ORDER.index(target_slot)
+    diff = (target_idx - user_idx) % 4
+
+    rel_zh = {0: "正前方", 1: "右手邊", 2: "後方", 3: "左手邊"}
+    return rel_zh.get(diff), target_slot, landmarks
+
+
 def _build_route_context(s, loc_result) -> tuple[str | None, str | None]:
     """Build a route context string for the VLM prompt + a one-line next instruction.
 
@@ -251,7 +347,28 @@ def _build_route_context(s, loc_result) -> tuple[str | None, str | None]:
                     if goal_item != "target":
                         break
 
-        if ref_map and loc_result.matched_heading is not None:
+        # Infer direction to target using directional reference photos
+        matched_node = ref_map.photos.get(loc_result.matched_nid) if ref_map else None
+        goal_kws = [goal_item] + (s.goal_objects or [])
+        dir_zh, dir_slot, dir_landmarks = _infer_target_direction(
+            matched_node, current_leg.to_node, ref_map, loc_result.matched_slot,
+            goal_keywords=goal_kws)
+
+        direction_hint = ""
+        if dir_zh:
+            lm_text = ""
+            if dir_landmarks:
+                lm_text = f"往那個方向看，你應該能看到：{'、'.join(dir_landmarks[:4])}\n"
+            direction_hint = (
+                f"根據地圖資料，「{goal_item}」在使用者的「{dir_zh}」方向。\n"
+                f"{lm_text}"
+            )
+
+        heading_reliable = (ref_map
+                            and loc_result.matched_heading is not None
+                            and loc_result.heading_confidence > 0.3)
+
+        if heading_reliable:
             node_positions = {
                 nid: (node.pdr_x, node.pdr_y)
                 for nid, node in ref_map.photos.items()
@@ -268,7 +385,6 @@ def _build_route_context(s, loc_result) -> tuple[str | None, str | None]:
                 dist_text = f"，約 {first.distance_m:.0f} 公尺" if first.distance_m > 0 else ""
                 next_instruction = f"{first.text_zh}{dist_text}，前往{target_area}找「{goal_item}」"
 
-                # Build path description with area names instead of node IDs
                 path_steps = []
                 for ri in rel_instructions[:3]:
                     step_area = _node_area_name(ri.to_node, ref_map)
@@ -277,6 +393,7 @@ def _build_route_context(s, loc_result) -> tuple[str | None, str | None]:
                 route_desc = (
                     f"目前要找的商品：「{goal_item}」\n"
                     f"該商品位於：{target_area}\n"
+                    f"{direction_hint}"
                     f"建議走法：{'；'.join(path_steps)}\n"
                     f"還有 {len(remaining)} 項商品待尋找"
                 )
@@ -284,12 +401,14 @@ def _build_route_context(s, loc_result) -> tuple[str | None, str | None]:
                 route_desc = (
                     f"目前要找的商品：「{goal_item}」\n"
                     f"該商品位於：{target_area}\n"
+                    f"{direction_hint}"
                     f"還有 {len(remaining)} 項商品待尋找"
                 )
         else:
             route_desc = (
                 f"目前要找的商品：「{goal_item}」\n"
                 f"該商品位於：{target_area}\n"
+                f"{direction_hint}"
                 f"還有 {len(remaining)} 項商品待尋找"
             )
     else:
@@ -330,12 +449,50 @@ def _current_goal_objects(s) -> list[str]:
     return s.goal_objects[:1]
 
 
-def _run_early_localization(s, session_id, detected_labels, ocr_texts):
+def _build_localization_items(detections, ocr_results, img_w, img_h):
+    """Build detected_items (with normalized [0,1] bboxes) for grid matching."""
+    items = []
+    for d in detections:
+        box = getattr(d, 'box', None) or getattr(d, 'bbox', None)
+        if box and len(box) == 4 and not isinstance(box[0], (list, tuple)):
+            norm_box = [box[0] / img_w, box[1] / img_h,
+                        box[2] / img_w, box[3] / img_h]
+            items.append({"label": d.label, "box": norm_box})
+        else:
+            items.append({"label": d.label, "box": None})
+    for r in ocr_results:
+        bbox = getattr(r, 'bbox', None)
+        text = getattr(r, 'text', "")
+        if not text:
+            continue
+        if bbox:
+            if isinstance(bbox[0], (list, tuple)):
+                xs = [p[0] for p in bbox]
+                ys = [p[1] for p in bbox]
+                norm_box = [min(xs) / img_w, min(ys) / img_h,
+                            max(xs) / img_w, max(ys) / img_h]
+            elif len(bbox) == 4:
+                norm_box = [bbox[0] / img_w, bbox[1] / img_h,
+                            bbox[2] / img_w, bbox[3] / img_h]
+            else:
+                norm_box = None
+            items.append({"label": text, "box": norm_box})
+        else:
+            items.append({"label": text, "box": None})
+    return items
+
+
+def _run_early_localization(s, session_id, detected_labels, ocr_texts,
+                            detected_items=None, image_path=None):
     """Run Neo4j localization early (before VLM decide) so route context is available.
 
     Returns the LocalizationResult, or None if localization is skipped/failed.
     Also stores heading on the session.
     """
+    from server.config import (
+        RERANK_ENABLED, REF_PHOTO_ROOT,
+        OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_BACKUP_KEY,
+    )
     if not s.place:
         return None
     neo4j = get_neo4j()
@@ -348,10 +505,38 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts):
             neo4j=neo4j,
             hint_nid=getattr(s, "last_corrected_nid", None),
             place=s.place,
+            detected_items=detected_items,
         )
+
+        if (RERANK_ENABLED and image_path and REF_PHOTO_ROOT
+                and loc_result.matched_nid is not None
+                and loc_result.top_candidates):
+            top = loc_result.top_candidates
+            ref_map = neo4j.load_reference_map(s.place)
+            log.info("[session %s] rerank triggered (always-on): WP%d %.3f",
+                     session_id, top[0][0], top[0][1])
+            reranked = _vlm_rerank(
+                query_image_path=image_path,
+                candidates=top,
+                ref_map=ref_map,
+                ref_photo_root=REF_PHOTO_ROOT,
+                api_key=OPENAI_API_KEY,
+                api_base_url=OPENAI_BASE_URL,
+                api_model=OPENAI_MODEL,
+                backup_key=OPENAI_BACKUP_KEY,
+            )
+            if reranked and reranked[0][0] != loc_result.matched_nid:
+                new_nid = reranked[0][0]
+                new_ref = ref_map.photos.get(new_nid)
+                log.info("[session %s] rerank changed: WP%d → WP%d",
+                         session_id, loc_result.matched_nid, new_nid)
+                loc_result.matched_nid = new_nid
+                loc_result.ref_node = new_ref
+                loc_result.method = "grid+rerank"
+                loc_result.reasoning = reranked[0][2]
+
         if loc_result.matched_nid is not None:
             s.last_corrected_nid = loc_result.matched_nid
-            # Store heading on session for route-relative directions
             if loc_result.matched_heading is not None:
                 s.user_heading = loc_result.matched_heading
                 s.heading_slot = loc_result.matched_slot
@@ -658,7 +843,10 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
                  session_id, nid, detected_labels or "(none)", ocr_text_summary[:80])
 
         # ── Early localization for route-aware VLM prompt ──────────────
-        _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts)
+        _loc_items = _build_localization_items(detections, ocr_results or [], img_w, img_h)
+        _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
+                                             detected_items=_loc_items,
+                                             image_path=str(photo_path))
         _route_ctx, _next_instr = _build_route_context(s, _early_loc)
 
         t_vlm_start = time.time()
@@ -746,7 +934,10 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         ocr_texts = [r.text for r in ocr_results]
 
         # ── Localize with detection labels + OCR BEFORE decide ────────
-        _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts)
+        _loc_items = _build_localization_items(detections, ocr_results, img_w, img_h)
+        _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
+                                             detected_items=_loc_items,
+                                             image_path=str(photo_path))
         _route_ctx, _next_instr = _build_route_context(s, _early_loc)
 
         # ── Stage 2: VLM decide (with map-aware route context) ────────

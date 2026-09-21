@@ -122,6 +122,12 @@ OCR_LANGUAGES = os.environ.get("OCR_LANGUAGES", "en,ch_tra").split(",")
 OCR_MIN_CONFIDENCE = float(os.environ.get("OCR_MIN_CONFIDENCE", "0.3"))
 OCR_MAX_RESULTS = int(os.environ.get("OCR_MAX_RESULTS", "15"))
 
+# VLM Re-ranking (optional, adds ~10s per photo for improved accuracy)
+RERANK_ENABLED = os.environ.get("RERANK_ENABLED", "0") != "0"
+REF_PHOTO_ROOT = os.environ.get("REF_PHOTO_ROOT", "")
+OPENAI_BACKUP_KEY = os.environ.get("OPENAI_BACKUP_KEY", "")
+RERANK_GAP_THRESHOLD = float(os.environ.get("RERANK_GAP_THRESHOLD", "0.05"))
+
 # Timeouts
 VLM_TIMEOUT_S = int(os.environ.get("VLM_TIMEOUT_S", "120"))
 GOAL_DECOMPOSE_TIMEOUT_S = 30

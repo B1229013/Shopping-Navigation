@@ -201,23 +201,63 @@ _BASE_SLOT_ORDER = ["front", "right", "back", "left"]
 _SLOT_ZH = {"front": "前方", "right": "右手邊", "back": "後方", "left": "左手邊"}
 
 
+def _detect_goal_in_photo(detections, goal_keywords, img_w=1, img_h=1):
+    """Check if goal-related objects are visible in the user's photo.
+
+    Uses bounding box position to determine left/center/right.
+    Returns (direction_zh, object_names) or (None, []).
+    """
+    if not detections or not goal_keywords:
+        return None, []
+
+    keywords = [kw.lower().strip() for kw in goal_keywords if kw]
+    matches = []
+    for det in detections:
+        label = (det.label if isinstance(det.label, str) else str(det.label)).lower()
+        box = det.box if hasattr(det, 'box') else det.get('box')
+        if not box or len(box) < 4:
+            continue
+        for kw in keywords:
+            if kw in label or label in kw:
+                cx = (box[0] + box[2]) / 2
+                matches.append((cx, det.label if isinstance(det.label, str) else str(det.label)))
+                break
+            elif len(kw) >= 2 and label[:2] == kw[:2] and _re.search(r'[一-鿿]', kw[:2]):
+                cx = (box[0] + box[2]) / 2
+                matches.append((cx, det.label if isinstance(det.label, str) else str(det.label)))
+                break
+
+    if not matches:
+        return None, []
+
+    avg_cx = sum(cx for cx, _ in matches) / len(matches)
+    names = list(dict.fromkeys(name for _, name in matches))
+
+    if avg_cx < 0.35:
+        return "左手邊", names
+    elif avg_cx > 0.65:
+        return "右手邊", names
+    else:
+        return "正前方", names
+
+
 def _infer_target_direction(matched_node, target_nid, ref_map,
                             user_slot: str | None,
                             goal_keywords: list[str] | None = None):
     """Infer which direction the target is from the current node.
 
-    Strategy: check which directional reference photos at the current node
-    contain objects matching the goal keywords or the target node's objects.
-    Uses substring matching for robustness (e.g. "寵物食品包" matches "寵物").
+    Strategy:
+    1. Check current node's directional photos for goal keyword matches.
+    2. If no match, check 1-hop neighbor nodes' directional photos.
+    Uses substring + CJK prefix matching for robustness.
 
     Returns (direction_zh, slot_name, landmarks_in_direction) or (None, None, []).
     """
-    if not matched_node or not matched_node.directional_photos or not ref_map:
+    if not ref_map:
         return None, None, []
 
     target_node = ref_map.photos.get(target_nid)
 
-    # Build search keywords: goal keywords + target node's distinctive objects
     keywords = set()
     if goal_keywords:
         for kw in goal_keywords:
@@ -242,39 +282,66 @@ def _infer_target_direction(matched_node, target_nid, ref_map,
                 score += 0.6
         return score
 
-    # Score each base slot
-    slot_scores: dict[str, float] = {}
-    slot_landmarks: dict[str, list[str]] = {}
-    for dp in matched_node.directional_photos:
-        base_slot = dp.slot
-        if "_" in base_slot:
-            base_slot = base_slot.split("_", 1)[1]
-        if base_slot not in _BASE_SLOT_ORDER:
-            continue
+    def _score_node_slots(node):
+        slot_scores = {}
+        slot_landmarks = {}
+        if not node or not node.directional_photos:
+            return slot_scores, slot_landmarks
+        for dp in node.directional_photos:
+            base_slot = dp.slot
+            if "_" in base_slot:
+                base_slot = base_slot.split("_", 1)[1]
+            if base_slot not in _BASE_SLOT_ORDER:
+                continue
+            score = 0.0
+            landmarks = []
+            for obj in dp.objects:
+                obj_text = obj.label + " " + (obj.ocr_text or "")
+                s = _keyword_score(obj_text)
+                if s > 0:
+                    score += s
+                    name = obj.ocr_text or obj.label
+                    if name and name not in landmarks:
+                        landmarks.append(name)
+            slot_scores[base_slot] = slot_scores.get(base_slot, 0) + score
+            if base_slot not in slot_landmarks:
+                slot_landmarks[base_slot] = []
+            slot_landmarks[base_slot].extend(landmarks)
+        return slot_scores, slot_landmarks
 
-        score = 0.0
-        landmarks = []
-        for obj in dp.objects:
-            obj_text = obj.label + " " + (obj.ocr_text or "")
-            s = _keyword_score(obj_text)
-            if s > 0:
-                score += s
-                name = obj.ocr_text or obj.label
-                if name and name not in landmarks:
-                    landmarks.append(name)
+    # 1. Check current node
+    slot_scores, slot_landmarks = _score_node_slots(matched_node)
 
-        slot_scores[base_slot] = slot_scores.get(base_slot, 0) + score
-        if base_slot not in slot_landmarks:
-            slot_landmarks[base_slot] = []
-        slot_landmarks[base_slot].extend(landmarks)
+    # 2. If no match on current node, check 1-hop neighbors
+    if (not slot_scores or max(slot_scores.values(), default=0) == 0) and matched_node:
+        current_nid = None
+        for nid, node in ref_map.photos.items():
+            if node is matched_node:
+                current_nid = nid
+                break
+        if current_nid is not None and hasattr(ref_map, 'walkway_edges'):
+            for edge in ref_map.walkway_edges:
+                neighbor_nid = None
+                if edge.get('from') == current_nid:
+                    neighbor_nid = edge['to']
+                elif edge.get('to') == current_nid:
+                    neighbor_nid = edge['from']
+                if neighbor_nid and neighbor_nid in ref_map.photos:
+                    nb_scores, nb_landmarks = _score_node_slots(
+                        ref_map.photos[neighbor_nid])
+                    for sl, sc in nb_scores.items():
+                        slot_scores[sl] = slot_scores.get(sl, 0) + sc * 0.7
+                    for sl, lms in nb_landmarks.items():
+                        if sl not in slot_landmarks:
+                            slot_landmarks[sl] = []
+                        slot_landmarks[sl].extend(lms)
 
-    if not slot_scores or max(slot_scores.values()) == 0:
+    if not slot_scores or max(slot_scores.values(), default=0) == 0:
         return None, None, []
 
     target_slot = max(slot_scores, key=slot_scores.get)
-    landmarks = slot_landmarks.get(target_slot, [])
+    landmarks = list(dict.fromkeys(slot_landmarks.get(target_slot, [])))
 
-    # Compute relative direction from user's facing to target_slot
     if not user_slot:
         return _SLOT_ZH.get(target_slot), target_slot, landmarks
 
@@ -293,7 +360,7 @@ def _infer_target_direction(matched_node, target_nid, ref_map,
     return rel_zh.get(diff), target_slot, landmarks
 
 
-def _build_route_context(s, loc_result) -> tuple[str | None, str | None]:
+def _build_route_context(s, loc_result, detections=None) -> tuple[str | None, str | None]:
     """Build a route context string for the VLM prompt + a one-line next instruction.
 
     Returns (route_context_block, next_instruction).
@@ -347,22 +414,33 @@ def _build_route_context(s, loc_result) -> tuple[str | None, str | None]:
                     if goal_item != "target":
                         break
 
-        # Infer direction to target using directional reference photos
-        matched_node = ref_map.photos.get(loc_result.matched_nid) if ref_map else None
+        # --- Priority 1: check if goal is visible in the user's photo ---
         goal_kws = [goal_item] + (s.goal_objects or [])
-        dir_zh, dir_slot, dir_landmarks = _infer_target_direction(
-            matched_node, current_leg.to_node, ref_map, loc_result.matched_slot,
-            goal_keywords=goal_kws)
+        photo_dir_zh, photo_obj_names = _detect_goal_in_photo(
+            detections, goal_kws)
 
         direction_hint = ""
-        if dir_zh:
-            lm_text = ""
-            if dir_landmarks:
-                lm_text = f"往那個方向看，你應該能看到：{'、'.join(dir_landmarks[:4])}\n"
+        if photo_dir_zh:
+            obj_text = "、".join(photo_obj_names[:3])
             direction_hint = (
-                f"根據地圖資料，「{goal_item}」在使用者的「{dir_zh}」方向。\n"
-                f"{lm_text}"
+                f"重要：使用者的照片中已經可以看到目標相關物件（{obj_text}），"
+                f"位於畫面的「{photo_dir_zh}」。請直接引導使用者往那個方向走。\n"
             )
+        else:
+            # --- Priority 2: infer from directional reference photos ---
+            matched_node = ref_map.photos.get(loc_result.matched_nid) if ref_map else None
+            dir_zh, dir_slot, dir_landmarks = _infer_target_direction(
+                matched_node, current_leg.to_node, ref_map, loc_result.matched_slot,
+                goal_keywords=goal_kws)
+
+            if dir_zh:
+                lm_text = ""
+                if dir_landmarks:
+                    lm_text = f"往那個方向看，你應該能看到：{'、'.join(dir_landmarks[:4])}\n"
+                direction_hint = (
+                    f"根據地圖資料，「{goal_item}」在使用者的「{dir_zh}」方向。\n"
+                    f"{lm_text}"
+                )
 
         heading_reliable = (ref_map
                             and loc_result.matched_heading is not None
@@ -847,7 +925,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
                                              image_path=str(photo_path))
-        _route_ctx, _next_instr = _build_route_context(s, _early_loc)
+        _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections)
 
         t_vlm_start = time.time()
         _active_goals = _current_goal_objects(s)
@@ -938,7 +1016,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...)) -> TurnRe
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
                                              image_path=str(photo_path))
-        _route_ctx, _next_instr = _build_route_context(s, _early_loc)
+        _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections)
 
         # ── Stage 2: VLM decide (with map-aware route context) ────────
         ocr_text_summary = scene.format_ocr(ocr_results, img_w, img_h) if ocr_results else "(no text detected)"

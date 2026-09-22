@@ -84,12 +84,29 @@ def test_rerank_candidates_add_neighbourhood_of_last_fix():
     merged = vl.rerank_candidates(top, m, hint_nid=10)
 
     nids = [n for n, _, _ in merged]
-    assert nids[:5] == [1, 2, 3, 4, 5]
+    # Word candidates lead, but slots are RESERVED for the neighbourhood: where the
+    # user just stood beats the 5th-best word guess.
+    assert nids[0] == 1
     assert 10 in nids and 11 in nids and 9 in nids          # the fix itself + both edge directions
     assert len(nids) <= vl.RERANK_MAX_NODES
     assert len(set(nids)) == len(nids)
     assert vl.rerank_candidates(top, m, hint_nid=None) == top
     assert vl.rerank_candidates([(10, 0.5, "x")], m, hint_nid=10)[0] == (10, 0.5, "x")   # no duplicate
+
+
+def test_word_candidates_fill_the_slots_no_neighbour_needs():
+    """With a hint that has no neighbours, the reserved slots go back to the word
+    matcher rather than being wasted."""
+    m = RefMap(place="t")
+    for nid in range(1, 12):
+        m.photos[nid] = RefPhotoNode(nid=nid, photo_file="", pdr_x=0, pdr_y=0, heading_deg=0, session="s",
+                                     total_steps=0, total_distance_m=0)
+    top = [(i, 1.0 / i, "w") for i in range(1, 9)]
+
+    nids = [n for n, _, _ in vl.rerank_candidates(top, m, hint_nid=10)]
+
+    assert len(nids) == vl.RERANK_MAX_NODES
+    assert nids[0] == 1 and 10 in nids                      # hint kept, rest are word candidates
 
 
 def test_neighbourhood_prefers_closer_hops_when_capped():
@@ -105,6 +122,7 @@ def test_neighbourhood_prefers_closer_hops_when_capped():
 
     assert len(nids) == vl.RERANK_MAX_NODES
     assert 20 in nids and 21 in nids and 22 in nids     # the fix and its 1-hop ring survive the cap
+    assert 23 not in nids and 26 not in nids            # 2-hop ring yields to the word candidates
 
 
 def test_server_hands_reranker_the_neighbourhood_of_last_fix(caplog):
@@ -144,3 +162,34 @@ def test_server_hands_reranker_the_neighbourhood_of_last_fix(caplog):
     assert seen["cands"][:3] == [1, 2, 3]
     assert 40 in seen["cands"] and 41 in seen["cands"]
     assert any("⏱ rerank:" in r.message for r in caplog.records)   # duration is logged
+
+
+def test_rerank_payload_is_small_enough_for_a_phone_hotspot(tmp_path):
+    """Field runs tether the Mac to the phone's hotspot, so the re-rank upload
+    competes with the phone's own photo upload. At 8 nodes × 4 views × 512 px the
+    request was ~1.9 MB and the proxy connection timed out (session a8a95d4d).
+    Keep reference views small and the node count modest."""
+    from server import visual_localization as vl
+
+    assert vl.RERANK_MAX_NODES <= 6
+    assert vl.REF_PHOTO_MAX_PX <= 384
+
+    m = RefMap(place="t")
+    for nid in (1, 2):
+        m.photos[nid] = _node_with_files(nid, tmp_path)
+    _jpg(tmp_path / "q.jpg")
+    sizes = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        body = str(json)
+        sizes.append(len(body))
+        return _post_returning('{"ranking": [1, 2], "reason": "r"}')
+
+    with patch.object(vl.requests, "post", side_effect=fake_post):
+        vl.vlm_rerank(str(tmp_path / "q.jpg"), [(1, 0.5, "a"), (2, 0.4, "b")], m,
+                      ref_photo_root=str(tmp_path), api_key="k", api_base_url="http://x",
+                      api_model="m")
+
+    # 8 tiny 8×8 JPEGs — the point is that reference views go through the shrinking
+    # encoder, so the per-view budget stays where the constant says.
+    assert sizes and sizes[0] > 0

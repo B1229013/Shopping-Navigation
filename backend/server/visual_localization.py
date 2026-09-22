@@ -552,8 +552,12 @@ RERANK_PROMPT = (
 )
 
 # How many nodes the re-ranker may compare in one call (each contributes up to
-# 4 directional photos). Above this the call gets slow and the VLM sloppy.
-RERANK_MAX_NODES = 8
+# 4 directional photos). Field runs tether the Mac to the phone's hotspot, so this
+# upload competes with the phone's own photo upload: 8 nodes × 4 views × 512 px was
+# ~1.9 MB and the proxy connection timed out. 6 × 4 × 384 px is ~0.9 MB.
+RERANK_MAX_NODES = 6
+REF_PHOTO_MAX_PX = 384
+RERANK_HINT_SLOTS = 3   # of those nodes, how many are held for the previous fix and its ring
 
 
 def neighbourhood_nids(ref_map: RefMap, nid: int, hops: int = 2) -> List[List[int]]:
@@ -587,7 +591,12 @@ def rerank_candidates(
     often leaves the true node out entirely."""
     if hint_nid is None or hint_nid not in ref_map.photos:
         return list(top)
-    merged = list(top)
+
+    # Reserve slots for the neighbourhood: where the user stood one photo ago is
+    # better evidence than the tail of a word-similarity ranking, and with a small
+    # cap the word candidates would otherwise crowd it out entirely.
+    keep = max(1, cap - RERANK_HINT_SLOTS)
+    merged = list(top[:keep])
     have = {c[0] for c in merged}
     for ring_i, ring in enumerate(neighbourhood_nids(ref_map, hint_nid)):
         for nid in ring:
@@ -596,6 +605,13 @@ def rerank_candidates(
             if nid not in have:
                 merged.append((nid, 0.0, f"near last fix WP{hint_nid} ({ring_i} hop)"))
                 have.add(nid)
+    # Few or no neighbours: give the spare slots back to the word matcher.
+    for cand in top[keep:]:
+        if len(merged) >= cap:
+            break
+        if cand[0] not in have:
+            merged.append(cand)
+            have.add(cand[0])
     return merged
 
 
@@ -681,12 +697,12 @@ def vlm_rerank(
         views: list[tuple[str, str]] = []
         for dp in ref_node.directional_photos:
             photo_path = _resolve_ref_photo(dp.photo_file, ref_photo_root)
-            b64 = _encode_photo_b64(photo_path) if photo_path else None
+            b64 = _encode_photo_b64(photo_path, max_size=REF_PHOTO_MAX_PX) if photo_path else None
             if b64:
                 views.append((dp.slot, b64))
         if not views:
             photo_path = _resolve_ref_photo(ref_node.photo_file, ref_photo_root)
-            b64 = _encode_photo_b64(photo_path) if photo_path else None
+            b64 = _encode_photo_b64(photo_path, max_size=REF_PHOTO_MAX_PX) if photo_path else None
             if b64:
                 views.append(("front", b64))
         if views:

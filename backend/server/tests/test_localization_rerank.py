@@ -59,3 +59,25 @@ def test_rerank_switching_node_recomputes_heading_for_new_node():
     assert out.matched_slot == "front"
     assert out.matched_heading == 0.0
     assert s.heading_slot == "front"
+
+
+def test_top_candidates_include_hint_boosted_winner():
+    """The proximity bonus can lift a node from outside the raw top-5 into first
+    place. The re-ranker must then be shown that node — otherwise the system's
+    own pick is the one candidate the visual comparison never sees."""
+    from server import visual_localization as vl
+
+    m = RefMap(place="test")
+    for nid in range(1, 8):
+        m.photos[nid] = _node(nid, {"front": ["shelf"]})
+    m.photos[7].neighbor_nids = [6]          # node 6 is next to the previous fix (7)
+
+    raw = [(1, 0.30, "a"), (2, 0.29, "b"), (3, 0.28, "c"), (4, 0.27, "d"),
+           (5, 0.26, "e"), (6, 0.25, "f")]  # node 6 is 6th → outside the raw top-5
+    with patch.object(vl, "match_by_objects", return_value=raw):
+        out = vl.localize(["shelf"], [], _FakeNeo4j(m), place="test", hint_nid=7)
+
+    assert out.matched_nid == 6                       # 0.25 + 0.08 proximity = 0.33 wins
+    cand_nids = [c[0] for c in out.top_candidates]
+    assert cand_nids[0] == out.matched_nid            # the pick leads the re-rank list
+    assert len(cand_nids) == 5

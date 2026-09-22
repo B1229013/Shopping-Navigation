@@ -501,6 +501,9 @@ def localize(
         best_nid, best_score, best_reason = boosted[0]
         runner_nid = boosted[1][0] if len(boosted) > 1 else None
         runner_score = boosted[1][1] if len(boosted) > 1 else 0.0
+        # The re-ranker must see the node we actually picked, so hand it the
+        # proximity-boosted ordering rather than the raw one.
+        candidates = boosted
 
     confidence = min(best_score / 0.6, 1.0)
 

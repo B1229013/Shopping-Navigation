@@ -81,3 +81,25 @@ def test_top_candidates_include_hint_boosted_winner():
     cand_nids = [c[0] for c in out.top_candidates]
     assert cand_nids[0] == out.matched_nid            # the pick leads the re-rank list
     assert len(cand_nids) == 5
+
+
+def test_ref_photo_coverage_counts_resolvable_files(tmp_path):
+    """Startup check: how many of the map's reference photos exist on disk under
+    REF_PHOTO_ROOT — so a wrong folder is visible in the log, not silently a no-op."""
+    from server.visual_localization import ref_photo_coverage
+
+    (tmp_path / "01").mkdir()
+    (tmp_path / "01" / "a_front.jpg").write_bytes(b"x")
+    m = RefMap(place="test")
+    m.photos[1] = _node(1, {"front": ["shelf"]})
+    m.photos[1].photo_file = "set01/a_front.jpg"
+    m.photos[1].directional_photos[0].photo_file = "set01/a_front.jpg"
+    m.photos[2] = _node(2, {"front": ["shelf"]})
+    m.photos[2].photo_file = "set01/missing.jpg"
+    m.photos[2].directional_photos[0].photo_file = "set01/missing.jpg"
+
+    found, total, nodes_ok = ref_photo_coverage(m, str(tmp_path))
+
+    assert (found, total) == (1, 2)
+    assert nodes_ok == 1
+    assert ref_photo_coverage(m, "") == (0, 2, 0)

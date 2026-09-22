@@ -578,6 +578,21 @@ def _resolve_ref_photo(neo4j_path: str, ref_photo_root: str) -> Optional[str]:
     return None
 
 
+def ref_photo_coverage(ref_map: RefMap, ref_photo_root: str) -> tuple[int, int, int]:
+    """(photo files found on disk, photo files referenced by the map, nodes with
+    at least one file). Lets startup report whether REF_PHOTO_ROOT really holds
+    this map's photos instead of the re-ranker silently skipping every call."""
+    found = total = nodes_ok = 0
+    for node in ref_map.photos.values():
+        files = {node.photo_file, *(dp.photo_file for dp in node.directional_photos)}
+        files.discard("")
+        node_hits = sum(1 for f in files if _resolve_ref_photo(f, ref_photo_root))
+        total += len(files)
+        found += node_hits
+        nodes_ok += 1 if node_hits else 0
+    return found, total, nodes_ok
+
+
 def vlm_rerank(
     query_image_path: str,
     candidates: List[tuple[int, float, str]],

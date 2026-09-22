@@ -1744,6 +1744,25 @@ def get_sensor_test_plot(test_id: str):
     return FileResponse(str(path), media_type="image/png")
 
 
+def _log_rerank_status(ref) -> None:
+    """One startup line saying whether photo-based re-ranking will actually run."""
+    from server.config import RERANK_ENABLED, REF_PHOTO_ROOT
+    from server.visual_localization import ref_photo_coverage
+    if not RERANK_ENABLED:
+        log.info("Visual re-ranker: OFF (set RERANK_ENABLED=1 and REF_PHOTO_ROOT to enable)")
+        return
+    if not REF_PHOTO_ROOT:
+        log.warning("Visual re-ranker: OFF — RERANK_ENABLED=1 but REF_PHOTO_ROOT is empty")
+        return
+    found, total, nodes_ok = ref_photo_coverage(ref, REF_PHOTO_ROOT)
+    if found == 0:
+        log.warning("Visual re-ranker: OFF — none of the %d reference photos found under %s",
+                    total, REF_PHOTO_ROOT)
+    else:
+        log.info("Visual re-ranker: ON — %d/%d reference photos found under %s (%d/%d nodes)",
+                 found, total, REF_PHOTO_ROOT, nodes_ok, len(ref.photos))
+
+
 @app.on_event("startup")
 def _check_vlm_and_warm():
     from server.config import OPENAI_API_KEY, OPENAI_MODEL
@@ -1764,6 +1783,7 @@ def _check_vlm_and_warm():
             ref = neo4j.load_reference_map()
             log.info("Neo4j reference map: %d photos, %d edges",
                      len(ref.photos), len(ref.walkway_edges))
+            _log_rerank_status(ref)
         except Exception as e:
             log.warning("Neo4j reference map load failed: %s", e)
     else:

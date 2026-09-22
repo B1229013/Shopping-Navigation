@@ -381,6 +381,10 @@ def _infer_target_direction(matched_node, target_nid, ref_map,
 
 
 PHONE_HEADING_CONFIDENCE = 0.85
+# Below this, the facing is only a guess from matching reference photos and must
+# not be used to name a side: left/right is route bearing minus facing, so a wrong
+# guess turns 左轉 into 右轉. The phone's own compass sits above it.
+TURN_DIRECTION_MIN_HEADING_CONFIDENCE = 0.6
 
 
 def _apply_phone_heading(s, loc_result, heading: Optional[float]) -> None:
@@ -556,9 +560,12 @@ def _build_route_context(s, loc_result, detections=None,
                     f"不要提供具體距離，也不要叫使用者自己去找標示。\n"
                 )
 
+        # user_heading=None makes the route read as if the user faces along the
+        # first edge: the distances stay, the left/right claims drop out.
         heading_reliable = (ref_map
                             and loc_result.matched_heading is not None
-                            and loc_result.heading_confidence > 0.3)
+                            and loc_result.heading_confidence
+                            >= TURN_DIRECTION_MIN_HEADING_CONFIDENCE)
         user_heading = loc_result.matched_heading if heading_reliable else None
 
         # Steps are computed on the hand-corrected editor map when one exists —

@@ -223,3 +223,44 @@ def test_detect_goal_in_photo_uses_aisle_sign_text():
                                          ocr_results=[_ocr("泡麵", 120, 240), _ocr("12", 250, 300)])
     assert d == "左手邊"
     assert names == ["泡麵"]
+
+
+def test_weak_heading_guess_does_not_produce_a_left_or_right_turn():
+    """Without the phone's compass the facing is guessed from reference photos and
+    swings wildly (104°→262°→104° across three photos of one aisle in session
+    8e4be73c). Left/right is route-bearing minus facing, so a ~180° error turns
+    左轉 into 右轉. When the guess is weak the instruction must stay direction-free
+    rather than confidently name the wrong side."""
+    ref_map = _two_aisle_map()
+    s = _session_with_route(ref_map, [10, 11, 12, 13])
+    s.goal = "牛奶"; s.target_objects = ["牛奶"]
+    loc = _localized_at(ref_map, 10, heading=180.0)
+    loc.heading_confidence = 0.35          # a guess, not the phone compass
+
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
+         patch("server.server._editor_graph_for", return_value=_editor_graph()):
+        _, next_instr = srv._build_route_context(s, loc, detections=[])
+
+    # A corner later in the route is intrinsic to the path and stays named; it is
+    # the FIRST step that depends on which way the user is pointed, so that one
+    # must not claim a side.
+    assert not next_instr.startswith("左轉") and not next_instr.startswith("右轉")
+    assert next_instr.startswith("直走")
+    assert "公尺" in next_instr             # distance is still trustworthy
+
+
+def test_phone_compass_heading_still_gives_a_turn():
+    """The phone's own compass is reliable, so it keeps producing left/right."""
+    from server.server import PHONE_HEADING_CONFIDENCE
+
+    ref_map = _two_aisle_map()
+    s = _session_with_route(ref_map, [10, 11, 12, 13])
+    s.goal = "牛奶"; s.target_objects = ["牛奶"]
+    loc = _localized_at(ref_map, 10, heading=180.0)
+    loc.heading_confidence = PHONE_HEADING_CONFIDENCE
+
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
+         patch("server.server._editor_graph_for", return_value=_editor_graph()):
+        _, next_instr = srv._build_route_context(s, loc, detections=[])
+
+    assert next_instr.startswith("直走約 6 公尺，然後左轉")

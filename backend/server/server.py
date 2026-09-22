@@ -17,7 +17,7 @@ logging.basicConfig(
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse, Response
 from PIL import Image, ImageOps
 
 from server import scene
@@ -1768,6 +1768,24 @@ def _log_rerank_status(ref) -> None:
     else:
         log.info("Visual re-ranker: ON — %d/%d reference photos found under %s (%d/%d nodes)",
                  found, total, REF_PHOTO_ROOT, nodes_ok, len(ref.photos))
+
+
+@app.get("/", response_class=PlainTextResponse)
+def root_status() -> str:
+    """Opening the server address in a browser shows what it is and whether it is
+    ready — a bare 404 there reads as "the server is broken" during field tests."""
+    from server.config import OPENAI_MODEL, RERANK_ENABLED
+    neo4j = get_neo4j()
+    lines = [
+        "APPNAV navigation server",
+        f"VLM model      : {OPENAI_MODEL}",
+        f"Neo4j          : {'connected' if neo4j else 'not configured'}",
+        f"Visual re-rank : {'on' if RERANK_ENABLED else 'off'}",
+        "",
+        "Checks : /health (JSON)   API docs : /docs",
+        "The iOS app talks to /session, /session/{id}/photo and /session/{id}/path.",
+    ]
+    return "\n".join(lines)
 
 
 @app.on_event("startup")

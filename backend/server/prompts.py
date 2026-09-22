@@ -106,5 +106,11 @@ Rules:
   "looks like it could hold" the goal is NOT the goal. When unsure, leave it out.
 - When the goal item IS visible, label it exactly as one of the goal names listed above (same language, same
   wording, e.g. "{goal_label_example}"), not a translation or paraphrase — downstream matching is literal.
+- Real packaging often words the goal differently from the goal list (優格 / 優酪 / 優酪乳, yogurt / yoghurt).
+  Judge by what the product actually is, and still label that detection "{goal_label_example}" — while
+  transcribing the package's own wording into ocr_texts.
+- When a shelf, fridge or rack in view is full of the goal category, read the product names off several
+  packages into ocr_texts. Price numbers alone are not enough — a wall of price tags with no product name
+  tells the system nothing about what is on the shelf.
 - Keep "label" and "text" values short.
 """

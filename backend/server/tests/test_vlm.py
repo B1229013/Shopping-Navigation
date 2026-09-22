@@ -187,3 +187,20 @@ def test_perceive_prompt_asks_for_goal_label_in_goal_language(tmp_path):
     text = post.call_args.kwargs["json"]["messages"][0]["content"][-1]["text"]
     assert "label it exactly as one of the goal names" in text
     assert "優格" in text
+
+
+def test_perceive_prompt_tells_model_to_read_product_names_and_label_the_goal():
+    """Session 8e4be73c photo 4 was a wall of 頂級優酪/希臘式優酪 tubs, yet perception
+    returned only "dairy shelves" plus the price numbers, so the arrival gate could
+    never fire. The prompt must ask for the product names on the packages and for a
+    detection labelled with the goal name, including when the packaging words it
+    differently (優酪 vs 優格)."""
+    from server.prompts import PERCEIVE_PROMPT
+
+    p = PERCEIVE_PROMPT.format(goal="找到：優格", goal_objects="優格, 希臘優格",
+                               goal_label_example="優格")
+
+    low = p.lower()
+    assert "優酪" in p                      # names the real-world wording mismatch
+    assert "price" in low and "product name" in low   # prices alone are not enough
+    assert p.count("優格") >= 2             # the goal is what the detection must be labelled

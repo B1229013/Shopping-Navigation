@@ -45,7 +45,7 @@ def test_rerank_switching_node_recomputes_heading_for_new_node():
     grid_result = LocalizationResult(
         matched_nid=1, confidence=0.9, method="grid", reasoning="", ref_node=ref_map.photos[1],
         matched_heading=90.0, matched_slot="right", heading_confidence=0.8,
-        top_candidates=[(1, 0.9), (2, 0.85)],
+        top_candidates=[(1, 0.9, "grid"), (2, 0.85, "grid")],
     )
     with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
          patch("server.server._localize_photo", return_value=grid_result), \

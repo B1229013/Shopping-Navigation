@@ -537,17 +537,66 @@ def localize(
 # ── VLM Re-ranking (optional) ────────────────────────────────────────────
 
 RERANK_PROMPT = (
-    "你正在進行超市室內定位。上面是一張使用者拍攝的「查詢照片」，"
-    "後面是 {n} 張編號 1~{n} 的「候選參考照片」。\n\n"
-    "請比較查詢照片與每張候選照片的視覺相似度，考慮：\n"
-    "- 相同的標示牌、吊牌、區域標示文字\n"
-    "- 相同的商品種類和擺設方式\n"
-    "- 相同的設備（冷藏櫃、貨架類型等）\n"
-    "- 整體場景和空間佈局的相似程度\n\n"
+    "你正在進行超市室內定位。第一張是使用者拍攝的「查詢照片」，"
+    "後面是 {n} 個編號 1~{n} 的「候選地點」，每個候選地點有多張在同一位置朝不同方向"
+    "（front/right/back/left）拍的參考照片。使用者可能面向任何方向，"
+    "所以只要候選地點的「任一方向」照片和查詢照片是同一個位置、同一段走道，就算符合。\n\n"
+    "判斷是否為同一位置，請看：\n"
+    "- 相同的標示牌、吊牌文字、走道編號\n"
+    "- 相同的貨架排列順序、端架商品、牆面顏色與裝飾\n"
+    "- 整體走道幾何與空間佈局\n"
+    "只是同類型的設備（都是冷藏櫃、都是貨架）不算證據，賣場裡到處都有。\n\n"
     '回覆 JSON（不要加其他文字）：\n'
-    '{{"ranking": [最像的編號, 第二像, ..., 最不像的編號], '
-    '"reason": "簡短說明為何第一名最像"}}'
+    '{{"ranking": [最像的候選編號, 第二像, ..., 最不像的候選編號], '
+    '"reason": "簡短說明決定性的線索"}}'
 )
+
+# How many nodes the re-ranker may compare in one call (each contributes up to
+# 4 directional photos). Above this the call gets slow and the VLM sloppy.
+RERANK_MAX_NODES = 8
+
+
+def neighbourhood_nids(ref_map: RefMap, nid: int, hops: int = 2) -> List[List[int]]:
+    """Rings of nodes around ``nid``: [[nid], [1-hop...], [2-hop...]]. Walkway
+    edges in the map are stored one-way and sparsely, so both directions count."""
+    rings: List[List[int]] = [[nid]]
+    seen = {nid}
+    frontier = {nid}
+    for _ in range(hops):
+        nxt: set[int] = set()
+        for n in frontier:
+            node = ref_map.photos.get(n)
+            if node:
+                nxt.update(node.neighbor_nids)
+            nxt.update(k for k, v in ref_map.photos.items() if n in v.neighbor_nids)
+        frontier = {n for n in nxt if n not in seen and n in ref_map.photos}
+        seen |= frontier
+        rings.append(sorted(frontier))
+    return rings
+
+
+def rerank_candidates(
+    top: List[tuple[int, float, str]],
+    ref_map: RefMap,
+    hint_nid: Optional[int],
+    cap: int = RERANK_MAX_NODES,
+) -> List[tuple[int, float, str]]:
+    """The nodes the re-ranker should compare: the word-matcher's top-N first,
+    then the previous fix and its neighbours (nearest rings first) — the user
+    cannot have walked far since the last photo, and the word matcher alone
+    often leaves the true node out entirely."""
+    if hint_nid is None or hint_nid not in ref_map.photos:
+        return list(top)
+    merged = list(top)
+    have = {c[0] for c in merged}
+    for ring_i, ring in enumerate(neighbourhood_nids(ref_map, hint_nid)):
+        for nid in ring:
+            if len(merged) >= cap:
+                return merged
+            if nid not in have:
+                merged.append((nid, 0.0, f"near last fix WP{hint_nid} ({ring_i} hop)"))
+                have.add(nid)
+    return merged
 
 
 def _encode_photo_b64(path: str, max_size: int = 512) -> Optional[str]:
@@ -603,13 +652,14 @@ def vlm_rerank(
     api_base_url: str,
     api_model: str,
     backup_key: str = "",
-    top_n: int = 5,
+    top_n: int = RERANK_MAX_NODES,
     timeout: int = 60,
 ) -> List[tuple[int, float, str]]:
     """Re-rank top candidates using VLM visual comparison.
 
-    Sends the query image + top-N reference photos to VLM in a single call.
-    Returns re-ordered candidates list.
+    Sends the query image + every directional reference photo of the top-N
+    candidate nodes to the VLM in a single call. Returns the candidates
+    re-ordered; ones the VLM did not rank keep their original order after.
     """
     if not candidates or not query_image_path:
         return candidates
@@ -621,35 +671,41 @@ def vlm_rerank(
         log.warning("rerank: cannot encode query image %s", query_image_path)
         return candidates
 
-    ref_images: list[tuple[int, str]] = []
+    # One entry per node, with every directional photo we can find for it —
+    # the user may be facing any way, so the "front" photo alone misses matches.
+    ref_nodes: list[tuple[int, list[tuple[str, str]]]] = []
     for nid, score, reason in top:
         ref_node = ref_map.photos.get(nid)
         if not ref_node:
             continue
-        photo_path = _resolve_ref_photo(ref_node.photo_file, ref_photo_root)
-        if not photo_path:
-            for dp in ref_node.directional_photos:
-                photo_path = _resolve_ref_photo(dp.photo_file, ref_photo_root)
-                if photo_path:
-                    break
-        if photo_path:
-            b64 = _encode_photo_b64(photo_path)
+        views: list[tuple[str, str]] = []
+        for dp in ref_node.directional_photos:
+            photo_path = _resolve_ref_photo(dp.photo_file, ref_photo_root)
+            b64 = _encode_photo_b64(photo_path) if photo_path else None
             if b64:
-                ref_images.append((nid, b64))
+                views.append((dp.slot, b64))
+        if not views:
+            photo_path = _resolve_ref_photo(ref_node.photo_file, ref_photo_root)
+            b64 = _encode_photo_b64(photo_path) if photo_path else None
+            if b64:
+                views.append(("front", b64))
+        if views:
+            ref_nodes.append((nid, views))
 
-    if len(ref_images) < 2:
-        log.warning("rerank: only %d ref images found, skipping", len(ref_images))
+    if len(ref_nodes) < 2:
+        log.warning("rerank: only %d candidate nodes have reference photos, skipping", len(ref_nodes))
         return candidates
 
     content: list[dict] = [
         {"type": "text", "text": "查詢照片："},
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{query_b64}"}},
     ]
-    for i, (nid, b64) in enumerate(ref_images, 1):
-        content.append({"type": "text", "text": f"候選 {i}（WP{nid}）："})
-        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+    for i, (nid, views) in enumerate(ref_nodes, 1):
+        for slot, b64 in views:
+            content.append({"type": "text", "text": f"候選 {i}（WP{nid}）{slot}："})
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
 
-    prompt = RERANK_PROMPT.format(n=len(ref_images))
+    prompt = RERANK_PROMPT.format(n=len(ref_nodes))
     content.append({"type": "text", "text": prompt})
 
     body = {
@@ -685,8 +741,8 @@ def vlm_rerank(
             ranking = result.get("ranking", [])
             reason = result.get("reason", "")
 
-            nid_list = [ref_images[idx - 1][0] for idx in ranking
-                        if 1 <= idx <= len(ref_images)]
+            nid_list = [ref_nodes[idx - 1][0] for idx in ranking
+                        if 1 <= idx <= len(ref_nodes)]
 
             if not nid_list:
                 return candidates

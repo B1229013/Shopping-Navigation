@@ -97,6 +97,7 @@ from server.vlm import (
 from server.neo4j_client import get_neo4j
 from server.visual_localization import (
     localize as _localize_photo, vlm_rerank as _vlm_rerank,
+    rerank_candidates as _rerank_candidates,
     estimate_node_heading as _estimate_node_heading,
 )
 from server.heading import (
@@ -723,10 +724,14 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
         if (RERANK_ENABLED and image_path and REF_PHOTO_ROOT
                 and loc_result.matched_nid is not None
                 and loc_result.top_candidates):
-            top = loc_result.top_candidates
             ref_map = neo4j.load_reference_map(s.place)
-            log.info("[session %s] rerank triggered (always-on): WP%d %.3f",
-                     session_id, top[0][0], top[0][1])
+            # Word-matcher top-N plus the nodes around the previous fix: the
+            # user cannot have walked far, and the word matcher often leaves
+            # the true node out of its top-N altogether.
+            top = _rerank_candidates(loc_result.top_candidates, ref_map,
+                                     getattr(s, "last_corrected_nid", None))
+            log.info("[session %s] rerank triggered (always-on): WP%d %.3f | candidates %s",
+                     session_id, top[0][0], top[0][1], [n for n, _, _ in top])
             reranked = _vlm_rerank(
                 query_image_path=image_path,
                 candidates=top,

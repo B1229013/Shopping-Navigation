@@ -106,7 +106,7 @@ def test_neighbourhood_prefers_closer_hops_when_capped():
     assert 20 in nids and 21 in nids and 22 in nids     # the fix and its 1-hop ring survive the cap
 
 
-def test_server_hands_reranker_the_neighbourhood_of_last_fix():
+def test_server_hands_reranker_the_neighbourhood_of_last_fix(caplog):
     """upload_photo's early localization must augment the word-matcher's
     candidates with the previous fix's neighbourhood before re-ranking."""
     from server.session import Session
@@ -141,3 +141,4 @@ def test_server_hands_reranker_the_neighbourhood_of_last_fix():
 
     assert seen["cands"][:3] == [1, 2, 3]
     assert 40 in seen["cands"] and 41 in seen["cands"]
+    assert any("⏱ rerank:" in r.message for r in caplog.records)   # duration is logged

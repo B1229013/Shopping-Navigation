@@ -732,6 +732,7 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                      getattr(s, "last_corrected_nid", None))
             log.info("[session %s] rerank triggered (always-on): WP%d %.3f | candidates %s",
                      session_id, top[0][0], top[0][1], [n for n, _, _ in top])
+            t_rerank = time.time()
             reranked = _vlm_rerank(
                 query_image_path=image_path,
                 candidates=top,
@@ -742,6 +743,7 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                 api_model=OPENAI_MODEL,
                 backup_key=OPENAI_BACKUP_KEY,
             )
+            log.info("⏱ rerank: %.1fs (%d candidate nodes)", time.time() - t_rerank, len(top))
             if reranked and reranked[0][0] != loc_result.matched_nid:
                 new_nid = reranked[0][0]
                 new_ref = ref_map.photos.get(new_nid)

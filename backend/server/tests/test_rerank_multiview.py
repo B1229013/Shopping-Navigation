@@ -3,6 +3,7 @@ reference photo of each candidate (the user may face any way), and the
 candidate set must include the nodes around the previous fix (the user cannot
 have walked far since the last photo)."""
 import json
+import logging
 from unittest.mock import patch, MagicMock
 
 from PIL import Image
@@ -127,6 +128,7 @@ def test_server_hands_reranker_the_neighbourhood_of_last_fix(caplog):
     grid = LocalizationResult(matched_nid=1, confidence=0.6, method="grid", reasoning="",
                               ref_node=m.photos[1], top_candidates=[(1, 0.3, ""), (2, 0.2, ""), (3, 0.1, "")])
     seen = {}
+    caplog.set_level(logging.INFO, logger="server.server")
 
     def fake_rerank(query_image_path, candidates, ref_map, **kw):
         seen["cands"] = [n for n, _, _ in candidates]

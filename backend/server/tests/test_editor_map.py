@@ -143,3 +143,25 @@ class TestEdgeLinking:
             {"name": "T", "points": [[5, 10], [3, 10]]},
         ]})
         assert not g.graph.has_edge(em.waypoint_id(g, "T", 1), em.waypoint_id(g, "L", 0))
+
+
+def test_far_node_still_gets_a_position_but_donates_no_labels():
+    """A Neo4j node whose recorded walk passed a few metres off the editor walks
+    must still map to a waypoint — otherwise localizing there yields no route at
+    all (4 of 6 photos in session 7c600e4a). Its product labels stay out, so
+    goal resolution keeps the tighter radius."""
+    g = em.build_graph({"walks": [{"name": "w1", "points": [[0, 0], [0, 5], [0, 10]]}]})
+    neo = [
+        {"nid": 1, "x": 0.5, "y": 5.0, "labels": ["優格"]},     # 0.5 m: close, labels count
+        {"nid": 2, "x": 3.0, "y": 5.0, "labels": ["狗飼料"]},   # 3 m: position only
+        {"nid": 3, "x": 30.0, "y": 5.0, "labels": ["電視"]},    # 30 m: nowhere near
+    ]
+
+    unmapped = em.merge_labels(g, neo)
+
+    assert unmapped == [3]
+    assert g.waypoint_for_neo(1) is not None
+    assert g.waypoint_for_neo(2) is not None          # routes can start here
+    assert g.waypoint_for_neo(3) is None
+    products = g.graph.nodes[g.waypoint_for_neo(2)]["products"]
+    assert "優格" in products and "狗飼料" not in products

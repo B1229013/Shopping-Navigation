@@ -25,7 +25,8 @@ from server.heading import convert_leg_to_relative, merge_instructions, next_ins
 
 LINK_RADIUS_M = 1.5        # walks passing within this distance are joined
 DEDUPE_EPS_M = 0.05        # consecutive points closer than this are one waypoint
-LABEL_MAX_DIST_M = 2.0     # a Neo4j node farther than this from every waypoint stays unmapped
+LABEL_MAX_DIST_M = 2.0     # products of a Neo4j node farther than this are not merged onto a waypoint
+POSITION_MAX_DIST_M = 6.0  # …but it still gets a position up to here, so routes can start from it
 SIMPLIFY_EPS_M = 0.5       # polyline jogs shorter than this are folded into the next edge
 TURN_PENALTY_M = 3.0       # a route "costs" this many extra metres per turn (≥ TURN_MIN_DEG)
 TURN_MIN_DEG = 45.0
@@ -139,14 +140,21 @@ def merge_labels(g: EditorGraph, neo_nodes: List[dict], max_dist: float = LABEL_
     unmapped: List[int] = []
     for n in neo_nodes:
         wp = nearest_waypoint(g, n["x"], n["y"])
-        if math.hypot(g.graph.nodes[wp]["x"] - n["x"], g.graph.nodes[wp]["y"] - n["y"]) > max_dist:
+        d = math.hypot(g.graph.nodes[wp]["x"] - n["x"], g.graph.nodes[wp]["y"] - n["y"])
+        if d > POSITION_MAX_DIST_M:
             unmapped.append(n["nid"])
             continue
         node = g.graph.nodes[wp]
-        for label in n.get("labels", []):
-            if label and label not in node["products"]:
-                node["products"].append(label)
-        node["neo_nids"].append(n["nid"])
+        # Labels only from nodes standing right on the walk: a node several
+        # metres off may be in the next aisle, and a wrong "優格" there would
+        # send the whole route to the wrong place.
+        if d <= max_dist:
+            for label in n.get("labels", []):
+                if label and label not in node["products"]:
+                    node["products"].append(label)
+            node["neo_nids"].append(n["nid"])
+        # The position mapping is what lets localization start a route at all,
+        # so keep it even when the node is too far to contribute labels.
         g._neo_to_wp[n["nid"]] = wp
     return unmapped
 

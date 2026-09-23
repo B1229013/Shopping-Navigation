@@ -1,0 +1,321 @@
+"""Spatial scene formatting for the VLM prompt.
+
+Pure (no model/torch imports) so it is fast to unit-test. Converts detection and
+OCR bounding boxes into coarse, human-readable positions ("right, near") that
+give the VLM the spatial grounding it needs to produce correct directions.
+
+Inputs are duck-typed: a detection is anything with ``.label``, ``.box``
+([x1,y1,x2,y2] absolute pixels) and ``.score``; an OCR result is anything with
+``.text``, ``.confidence`` and ``.bbox`` (four [x,y] corner points).
+"""
+from __future__ import annotations
+
+import difflib
+
+from server.models import VLMAction, VLMResponse
+
+# Bilingual (EN / 中文) category synonyms so an OCR'd aisle/section sign can be
+# matched to a goal even when the words differ. Extend as needed per store.
+SYNONYMS: dict[str, list[str]] = {
+    "milk": ["dairy", "refrigerated", "牛奶", "鮮奶", "乳製品"],
+    "cheese": ["dairy", "refrigerated", "起司", "乳酪", "乳製品"],
+    "egg": ["eggs", "dairy", "refrigerated", "蛋", "雞蛋"],
+    "eggs": ["egg", "dairy", "refrigerated", "蛋", "雞蛋"],
+    "refrigerator": ["fridge", "freezer", "冰箱", "冷藏", "冷凍"],
+    "fire extinguisher": ["extinguisher", "滅火器", "消防"],
+    "bread": ["bakery", "baked", "麵包", "烘焙"],
+    "vegetable": ["produce", "vegetables", "fresh", "蔬菜", "生鮮"],
+    "fruit": ["produce", "fruits", "fresh", "水果", "生鮮"],
+    "produce": ["vegetables", "fruit", "fresh", "蔬果", "生鮮"],
+    "frozen": ["freezer", "frozen foods", "冷凍"],
+    "meat": ["butcher", "肉", "肉品", "生鮮"],
+    "drink": ["beverage", "beverages", "drinks", "soda", "juice", "water", "飲料"],
+    "snack": ["snacks", "零食", "餅乾"],
+    "checkout": ["cashier", "checkout", "register", "結帳", "收銀"],
+    "exit": ["出口"],
+    "entrance": ["入口"],
+    "toilet": ["restroom", "washroom", "wc", "廁所", "洗手間"],
+}
+
+# Fuzzy ratio at/above which an OCR string is considered a match for a term.
+OCR_MATCH_RATIO = 0.85
+
+# Box area as a fraction of the image at/above which an object is called "near".
+NEAR_AREA_RATIO = 0.15
+
+# 5x5 grid (25 cells) instead of the original 3x3 (9 cells) — finer left/right and
+# top/bottom resolution for the VLM's spatial grounding. To revert to 3x3, restore
+# _HORIZONTAL/_VERTICAL to 3-tuples and _bucket's boundary count to match (see
+# _third's git history) — _horizontal_side/_position don't need any other change
+# since they just index into whatever-length tuple _bucket is sized for.
+_HORIZONTAL = ("far-left", "left", "center", "right", "far-right")
+_VERTICAL = ("top", "upper-middle", "middle", "lower-middle", "bottom")
+
+
+def _attr(item, name):
+    """Read a field from either an object (attribute) or a dict (key)."""
+    return item[name] if isinstance(item, dict) else getattr(item, name)
+
+
+def _bucket(frac: float, n: int) -> int:
+    """Which of n equal-width buckets `frac` (0-1) falls into, clamped to [0, n-1]."""
+    idx = int(frac * n)
+    return max(0, min(n - 1, idx))
+
+
+def _horizontal_side(center_x: float, img_w: int) -> str:
+    if not img_w:
+        return "center"
+    return _HORIZONTAL[_bucket(center_x / img_w, len(_HORIZONTAL))]
+
+
+def _position(box: list[float], img_w: int, img_h: int) -> tuple[str, str, str]:
+    """Return (horizontal, vertical, depth) for an [x1,y1,x2,y2] box."""
+    x1, y1, x2, y2 = box
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    horizontal = _horizontal_side(cx, img_w)
+    vertical = _VERTICAL[_bucket(cy / img_h, len(_VERTICAL))] if img_h else "middle"
+    area_ratio = (abs(x2 - x1) * abs(y2 - y1)) / (img_w * img_h) if img_w and img_h else 0.0
+    depth = "near" if area_ratio >= NEAR_AREA_RATIO else "far"
+    return horizontal, vertical, depth
+
+
+def format_detections(detections, img_w: int, img_h: int) -> str:
+    """Render detections with positions, e.g. ``refrigerator (91%) - right middle, near``."""
+    if not detections:
+        return "(none)"
+    parts = []
+    for d in detections:
+        h, v, depth = _position(_attr(d, "box"), img_w, img_h)
+        parts.append(f"{_attr(d, 'label')} ({_attr(d, 'score'):.0%}) - {h} {v}, {depth}")
+    return "; ".join(parts)
+
+
+def _bbox_center(bbox: list[list[float]]) -> tuple[float, float]:
+    xs = [p[0] for p in bbox]
+    ys = [p[1] for p in bbox]
+    return sum(xs) / len(xs), sum(ys) / len(ys)
+
+
+def format_ocr(ocr_results, img_w: int, img_h: int) -> str:
+    """Render OCR text with its horizontal side, e.g. ``"Dairy" (98%) - left``."""
+    if not ocr_results:
+        return "(no text detected)"
+    parts = []
+    for r in ocr_results:
+        cx, _ = _bbox_center(r.bbox)
+        side = _horizontal_side(cx, img_w)
+        parts.append(f'"{r.text}" ({r.confidence:.0%}) - {side}')
+    return "; ".join(parts)
+
+
+def _goal_terms(goal_objects) -> set[str]:
+    """Goal words plus their bilingual synonyms, lowercased."""
+    terms: set[str] = set()
+    for g in goal_objects:
+        gl = g.lower().strip()
+        if not gl:
+            continue
+        terms.add(gl)
+        terms.update(s.lower() for s in SYNONYMS.get(gl, []))
+        # also pull in the synonym group if the goal word IS a synonym of some key
+        for key, syns in SYNONYMS.items():
+            low = [s.lower() for s in syns]
+            if gl == key or gl in low:
+                terms.add(key)
+                terms.update(low)
+    return terms
+
+
+def match_ocr_to_goal(ocr_results, goal_objects) -> list[str]:
+    """OCR strings that likely indicate the goal's section/aisle.
+
+    In a store the sign is the most reliable signal, so a match here is strong
+    evidence. Matching is case-insensitive substring or fuzzy (>= OCR_MATCH_RATIO),
+    against the goal words and their synonyms.
+    """
+    terms = _goal_terms(goal_objects)
+    out: list[str] = []
+    seen: set[str] = set()
+    for r in ocr_results:
+        text = r.text.lower().strip()
+        if not text:
+            continue
+        for term in terms:
+            # `text in term` only for 2+ chars: a stray single OCR character
+            # ("奶", "m") inside a goal word is noise, not a sign match.
+            hit = term in text or (len(text) >= 2 and text in term) or \
+                difflib.SequenceMatcher(None, term, text).ratio() >= OCR_MATCH_RATIO
+            if hit:
+                if r.text not in seen:
+                    out.append(f'"{r.text}" (relates to your goal "{term}")')
+                    seen.add(r.text)
+                break
+    return out
+
+
+def confirm_zone_by_ocr(ocr_texts, goal_objects) -> bool:
+    """TASK 5 — True if any OCR sign text names the goal product's store section.
+
+    A plain-string counterpart to :func:`match_ocr_to_goal`: it takes raw OCR
+    strings (not result objects) and the goal words, expands them with the section
+    synonyms above, and reports whether the current zone's signage corroborates the
+    goal. A True here is a strong store signal — the aisle sign agrees with the goal
+    — so the caller can treat the zone as a candidate even on a borderline detection.
+    """
+    terms = _goal_terms(goal_objects)
+    for text in ocr_texts:
+        t = (text or "").lower().strip()
+        if not t:
+            continue
+        for term in terms:
+            if term in t or t in term or \
+                    difflib.SequenceMatcher(None, term, t).ratio() >= OCR_MATCH_RATIO:
+                return True
+    return False
+
+
+def _label_matches_goal(label: str, goal_objects) -> bool:
+    label = label.lower()
+    for g in goal_objects:
+        g = g.lower()
+        if g and (g in label or label in g):
+            return True
+    return False
+
+
+def _is_near(box, img_w, img_h) -> bool:
+    """True when the bounding box is large enough to be considered nearby."""
+    if not img_w or not img_h:
+        return False
+    x1, y1, x2, y2 = box
+    area_ratio = (abs(x2 - x1) * abs(y2 - y1)) / (img_w * img_h)
+    return area_ratio >= NEAR_AREA_RATIO
+
+
+def verify_arrival(resp: VLMResponse, detections, ocr_matches, goal_objects,
+                   min_score: float, img_w: int = 0, img_h: int = 0,
+                   prior_was_confirm: bool = False,
+                   goal_verified: bool | None = None) -> VLMResponse:
+    """Gate ARRIVED on real evidence to prevent false "you've arrived" claims.
+
+    ARRIVED is kept when a goal-related object is detected at >= ``min_score``
+    and — when the image size is known — that detection is *near* (bbox area
+    >= ``NEAR_AREA_RATIO``). Weaker evidence is downgraded:
+
+    * goal detected but far away → directional MOVE hint ("it is on your left,
+      walk closer"): we know where it is, so a question would only slow the
+      user down;
+    * OCR sign matched but nothing detected → "walk closer" MOVE hint, because
+      a sign means the right zone, not the item itself;
+    * no evidence at all, or crop verification explicitly rejected the
+      candidate → ASK the user to confirm. The user's eyes are the last ground
+      truth: when the detector has no class for the product, a question-free
+      MOVE would leave them walking forever with no way to finish the leg.
+      ``server.post_answer`` recognises that question via ``pending_is_confirm``
+      and routes a "沒有" answer straight back to MOVE.
+
+    ``prior_was_confirm`` means the user is already answering that confirm
+    question, so ARRIVED is trusted and we never loop.
+
+    ``goal_verified`` is the result of cropping the goal detection and asking
+    the VLM to confirm it: ``True`` is strong evidence (ARRIVED kept even
+    without other signals), ``False`` is an explicit rejection that overrides a
+    borderline detection, and ``None`` means no crop check ran (fall back to
+    the detection/OCR evidence test).
+
+    ``img_w``/``img_h`` are optional: without them near/far cannot be judged at
+    all, so callers that omit them (the offline eval harness, unit tests) get
+    the plain "a goal detection or an OCR match is enough" rule rather than the
+    distance-aware one.
+    """
+    if resp.action != VLMAction.ARRIVED or prior_was_confirm:
+        return resp
+
+    if goal_verified is True:
+        return resp
+    if goal_verified is False:
+        return _confirm_question(resp)
+
+    dims_known = bool(img_w and img_h)
+    near_match = False
+    far_match_box = None
+    for d in detections:
+        if _attr(d, "score") >= min_score and _label_matches_goal(_attr(d, "label"), goal_objects):
+            # Without image dimensions distance is unknowable, so any
+            # above-threshold goal detection counts as arrival evidence.
+            if not dims_known or _is_near(_attr(d, "box"), img_w, img_h):
+                near_match = True
+                break
+            if far_match_box is None:
+                far_match_box = _attr(d, "box")
+
+    if near_match:
+        return resp
+
+    if far_match_box is not None:
+        return _goal_visible_but_far(resp, far_match_box, img_w)
+
+    if ocr_matches:
+        return _ocr_hint(resp) if dims_known else resp
+
+    return _confirm_question(resp)
+
+
+def _confirm_question(resp: VLMResponse) -> VLMResponse:
+    # Downgrade to ASK (not ARRIVED): an uncorroborated ARRIVED must not put the
+    # app into the arrival-confirm state. server.post_answer recognises this
+    # question via pending_is_confirm and routes "沒有/不是" straight to MOVE.
+    return VLMResponse(
+        action=VLMAction.ASK,
+        guidance="看起來可能已經到了，但還不太確定。",
+        question="請確認：眼前有沒有看到要找的東西？（有／沒有）",
+        vlm_summary=resp.vlm_summary,
+    )
+
+
+def _goal_visible_but_far(resp: VLMResponse, box, img_w: int) -> VLMResponse:
+    """Goal detected in photo but too far — tell user direction and ask to get closer."""
+    x1, _, x2, _ = box
+    cx = (x1 + x2) / 2
+    side = _horizontal_side(cx, img_w) if img_w else "center"
+    side_zh = {"left": "左手邊", "far-left": "左手邊", "center": "正前方",
+               "right": "右手邊", "far-right": "右手邊"}.get(side, "前方")
+    return VLMResponse(
+        action=VLMAction.MOVE,
+        guidance=f"目標就在{side_zh}，請走近後再拍一張照片確認。",
+        question=None,
+        vlm_summary=resp.vlm_summary,
+    )
+
+
+def _ocr_hint(resp: VLMResponse) -> VLMResponse:
+    """OCR matched the goal text but no nearby object detection.
+
+    Downgrades to ASK, not to a bare MOVE: a question-free MOVE sets neither
+    pending_question nor pending_arrival, so /answer and /confirm both 409.
+    When the detector simply has no class for the product, every later photo
+    lands here again and the user could never finish the leg. The yes/no keeps
+    the escape hatch that every other ARRIVED downgrade in this gate leaves.
+    """
+    return VLMResponse(
+        action=VLMAction.ASK,
+        guidance="附近有看到目標的標示，請再往前走近一點確認。",
+        question="請確認：眼前有沒有看到要找的東西？（有／沒有）",
+        vlm_summary=resp.vlm_summary,
+    )
+
+
+def detection_sides(detections, img_w: int) -> list[str]:
+    """Unique horizontal sides (in first-seen order) where objects were detected.
+
+    Used by the evaluation harness to check that MOVE guidance points at a side
+    where something actually is.
+    """
+    sides: list[str] = []
+    for d in detections:
+        x1, _, x2, _ = _attr(d, "box")
+        side = _horizontal_side((x1 + x2) / 2, img_w)
+        if side not in sides:
+            sides.append(side)
+    return sides

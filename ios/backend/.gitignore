@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# 模型權重（請依 README 另行下載，勿入庫）
+models/
+*.pth
+*.pt
+
+# 執行期輸出（每場 session 的照片、標註圖、地圖）
+output/
+
+# 建圖階段的本地資料與產物（由管線重新產生）
+store_photos/
+b3_photos/
+store_detections*.json
+store_detections_enriched.json
+store_ocr.json
+b3_ocr.json
+detections.json
+*_topomap*.png
+store_map*.png
+store_map*.html
+store_graph*.png
+store_graph*.html
+
+# 本地機密 / 覆寫設定
+.env
+.env.local

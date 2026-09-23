@@ -4,7 +4,7 @@
 使用者拍照上傳，系統透過物件偵測（GroundingDINO）、文字辨識（EasyOCR）與
 VLM（GPT-4o / Gemini / CGU gateway）分析環境，並在拓樸地圖上進行照片定位與
 路徑規劃，提供逐步導航指引。
-
+開箱影片連結：https://drive.google.com/file/d/1nU0xep0huSmS2-fzG8ooJqlZE7_wVK6P/view?usp=sharing
 ---
 
 ## 系統功能綜覽

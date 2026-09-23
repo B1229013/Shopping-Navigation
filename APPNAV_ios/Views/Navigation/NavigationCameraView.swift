@@ -28,6 +28,7 @@ struct NavigationCameraView: View {
     @State private var galleryItem: PhotosPickerItem?
     @State private var loopBanner: String?
     @State private var lastCapturedImage: UIImage?
+    @State private var navPhase: String = "shopping"
 
     init(sessionId: String, goal: String, initialGuidance: String, onExit: @escaping () -> Void) {
         self.sessionId = sessionId
@@ -124,21 +125,54 @@ struct NavigationCameraView: View {
 
     // MARK: - Status card
 
+    private var phaseLabel: String {
+        switch navPhase {
+        case "checkout": return "前往結帳"
+        case "exit": return "前往出口"
+        case "done": return "導航完成"
+        default: return "找商品中"
+        }
+    }
+
+    private var statusTitle: String {
+        if hasArrived { return navPhase == "done" ? "導航完成！" : "已到達！" }
+        if pendingArrival { return "請確認是否到達" }
+        return "導航中"
+    }
+
     private var statusCard: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(hasArrived ? "已到達目標！" : (pendingArrival ? "請確認是否到達目標" : "導航中"))
-                    .font(.headline)
-                    .foregroundColor(.white)
-                Text("目標　\(goal)")
+                HStack(spacing: 6) {
+                    Text(statusTitle)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text(phaseLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(
+                            navPhase == "checkout" ? Color.orange.opacity(0.7) :
+                            navPhase == "exit" ? Color.purple.opacity(0.7) :
+                            navPhase == "done" ? Color.green.opacity(0.7) :
+                            Color.blue.opacity(0.5)
+                        )
+                        .clipShape(Capsule())
+                }
+                Text(navPhase == "checkout" ? "前往收銀台" :
+                     navPhase == "exit" ? "前往出口" :
+                     "目標　\(goal)")
                     .font(.subheadline)
                     .foregroundColor(.white.opacity(0.85))
                     .lineLimit(2)
+                // The localization result (with match confidence) is only shown here —
+                // the guidance text no longer repeats it.
                 if let currentLocation {
                     Text("📍 \(currentLocation)")
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.7))
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -146,7 +180,11 @@ struct NavigationCameraView: View {
             flashButton
         }
         .padding(14)
-        .background(Color.blue.opacity(0.55))
+        .background(
+            navPhase == "checkout" ? Color.orange.opacity(0.45) :
+            navPhase == "exit" ? Color.purple.opacity(0.45) :
+            Color.blue.opacity(0.55)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -273,23 +311,19 @@ struct NavigationCameraView: View {
                     if isConfirming {
                         ProgressView().tint(.white)
                     } else {
-                        Text("確認到達").font(.subheadline.weight(.bold))
+                        Text(navPhase == "checkout" ? "確認已結帳" :
+                             navPhase == "exit" ? "確認已到出口" :
+                             "確認到達").font(.subheadline.weight(.bold))
                     }
                 }
                 .frame(maxWidth: .infinity).frame(height: 46)
                 .buttonStyle(.borderedProminent).tint(.green)
                 .disabled(isConfirming)
 
-                HStack(spacing: 8) {
-                    Button("不是目標") { confirmArrival(kind: "false_positive") }
-                        .frame(maxWidth: .infinity).frame(height: 42)
-                        .buttonStyle(.borderedProminent).tint(.gray)
-                        .disabled(isConfirming)
-                    Button("同類非目標") { confirmArrival(kind: "wrong_instance") }
-                        .frame(maxWidth: .infinity).frame(height: 42)
-                        .buttonStyle(.borderedProminent).tint(.purple)
-                        .disabled(isConfirming)
-                }
+                Button("不是目標") { confirmArrival(kind: "false_positive") }
+                    .frame(maxWidth: .infinity).frame(height: 42)
+                    .buttonStyle(.borderedProminent).tint(.gray)
+                    .disabled(isConfirming)
             }
         } else {
             HStack(spacing: 8) {
@@ -353,6 +387,13 @@ struct NavigationCameraView: View {
         }
         // The map's own verdict for this photo, independent of the VLM prose
         mapInstruction = response.nextInstruction
+        // Navigation phase (shopping → checkout → exit → done) drives the status card
+        // and the arrival wording, so apply it before the action is interpreted.
+        var phaseChanged = false
+        if let phase = response.phase, phase != navPhase {
+            navPhase = phase
+            phaseChanged = true
+        }
         // A confident photo fix re-anchors the dead-reckoned position at that
         // waypoint (cancelling drift). A weak fix (keyword localization can jump
         // between nodes on the same photo) only re-plans from where the phone
@@ -360,15 +401,21 @@ struct NavigationCameraView: View {
         if response.correctedNodeId != nil {
             let confident = (response.correctedConfidence ?? 0) >= 0.6
             Task { await routeModel.load(sessionId: sessionId, fromPhone: !confident) }
+        } else if phaseChanged {
+            // The phase moved on (shopping → checkout → exit) but this photo wasn't
+            // localized: the path endpoint now plans a different leg, so re-plan from
+            // where the phone thinks it is instead of following the stale leg.
+            Task { await routeModel.load(sessionId: sessionId, fromPhone: true) }
         }
-        if let loc = currentLocation {
-            guidance = "📍 目前位置：\(loc)\n\n\(response.guidance)"
-        } else {
-            guidance = response.guidance
-        }
+        guidance = response.guidance
         switch response.action {
         case "ARRIVED":
-            pendingArrival = true
+            if navPhase == "done" {
+                hasArrived = true
+                pendingArrival = false
+            } else {
+                pendingArrival = true
+            }
             pendingQuestion = nil
         case "ASK":
             pendingQuestion = response.question
@@ -467,6 +514,13 @@ struct NavigationCameraView: View {
                 await MainActor.run {
                     pendingArrival = false
                     guidance = response.guidance
+                    // POST /confirm is the ONLY endpoint that advances the phase, and
+                    // reaching "done" also sets s.arrived, which makes a later POST
+                    // /photo 409 — so if we drop phase here the client can never see
+                    // "done" and origin/main's 導航完成 UI is unreachable.
+                    if let phase = response.phase, phase != navPhase {
+                        navPhase = phase
+                    }
                     if response.action == "ARRIVED" {
                         hasArrived = true
                     } else if response.action == "MOVE" {

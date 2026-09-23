@@ -2,79 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
-	<key>CFBundleDisplayName</key>
-	<string>智慧購物</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundlePackageType</key>
-	<string>$(PRODUCT_BUNDLE_TYPE)</string>
-	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-	</dict>
-	<key>UILaunchScreen</key>
-	<dict/>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-	</array>
-	<!-- iPad supports rotation/multitasking even though iPhone is locked to portrait -->
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-
-	<!-- Permission descriptions (required by App Store / iOS) -->
-	<key>NSCameraUsageDescription</key>
-	<string>需要相機權限以掃描購物收據</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>需要相簿權限以選取收據圖片</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>需要位置權限以顯示附近商店</string>
-	<key>NSMotionUsageDescription</key>
-	<string>需要動作與體能活動權限，以偵測您在店內的移動路徑並提供導航輔助</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>需要連接本機網路，以便與店內導航伺服器通訊</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>需要讀取健身紀錄，以便匯入 Apple Watch 訓練中的路徑資料來補足感測器測試</string>
-
-	<!-- API Keys (injected from xcconfig at build time) -->
 	<key>GROQ_API_KEY</key>
 	<string>$(GROQ_API_KEY)</string>
-	<key>PADDLEOCR_API_URL</key>
-	<string>$(PADDLEOCR_API_URL)</string>
-	<key>PADDLEOCR_ACCESS_TOKEN</key>
-	<string>$(PADDLEOCR_ACCESS_TOKEN)</string>
 	<key>MAPS_API_KEY</key>
 	<string>$(MAPS_API_KEY)</string>
 	<key>NAVIGATION_BACKEND_URL</key>
 	<string>$(NAVIGATION_BACKEND_URL)</string>
-
-	<!-- Allow HTTP for local backend dev server -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
-		<!-- Dev navigation backend runs on a LAN IP with plain HTTP; this permits
-		     insecure loads to IP addresses / unqualified hosts without disabling ATS globally. -->
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 		<key>NSExceptionDomains</key>
@@ -88,5 +25,16 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>PADDLEOCR_ACCESS_TOKEN</key>
+	<string>$(PADDLEOCR_ACCESS_TOKEN)</string>
+	<key>PADDLEOCR_API_URL</key>
+	<string>$(PADDLEOCR_API_URL)</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict/>
 </dict>
 </plist>

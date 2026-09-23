@@ -38,12 +38,16 @@ PER_TURN_PROMPT = """\
 
 {{"action": "ARRIVED" | "MOVE" | "ASK", "guidance": "<一到兩句自然的引導語>", "question": "<僅 ASK 時填短問題，否則 null>", "vlm_summary": "<一句話描述目前位置>"}}
 
+最重要：你可以直接看到照片！不要只依賴下方的偵測清單。請自己仔細看照片，判斷目標商品是否出現在畫面中。
+
 引導原則：
-- 照片中已看到目標 → ARRIVED，告訴顧客「就在您的左手邊/前方/右手邊」
+- 你在照片中看到目標商品本身或其包裝（看得到商品實體、或包裝上印的品名）→ 回覆 ARRIVED，告訴顧客「就在您的左手邊/前方/右手邊」。即使偵測清單沒有列出該物品，只要你自己在照片中看得清楚就算找到了
+- 只看到擺放目標的貨架、冷藏櫃、分類招牌或區域標示牌，卻看不到商品本身 → 絕對不可以回 ARRIVED。這些只是線索，請回 MOVE，引導顧客再走近一點拍一張確認
 - 需要確認方向 → ASK，問一個簡短的是非題
+- 照片中完全看不到任何目標相關物件 → MOVE，給一句具體的走法指引
 - 其他情況 → MOVE，給一句具體的走法指引
-- 方向判斷以照片為準：物件在畫面左側→說「往左走」，在右側→說「往右走」，在正中→說「直走」
-- 結合照片中看到的走道、貨架、標示牌來描述方向，例如「沿著這條走道直走約十公尺，經過飲料區後右轉」
+- 方向判斷：以照片中物品的實際位置為準。畫面左側 → 說「左手邊」，右側 → 說「右手邊」，中間 → 說「正前方」
+- 不要引導使用者去遠處的地標（如冷藏展示櫃、冷凍櫃），如果目標就在附近就直接引導到目標
 
 嚴格禁止：
 - guidance 和 vlm_summary 裡提到的每一個地標、設備、區域，都必須出自上方「偵測物件」清單或「OCR 文字」清單
@@ -70,16 +74,15 @@ PRIOR_ANSWER_BLOCK = """\
 
 
 ROUTE_CONTEXT_BLOCK = """\
-── 導航參考資訊 ──
+── 導航參考資訊（來自預建地圖與路徑規劃）──
 目前位置：{position_description}
 面向：{heading_description}
 {route_description}
 指引風格：
+- 如果照片中已經看到目標商品，直接說 ARRIVED + 方向，不需要再繼續引導
+- 如果照片中看不到目標，請嚴格遵循上方的路線指引（目標、區域、方向）來引導使用者
 - 一次只引導找一樣東西，找到後系統會自動切到下一項
-- 用照片裡看得到的東西來帶路，例如「沿著左邊的冷藏櫃走到底就看到了」「經過洗衣精那排貨架後右轉」
-- 如果照片裡有走道分岔，告訴顧客走哪一邊、大概走多遠
-- 如果已經看到目標，直接說「就在您的左手邊／右手邊／前方」
-- 照片裡看到的實際景象比地圖資料更可靠，優先依據照片判斷
+- 用照片裡看得到的物件來描述位置和方向
 - 說話要自然簡短，像真人導購員帶路
 """
 
@@ -98,10 +101,11 @@ object on one line, nothing else:
 Rules:
 - box coordinates are FRACTIONS of the image (0.0 to 1.0), [left, top, right, bottom].
 - detections: list every object relevant to the goal or useful as a landmark (shelves, signs, doors, counters, appliances, furniture). Include the goal item itself if visible.
-- ocr_texts: list every piece of readable text (signs, labels, aisle markers, room names), transcribed exactly as shown, in its original language.
-- Hanging aisle signs are the most important text: for EACH one, transcribe the aisle number AND its full category
-  text as separate entries (e.g. "12" and "泡麵 Instant Noodles"), even when the sign is small or far away.
-- Do not invent objects or text that are not actually visible.
+- For product shelves, racks and fridges: name the product category you can actually read off the packaging
+  (e.g. "pet food shelf", "snack shelf", "cleaning products shelf") rather than just "shelf". If the packaging
+  does not tell you what category it is, label it plainly "shelf" — never guess that it holds the goal.
+- Only report what you actually see. Do NOT invent, guess or hallucinate objects, and never hallucinate the
+  goal item.
 - Include the goal item ONLY if its packaging or label is clearly readable in the photo; a shelf that merely
   "looks like it could hold" the goal is NOT the goal. When unsure, leave it out.
 - When the goal item IS visible, label it exactly as one of the goal names listed above (same language, same
@@ -109,6 +113,12 @@ Rules:
 - Real packaging often words the goal differently from the goal list (優格 / 優酪 / 優酪乳, yogurt / yoghurt).
   Judge by what the product actually is, and still label that detection "{goal_label_example}" — while
   transcribing the package's own wording into ocr_texts.
+- ocr_texts: list every piece of readable text (signs, labels, aisle markers, room names), transcribed exactly
+  as shown, in its original language.
+- Hanging aisle signs are the most important text: for EACH one, transcribe the aisle number AND its full category
+  text as separate entries (e.g. "12" and "泡麵 Instant Noodles"), even when the sign is small or far away.
+- Do NOT fabricate text: transcribe only characters you can actually make out. If part of a sign is unreadable,
+  transcribe the part you can read and leave the rest out — but do not skip a sign just because it is small.
 - When a shelf, fridge or rack in view is full of the goal category, read the product names off several
   packages into ocr_texts. Price numbers alone are not enough — a wall of price tags with no product name
   tells the system nothing about what is on the shelf.

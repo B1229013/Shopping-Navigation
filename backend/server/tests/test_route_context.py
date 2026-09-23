@@ -161,7 +161,12 @@ def test_failed_localization_is_reported_when_a_map_is_in_use():
     s = _session_with_route(ref_map, [10, 11, 12, 13])
     with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)):
         ctx, next_instr = srv._build_route_context(s, None, detections=[])
-    assert ctx is None
+    # origin/main (898b468) stopped returning (None, None) here: when a route plan
+    # exists, the VLM keeps getting it even though the photo could not be localized,
+    # so the route no longer disappears. The context must still say the position is
+    # unconfirmed, and the user must still be told the photo missed the map.
+    assert ctx is not None and "定位中" in ctx
+    assert "面向：朝向不確定" in ctx
     assert next_instr and "對不到地圖" in next_instr
 
 
@@ -264,3 +269,125 @@ def test_phone_compass_heading_still_gives_a_turn():
         _, next_instr = srv._build_route_context(s, loc, detections=[])
 
     assert next_instr.startswith("直走約 6 公尺，然後左轉")
+
+
+# ---- multi-step chaining must not swallow route step #1 --------------------
+#
+# origin/main chains the steps after the one-line head with "→". The head
+# (heading.next_instruction_text) covers steps[0] AND steps[1] only when
+# steps[0] is a straight run that ends in a turn; otherwise it covers steps[0]
+# alone. A chain that always resumes at index 2 therefore loses the second
+# manoeuvre whenever the FIRST step is already a turn — the user hears the
+# wrong turn. These routes have three or four steps so the chain really fires.
+
+def _zigzag_map() -> RefMap:
+    # A staircase: north 6 m, east 4 m, north 6 m, east 6 m. Facing north (0°)
+    # at node 20 the first step is straight; starting at node 21 it is a turn.
+    m = RefMap(place="test")
+    for nid, x, y, label in [(20, 0, 0, "entrance"), (21, 0, 6, "corner a"),
+                             (22, 4, 6, "corner b"), (23, 4, 12, "corner c"),
+                             (24, 10, 12, "milk")]:
+        m.photos[nid] = _node(nid, x, y, label)
+    m.walkway_edges = [
+        {"from": 20, "to": 21, "distance_m": 6.0},
+        {"from": 21, "to": 22, "distance_m": 4.0},
+        {"from": 22, "to": 23, "distance_m": 6.0},
+        {"from": 23, "to": 24, "distance_m": 6.0},
+    ]
+    return m
+
+
+def _zigzag_editor_graph():
+    # The same staircase as an editor walk, so both branches can be compared.
+    g = em.build_graph({"place": "test", "walks": [
+        {"name": "Z", "points": [[0, 0], [0, 6], [4, 6], [4, 12], [10, 12]]},
+    ]})
+    em.merge_labels(g, [{"nid": 24, "x": 10.0, "y": 12.0, "labels": ["牛奶區吊牌 milk sign"]},
+                        {"nid": 21, "x": 0.0, "y": 6.0, "labels": ["shelf"]},
+                        {"nid": 20, "x": 0.0, "y": 0.0, "labels": ["door"]}])
+    return g
+
+
+def _chained_steps(next_instr: str) -> list[str]:
+    """The chained steps of the 🗺 line, without its trailing 「，到…找…」 tail."""
+    return next_instr.split("，到")[0].split("→")
+
+
+def test_turn_first_route_keeps_every_step_neo4j_fallback():
+    """No editor map: the steps come from the Neo4j walkway graph.
+
+    Facing north at node 21 the route is 右轉 4 m → 左轉 6 m → 右轉 6 m. The head
+    is only step #0 (it is a turn, not a straight run), so a chain resuming at
+    index 2 would drop the 左轉 and tell the user to turn right twice.
+    """
+    ref_map = _zigzag_map()
+    s = _session_with_route(ref_map, [21, 22, 23, 24])
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
+         patch("server.server._editor_graph_for", return_value=None):
+        _, next_instr = srv._build_route_context(s, _localized_at(ref_map, 21), detections=[])
+
+    steps = _chained_steps(next_instr)
+    assert steps == ["右轉後直走約 4 公尺", "左轉後直走約 6 公尺", "右轉後直走約 6 公尺"]
+    # the dropped manoeuvre, spelled out: the middle turn must still be there
+    assert "左轉後直走約 6 公尺" in next_instr
+
+
+def test_turn_first_route_keeps_every_step_on_editor_map():
+    """Same route through the editor-map branch (the one the phone walks)."""
+    ref_map = _zigzag_map()
+    s = _session_with_route(ref_map, [21, 22, 23, 24])
+    s.goal = "牛奶"; s.target_objects = ["牛奶"]
+    loc = _localized_at(ref_map, 21)
+    loc.heading_confidence = srv.PHONE_HEADING_CONFIDENCE
+
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
+         patch("server.server._editor_graph_for", return_value=_zigzag_editor_graph()):
+        _, next_instr = srv._build_route_context(s, loc, detections=[])
+
+    steps = _chained_steps(next_instr)
+    assert steps == ["右轉後直走約 4 公尺", "左轉後直走約 6 公尺", "右轉後直走約 6 公尺"]
+    assert "左轉後直走約 6 公尺" in next_instr
+
+
+def test_multi_step_chain_still_fires_when_first_step_is_straight():
+    """origin/main's multi-step guidance must keep working, and every leg must
+    keep its distance. next_instruction_text() would return the combined head
+    「直走約 6 公尺，然後右轉」, which names step #1's direction but NOT its 4 m — so
+    once anything is chained past it we speak the bare steps instead, or the user
+    turns left immediately instead of after 4 m. Capped at _MAX_CHAINED_STEPS, so
+    the 4th step is deliberately not spoken."""
+    ref_map = _zigzag_map()
+    s = _session_with_route(ref_map, [20, 21, 22, 23, 24])
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
+         patch("server.server._editor_graph_for", return_value=None):
+        _, next_instr = srv._build_route_context(s, _localized_at(ref_map, 20), detections=[])
+
+    assert "→" in next_instr
+    steps = _chained_steps(next_instr)
+    assert steps == ["直走約 6 公尺", "右轉後直走約 4 公尺", "左轉後直走約 6 公尺"]
+    # the 4 m leg the combined head would have swallowed is spoken in full
+    assert "右轉後直走約 4 公尺" in next_instr
+    # and the chain stops at the cap rather than reciting the whole route
+    assert len(steps) == srv._MAX_CHAINED_STEPS
+    assert "右轉後直走約 6 公尺" not in next_instr
+
+
+def test_multi_step_chain_still_fires_on_editor_map():
+    ref_map = _zigzag_map()
+    s = _session_with_route(ref_map, [20, 21, 22, 23, 24])
+    s.goal = "牛奶"; s.target_objects = ["牛奶"]
+    loc = _localized_at(ref_map, 20)
+    loc.heading_confidence = srv.PHONE_HEADING_CONFIDENCE
+
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
+         patch("server.server._editor_graph_for", return_value=_zigzag_editor_graph()):
+        _, next_instr = srv._build_route_context(s, loc, detections=[])
+
+    assert "→" in next_instr
+    steps = _chained_steps(next_instr)
+    assert steps == ["直走約 6 公尺", "右轉後直走約 4 公尺", "左轉後直走約 6 公尺"]
+    # the 4 m leg the combined head would have swallowed is spoken in full
+    assert "右轉後直走約 4 公尺" in next_instr
+    # and the chain stops at the cap rather than reciting the whole route
+    assert len(steps) == srv._MAX_CHAINED_STEPS
+    assert "右轉後直走約 6 公尺" not in next_instr

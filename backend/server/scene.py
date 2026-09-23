@@ -184,22 +184,50 @@ def _label_matches_goal(label: str, goal_objects) -> bool:
     return False
 
 
+def _is_near(box, img_w, img_h) -> bool:
+    """True when the bounding box is large enough to be considered nearby."""
+    if not img_w or not img_h:
+        return False
+    x1, y1, x2, y2 = box
+    area_ratio = (abs(x2 - x1) * abs(y2 - y1)) / (img_w * img_h)
+    return area_ratio >= NEAR_AREA_RATIO
+
+
 def verify_arrival(resp: VLMResponse, detections, ocr_matches, goal_objects,
-                   min_score: float, prior_was_confirm: bool = False,
+                   min_score: float, img_w: int = 0, img_h: int = 0,
+                   prior_was_confirm: bool = False,
                    goal_verified: bool | None = None) -> VLMResponse:
     """Gate ARRIVED on real evidence to prevent false "you've arrived" claims.
 
-    ARRIVED is kept only if a goal-related object was detected at >= ``min_score``
-    or an OCR sign matched the goal (``ocr_matches`` non-empty). Otherwise it is
-    downgraded to an ASK that asks the user to confirm. If the user is already
-    answering a confirm question (``prior_was_confirm``), ARRIVED is trusted so we
-    never loop.
+    ARRIVED is kept when a goal-related object is detected at >= ``min_score``
+    and — when the image size is known — that detection is *near* (bbox area
+    >= ``NEAR_AREA_RATIO``). Weaker evidence is downgraded:
 
-    ``goal_verified`` (TASK 3) is the result of cropping the goal detection and
-    asking the VLM to confirm it: ``True`` is strong evidence (ARRIVED kept even
+    * goal detected but far away → directional MOVE hint ("it is on your left,
+      walk closer"): we know where it is, so a question would only slow the
+      user down;
+    * OCR sign matched but nothing detected → "walk closer" MOVE hint, because
+      a sign means the right zone, not the item itself;
+    * no evidence at all, or crop verification explicitly rejected the
+      candidate → ASK the user to confirm. The user's eyes are the last ground
+      truth: when the detector has no class for the product, a question-free
+      MOVE would leave them walking forever with no way to finish the leg.
+      ``server.post_answer`` recognises that question via ``pending_is_confirm``
+      and routes a "沒有" answer straight back to MOVE.
+
+    ``prior_was_confirm`` means the user is already answering that confirm
+    question, so ARRIVED is trusted and we never loop.
+
+    ``goal_verified`` is the result of cropping the goal detection and asking
+    the VLM to confirm it: ``True`` is strong evidence (ARRIVED kept even
     without other signals), ``False`` is an explicit rejection that overrides a
-    borderline detection (ARRIVED downgraded), and ``None`` means no crop check ran
-    (fall back to the detection/OCR evidence test).
+    borderline detection, and ``None`` means no crop check ran (fall back to
+    the detection/OCR evidence test).
+
+    ``img_w``/``img_h`` are optional: without them near/far cannot be judged at
+    all, so callers that omit them (the offline eval harness, unit tests) get
+    the plain "a goal detection or an OCR match is enough" rule rather than the
+    distance-aware one.
     """
     if resp.action != VLMAction.ARRIVED or prior_was_confirm:
         return resp
@@ -209,12 +237,27 @@ def verify_arrival(resp: VLMResponse, detections, ocr_matches, goal_objects,
     if goal_verified is False:
         return _confirm_question(resp)
 
-    detection_ok = any(
-        _attr(d, "score") >= min_score and _label_matches_goal(_attr(d, "label"), goal_objects)
-        for d in detections
-    )
-    if detection_ok or ocr_matches:
+    dims_known = bool(img_w and img_h)
+    near_match = False
+    far_match_box = None
+    for d in detections:
+        if _attr(d, "score") >= min_score and _label_matches_goal(_attr(d, "label"), goal_objects):
+            # Without image dimensions distance is unknowable, so any
+            # above-threshold goal detection counts as arrival evidence.
+            if not dims_known or _is_near(_attr(d, "box"), img_w, img_h):
+                near_match = True
+                break
+            if far_match_box is None:
+                far_match_box = _attr(d, "box")
+
+    if near_match:
         return resp
+
+    if far_match_box is not None:
+        return _goal_visible_but_far(resp, far_match_box, img_w)
+
+    if ocr_matches:
+        return _ocr_hint(resp) if dims_known else resp
 
     return _confirm_question(resp)
 
@@ -226,6 +269,38 @@ def _confirm_question(resp: VLMResponse) -> VLMResponse:
     return VLMResponse(
         action=VLMAction.ASK,
         guidance="看起來可能已經到了，但還不太確定。",
+        question="請確認：眼前有沒有看到要找的東西？（有／沒有）",
+        vlm_summary=resp.vlm_summary,
+    )
+
+
+def _goal_visible_but_far(resp: VLMResponse, box, img_w: int) -> VLMResponse:
+    """Goal detected in photo but too far — tell user direction and ask to get closer."""
+    x1, _, x2, _ = box
+    cx = (x1 + x2) / 2
+    side = _horizontal_side(cx, img_w) if img_w else "center"
+    side_zh = {"left": "左手邊", "far-left": "左手邊", "center": "正前方",
+               "right": "右手邊", "far-right": "右手邊"}.get(side, "前方")
+    return VLMResponse(
+        action=VLMAction.MOVE,
+        guidance=f"目標就在{side_zh}，請走近後再拍一張照片確認。",
+        question=None,
+        vlm_summary=resp.vlm_summary,
+    )
+
+
+def _ocr_hint(resp: VLMResponse) -> VLMResponse:
+    """OCR matched the goal text but no nearby object detection.
+
+    Downgrades to ASK, not to a bare MOVE: a question-free MOVE sets neither
+    pending_question nor pending_arrival, so /answer and /confirm both 409.
+    When the detector simply has no class for the product, every later photo
+    lands here again and the user could never finish the leg. The yes/no keeps
+    the escape hatch that every other ARRIVED downgrade in this gate leaves.
+    """
+    return VLMResponse(
+        action=VLMAction.ASK,
+        guidance="附近有看到目標的標示，請再往前走近一點確認。",
         question="請確認：眼前有沒有看到要找的東西？（有／沒有）",
         vlm_summary=resp.vlm_summary,
     )

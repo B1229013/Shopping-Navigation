@@ -39,6 +39,8 @@ struct TurnResponse: Codable {
     // Map-derived turn-by-turn line (path with distance / "you're at the target" /
     // "photo could not be localized"); shown verbatim so the map's verdict is visible.
     let nextInstruction: String?
+    // Navigation phase
+    let phase: String?   // "shopping", "checkout", "exit", "done"
 }
 
 /// Route on the hand-corrected editor map (GET /session/{id}/path): the polyline the

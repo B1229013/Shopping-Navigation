@@ -1,214 +1,296 @@
-<div align="center">
+# Shopping Navigation — 室內導航系統
 
-# 🛒 智慧購物導航 · Smart Shopping Navigation
-
-*手機拍照即定位的賣場導航 App，整合相機 OCR、雲端大型語言模型與本地視覺導航後端*
-
-![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?logo=kotlin&logoColor=white)
-![Compose](https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4?logo=jetpackcompose&logoColor=white)
-![CameraX](https://img.shields.io/badge/CameraX-1.5.3-3DDC84?logo=android&logoColor=white)
-![Firebase](https://img.shields.io/badge/Firebase_Auth-FFCA28?logo=firebase&logoColor=black)
-![Groq](https://img.shields.io/badge/Groq-LLaMA_3.3--70B-F55036)
-![ML Kit](https://img.shields.io/badge/ML_Kit-OCR-4285F4?logo=google&logoColor=white)
-![PaddleOCR](https://img.shields.io/badge/PaddleOCR-REST-0062FF)
-![Places](https://img.shields.io/badge/Google_Places-New-34A853?logo=googlemaps&logoColor=white)
-![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)
-![Ollama](https://img.shields.io/badge/Ollama-LLaMA_3.2_Vision-000000?logo=ollama&logoColor=white)
-
-</div>
-
-「智慧購物導航」是一款 Android（Kotlin / Jetpack Compose）購物助理 App，採**單一 Activity** 架構，並搭配一個**獨立的 Python / FastAPI 後端**負責賣場內視覺定位。它把「找商品、控預算、顧健康」整合在同一個 App，且賣場導航**不需在現場裝設藍牙 / Wi-Fi 信標**。
-
-> **指導教授**:吳世琳、陳嶽鵬 　|　**成員**:B1229013 陳宜伶 · B1229020 何思顗 · B1229023 林依賢 · B1222017 周庠
-
----
-
-### 目錄
-[功能總覽](#功能總覽) ·
-[系統架構](#系統架構) ·
-[資料流與模型管線](#資料流與模型管線) ·
-[資料模型與持久化](#資料模型與持久化) ·
-[後端-api-參考](#後端-api-參考) ·
-[技術堆疊](#技術堆疊) ·
-[金鑰設定](#金鑰設定-env) ·
-[建置與執行](#建置與執行) ·
-[專案結構](#專案結構) ·
-[開發狀態](#開發狀態) ·
-[限制與容錯](#限制與容錯)
-
----
-
-## 功能總覽
-
-App 以底部六分頁(`MainContainer`)為主體，外加導航、登入與設定。下表對應「畫面 → 功能 → 實際使用的服務/模型 → 主要程式檔」:
-
-| 分頁 / 畫面 | 功能 | 服務 / 模型 | 主要檔案 |
-|---|---|---|---|
-| 首頁 | 商品搜尋、快速加入清單(縮圖 Coil) | — | `HomeScreen.kt` |
-| 清單 | 購物項目 CRUD / 勾選 | 本地 JSON | `ShoppingListScreen.kt` |
-| 分析 | 成分拍照辨識、過敏原警示、熱量↔運動換算 | **PaddleOCR (REST)** + 內建字典/MET 表 | `IngredientsScreen.kt` |
-| 預算 | 收據拍照 → 結構化 → 入帳 + 圓環圖 | **ML Kit OCR** + **Groq**(JSON) | `MainContainer.kt`(`BudgetScreen`) |
-| 紀錄 | 消費 / 購物歷史 | 本地 JSON | `HistoryScreen.kt` |
-| 助理 | 情境感知購物諮詢(多輪) | **Groq** `llama-3.3-70b-versatile` | `AIScreen.kt` |
-| 賣場導航 | 相機即時 + AR 店家標記 + 逐步指引 | CameraX + GPS / Places(視覺模型待接後端) | `NavigationScreen.kt` |
-| 附近門市 | 周邊門市清單 / AR 標記 | **Google Places** + FusedLocation | `NearbyStoresSheet.kt` · `NearbyStoresAr.kt` |
-| 登入 / 設定 | 註冊登入 + Email 驗證 / 個資 + 快取 | **Firebase Auth** | `LoginScreen.kt` · `SettingsScreen.kt` |
-
----
+基於 VLM（視覺語言模型）的即時室內導航 App。使用者拍照上傳，系統透過物件偵測（GroundingDINO）、文字辨識（EasyOCR）和 VLM（GPT-4o / Gemini）分析環境，提供逐步導航指引。
 
 ## 系統架構
 
-App 端直接呼叫雲端服務完成「OCR + 文字理解」;賣場視覺定位則交由獨立後端的「偵測 → 讀字 → 推論 → 拓樸」管線處理。
-
-<div align="center">
-
-![智慧購物導航 — 系統架構](docs/architecture.jpg)
-
-</div>
-
 ```
-        Android App  (com.example.shopping · 單一 Activity + Compose)
-        MainActivity → NavHost(起始頁 login)
-        login · main_list(六分頁) · teammate_home · ar_navigation · settings
-                          │
-        ┌─────────────────┼──────────────────────────────┐
-        ▼                 ▼                               ▼
-  Firebase Auth     雲端 AI / OCR 服務                賣場視覺定位
-  (帳號/驗證)   Groq · ML Kit · PaddleOCR · Places    （上傳照片）
-                                                          │
-                                                          ▼
-            Python 後端 backend/(FastAPI · 獨立資料夾)
-            GroundingDINO → EasyOCR → Ollama VLM → NetworkX 拓樸地圖
+┌──────────────┐    HTTP/JSON     ┌────────────────────────────┐
+│  Android App │ ◄──────────────► │  Python FastAPI Backend     │
+│  (Kotlin)    │   Retrofit       │                            │
+│              │                  │  ┌─ GroundingDINO (物件偵測)│
+│  Camera ─────┼─ JPEG ─────────► │  ├─ EasyOCR (文字辨識)     │
+│  Gallery ────┤                  │  ├─ VLM (GPT-4o/Gemini)    │
+│              │                  │  ├─ Annotator (標註圖)      │
+│  UI ◄────────┤◄── TurnResponse │  └─ TopoMap (拓撲地圖)      │
+└──────────────┘                  └────────────────────────────┘
 ```
 
-後端的完整模組、安裝與啟動見 **[`backend/README.md`](backend/README.md)**。
+## 導航流程
+
+1. **建立 Session** — 使用者輸入目標（如「找冰箱」），VLM 分解出偵測關鍵字
+2. **拍照上傳** — GroundingDINO 偵測物件、EasyOCR 讀取文字
+3. **VLM 決策** — 綜合偵測結果 + 照片 + 歷史路徑，回傳 MOVE / ARRIVED / ASK
+4. **標註圖** — 在照片上標示所有偵測框和 OCR 文字（含信心值）
+5. **拓撲地圖** — 每一步自動建立並保存地圖（JSON + PNG）
 
 ---
 
-## 資料流與模型管線
+## 從零開始安裝
 
-系統的「智慧」來自兩條獨立管線。
+### 前置需求
 
-**① App 端 — OCR → LLM 結構化**
+| 項目 | 版本 |
+|------|------|
+| Android Studio | Ladybug 以上（支援 AGP 9.0.0） |
+| JDK | 17+ |
+| Python | 3.10 ~ 3.11 |
+| C++ Build Tools | Visual Studio Build Tools（安裝「使用 C++ 的桌面開發」） |
 
-```
-收據:  拍照 → ML Kit TextRecognition → Groq(response_format=json) → TidiedReceiptResponse → 入帳 + DonutChart
-成分:  拍照 → PaddleOCR(REST) → 內建過敏原字典比對 + MET 熱量換算 → DietRecord
-助理:  使用者問題 + ShoppingContext(庫存+預算+健康 JSON 快照) → Groq → 跨模組回答(多輪)
-```
+### Step 1：Clone 專案
 
-**② 後端 — 賣場視覺導航(設計準則:先偵測 → 再讀字 → 後推論 → 拓樸定位)**
-
-```
-顧客照片
-   └─▶ GroundingDINO 物件偵測(貨架商品/冰箱/走道/標示)
-          └─▶ EasyOCR 招牌與貨架文字辨識
-                 └─▶ Ollama VLM(LLaMA 3.2 Vision)整合影像+偵測+OCR+地圖摘要
-                        └─▶ NetworkX 拓樸地圖(節點=位置 · 邊=走過路徑)
-                               └─▶ 導航動作:MOVE / ASK / ARRIVED ──(指引)──▶ 回到 App
-```
-
----
-
-## 資料模型與持久化
-
-狀態集中於 `MainContainer`(`shoppingItems` / `dietRecords` / `budgetTotalStr`),以 **kotlinx.serialization** 寫入 `filesDir`。
-
-| 本地檔 | 內容 | 對應資料類別 |
-|---|---|---|
-| `shopping_list.json` | 購物清單 | `ShoppingItem` |
-| `diet_records.json` | 飲食 / 營養紀錄 | `DietRecord` |
-| `monthly_budget.txt` | 月預算總額 | — |
-| `user_profile.json` | 個人資料 / 過敏原 | `UserProfile` |
-
-**主要欄位**
-- `ShoppingItem` — `name` / `qty` / `price` / `isChecked` / `createdAt` / `purchasedAt` / `dueDate` / `storeName` / `location` / `receiptId`
-- `DietRecord` — `name` / `ingredients` / `expiryDate` / `unitCalorie` / `portion` / `totalCalories` / `carbs` · `sugar` · `protein` · `fat` · `cholesterol` · `sodium` / `foodCategory`
-- `UserProfile` — `gender` / `birthday` / `height` / `weight` / `allergies` / `disease` / `activityLevel`
-- `ShoppingContext`(`model/ShoppingContext.kt`)— 由 `buildShoppingContext()` 把庫存 / 預算 / 健康彙整成 JSON 快照,於每次提問注入 AI 助理的系統提示。
-
----
-
-## 後端 API 參考
-
-後端為一般 REST 服務(`server/server.py`),客戶端依下列端點互動:
-
-| 方法 | 路徑 | 說明 | 回傳重點 |
-|---|---|---|---|
-| `POST` | `/session` | 建立導航 session(輸入商品目標) | `session_id` · `goal_objects` |
-| `POST` | `/session/{id}/photo` | 上傳一張照片取得導航動作 | `action`(MOVE/ASK/ARRIVED) · `guidance` · `annotated_photo_url` |
-| `POST` | `/session/{id}/answer` | 回答 ASK 問題後繼續 | 同上 |
-| `GET` | `/session/{id}/map?format=json\|png` | 取得目前拓樸地圖 | JSON 或 PNG |
-| `GET` | `/session/{id}` | 取得 session 狀態 / 歷史 | session 物件 |
-| `GET` | `/session/{id}/photo/{node}.jpg` | 取得標註後影像 | 影像 |
-| `GET` | `/health` | 健康檢查 | `{"status":"ok"}` |
-
-> 用法範例與啟動方式見 [`backend/README.md`](backend/README.md)。
-
----
-
-## 技術堆疊
-
-> 以 `app/build.gradle.kts` 與 `gradle/libs.versions.toml` 為準。
-
-**Android** — Kotlin 2.2.10 · Jetpack Compose(Material 3 / navigation-compose / icons-extended)· Coil 2.7.0 · kotlinx.serialization · Retrofit 2.9.0 + Gson + OkHttp · CameraX 1.5.3 · Firebase Auth (BoM 33.9.0) · ML Kit Text Recognition 16.0.1 · play-services-location 21.3.0 · Places SDK (New) 4.1.0
-**雲端 LLM** — Groq `llama-3.3-70b-versatile`(AI 助理 + 收據結構化)
-**OCR** — ML Kit(收據)· PaddleOCR 自架 REST(成分)
-**後端** — Python 3.12 · FastAPI · GroundingDINO · EasyOCR · Ollama(LLaMA 3.2 Vision)· NetworkX
-**備註** — Gemini generativeai 0.9.0 仍列為相依,但程式碼目前一律改用 Groq。
-
-## 建置與執行
-
-**Android App**
 ```bash
-git clone https://github.com/B1229013/Shopping-Navigation.git
+git clone <repo-url>
 cd Shopping-Navigation
-# 1) 複製 .env.example 為 .env 並填入金鑰
-# 2) 放入 Firebase 設定檔 app/google-services.json
-gradlew.bat :app:assembleDebug    # Windows（macOS/Linux 用 ./gradlew）
-gradlew.bat :app:installDebug     # 或在 Android Studio 直接 ▶ Run
 ```
-需求:Android Studio + JDK 11、Android SDK(compileSdk 35)、裝置 Android 7.0 (API 24)+。手機端不需自行下載大型模型(Groq 雲端、ML Kit 隨 Play Services、PaddleOCR 走 REST)。
 
-**後端導航伺服器** — 為**獨立資料夾**,其安裝、模型下載(Ollama `llama3.2-vision`、GroundingDINO 權重)與啟動請見 👉 **[`backend/README.md`](backend/README.md)**。
+### Step 2：設定環境變數
+
+在專案根目錄建立 `.env`：
+
+```env
+# Android App 連線用（改成你電腦的 IP）
+BACKEND_URL=http://192.168.x.x:8000/
+
+# VLM 後端選擇：openai 或 gemini
+VLM_BACKEND=openai
+
+# Gemini（選用）
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL=gemini-2.5-flash
+
+# OpenAI / 相容 API（選用）
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o
+
+# 感知模組開關（1=開，0=關）
+PERCEPTION_ENABLED=1
+OCR_ENABLED=1
+```
+
+### Step 3：安裝 Python Backend
+
+```powershell
+cd backend
+
+# 建立虛擬環境
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+$env:PYTHONUTF8 = "1"
+
+# 安裝基礎套件
+pip install -r requirements-server.txt
+
+# 安裝 CPU 版 PyTorch（覆蓋 CUDA 版，除非你有 ≥4GB VRAM 的 GPU）
+pip install torch torchvision --force-reinstall --index-url https://download.pytorch.org/whl/cpu
+
+# 安裝 transformers（必須 <5，GroundingDINO 不相容 v5）
+pip install "transformers>=4.40,<5"
+
+# 安裝 GroundingDINO
+pip install wheel setuptools
+pip install groundingdino-py --no-build-isolation
+```
+
+### Step 4：下載模型權重
+
+下載 `groundingdino_swint_ogc.pth`（約 694MB）放到 `backend/models/`：
+
+```
+backend/
+  models/
+    groundingdino_swint_ogc.pth
+```
+
+下載連結：https://github.com/IDEA-Research/GroundingDINO/releases
+
+### Step 5：啟動 Backend
+
+```powershell
+cd backend
+.\start.ps1
+```
+
+或手動：
+
+```powershell
+cd backend
+.\venv\Scripts\Activate.ps1
+$env:PYTHONUTF8 = "1"
+python -m uvicorn server.server:app --host 0.0.0.0 --port 8000
+```
+
+啟動成功會看到：
+
+```
+INFO server.server: VLM backend: openai
+INFO server.server: OpenAI model: gpt-4o
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+### Step 6：安裝 Android App
+
+1. 用 Android Studio 開啟專案根目錄
+2. 確認 `.env` 中 `BACKEND_URL` 是你電腦的 IP（手機和電腦要在同一網路）
+3. 連接手機或模擬器，點 Run
+
+### 連線測試
+
+手機瀏覽器開啟 `http://<你的IP>:8000/health`，應回傳 `{"status":"ok"}`。
 
 ---
 
-## 專案結構
+## 使用方式
+
+1. 開啟 App → 進入「導航」頁面
+2. 輸入目標（如「找冰箱」、「找咖啡機」）→ 按「開始導航」
+3. 拍照或從相簿選取照片 → 等待分析（約 50-80 秒，視 CPU 效能）
+4. 依照指引移動 → 再拍照 → 重複直到 ARRIVED
+
+### 快速模式 vs 完整模式
+
+在 `.env` 中切換：
+
+| 模式 | 設定 | 速度 | 精度 |
+|------|------|------|------|
+| 快速（VLM only） | `PERCEPTION_ENABLED=0`, `OCR_ENABLED=0` | ~5 秒 | 中 |
+| 完整（全模組） | `PERCEPTION_ENABLED=1`, `OCR_ENABLED=1` | ~60 秒 | 高 |
+
+---
+
+## API 端點
+
+| Method | Path | 說明 |
+|--------|------|------|
+| `POST` | `/session` | 建立導航 session，回傳 session_id 和 goal_objects |
+| `POST` | `/session/{id}/photo` | 上傳照片，回傳導航指引 |
+| `POST` | `/session/{id}/answer` | 回答 VLM 提問 |
+| `GET` | `/session/{id}` | 查詢 session 狀態和歷史 |
+| `GET` | `/session/{id}/map` | 取得拓撲地圖（JSON） |
+| `GET` | `/session/{id}/map?format=png` | 取得拓撲地圖（PNG） |
+| `GET` | `/session/{id}/photo/{n}.jpg` | 取得第 n 張標註照片 |
+| `GET` | `/health` | 健康檢查 |
+
+---
+
+## 輸出檔案
+
+每個 session 的輸出保存在 `backend/output/sessions/{session_id}/`：
 
 ```
-Shopping-Navigation/
-├── app/  ── src/main/java/com/example/shopping/
-│   ├── MainActivity.kt              # 單一 Activity + NavHost
-│   ├── model/                       # ShoppingItem · DietRecord · UserProfile · ShoppingContext
-│   └── ui/
-│       ├── screens/                 # MainContainer(含 BudgetScreen)· Home · ShoppingList
-│       │                            #   Ingredients · History · AI · Navigation · NearbyStores …
-│       ├── components/ · utils/ · theme/
-├── backend/                         # Python 後端導航伺服器(FastAPI)— 見 backend/README.md
-│   ├── server/                      # GroundingDINO · EasyOCR · Ollama VLM · NetworkX
-│   ├── eval/ · generate_topomap.py · build_store_*.py …
-│   └── README.md
-└── Map/ · .env.example · build.gradle.kts · settings.gradle.kts
+output/sessions/{session_id}/
+  ├── photo/        原始照片（0.jpg, 1.jpg, ...）
+  ├── annotated/    標註照片（綠框=物件偵測，青框=OCR文字，含信心值）
+  └── map/          拓撲地圖
+        ├── map_0.json    第 0 步的地圖 JSON
+        ├── map_0.png     第 0 步的地圖視覺化
+        ├── map_1.json
+        └── map_1.png
 ```
 
 ---
 
-## 開發狀態
+## 專案檔案說明
 
-| 模組 | 狀態 |
-|---|---|
-| 購物清單 / 預算 / 收據 / 飲食 / AI 助理 / 附近門市 / 登入設定 | ✅ 已實作 |
-| 賣場導航 UI(CameraX 即時、每 3 秒取樣、AR 店家標記、模擬圖片) | ✅ 已實作 |
-| 賣場視覺定位推論(`NavigationScreen.processImageForModel()`) | 🚧 佔位中,待串接 `backend/` |
-| 後端導航伺服器(偵測→OCR→VLM→拓樸) | ✅ 可獨立運作(`backend/`) |
-| App ⇄ 後端串接 | 🚧 進行中 |
+### Backend（`backend/server/`）
+
+| 檔案 | 功能 |
+|------|------|
+| `server.py` | FastAPI 主程式。定義所有 API 端點，串接各模組，處理照片上傳→偵測→OCR→VLM→標註→地圖的完整流程 |
+| `config.py` | 全域設定。讀取 `.env`，定義模型路徑、偵測閾值、VLM 後端選擇、OCR 語言等參數 |
+| `vlm.py` | VLM 呼叫層。支援三種後端（Gemini / OpenAI / Ollama），負責圖片壓縮、prompt 組裝、API 呼叫 |
+| `perception.py` | GroundingDINO 物件偵測。載入模型權重，根據 goal_objects 關鍵字在照片中偵測物件，回傳 bounding box + 信心值 |
+| `ocr.py` | EasyOCR 文字辨識。支援英文和繁體中文，回傳偵測到的文字、信心值和位置 |
+| `annotator.py` | 標註圖產生器。在照片上繪製物件偵測框（綠色）和 OCR 文字框（青色），標示 label 和信心值 |
+| `prompts.py` | Prompt 模板。包含 goal 分解 prompt 和每一步導航 prompt，指示 VLM 如何回應 |
+| `goal_decomposer.py` | 目標分解。呼叫 VLM 將使用者目標（如「找冰箱」）轉換為 GroundingDINO 偵測關鍵字列表 |
+| `topomap.py` | 拓撲地圖。用 NetworkX 建立動態圖：節點=拍照位置，邊=移動動作。支援 JSON 匯出和 PNG 視覺化 |
+| `scene.py` | 場景格式化。將偵測和 OCR 結果轉換為 VLM 可讀的文字描述（含空間位置：左/中/右、近/遠） |
+| `models.py` | 資料模型。定義 API 的 request/response schema（Pydantic）和 VLM 回應格式 |
+| `session.py` | Session 管理。記憶體中的 session store，保存每個導航工作的狀態、歷史和地圖 |
+| `store_knowledge.py` | 靜態環境知識。CSIE 系辦的 10 個區域定義（房間名稱、地標物件、教授辦公室對照） |
+| `store_map.py` | 靜態拓撲地圖。系辦的預建地圖（10 個節點及其連接關係） |
+| `navigator.py` | 靜態導航引擎。根據 `store_knowledge.py` 的資料進行物件/地點搜尋和路徑規劃 |
+| `batch_mapper.py` | 批次建圖工具。對一個資料夾的照片批次執行 GroundingDINO 偵測，產出偵測結果 JSON |
+| `run_server.py` | 啟動腳本。設定 logging 並啟動 uvicorn |
+| `start.ps1` | PowerShell 啟動腳本。自動啟用 venv 並啟動 server |
+
+### Android App（`app/src/main/java/com/example/shopping/`）
+
+| 檔案 | 功能 |
+|------|------|
+| `MainActivity.kt` | App 進入點 |
+| `network/NavigationApi.kt` | Retrofit HTTP client。定義 API 介面和 OkHttp 設定（30s connect / 300s read timeout） |
+| `ui/screens/NavigationScreen.kt` | 導航主畫面。整合 CameraX 拍照、相簿選取、API 呼叫、導航指引顯示、標註圖顯示 |
+| `ui/screens/HomeScreen.kt` | 首頁 |
+| `ui/screens/ShoppingListScreen.kt` | 購物清單頁面 |
+| `ui/screens/AIScreen.kt` | AI 助手頁面 |
+| `ui/screens/SettingsScreen.kt` | 設定頁面 |
+| `ui/screens/LoginScreen.kt` | 登入頁面 |
+| `ui/screens/MainContainer.kt` | 主容器（底部導航列） |
+| `ui/screens/HistoryScreen.kt` | 歷史記錄 |
+| `ui/screens/IngredientsScreen.kt` | 食材推薦 |
+| `ui/screens/NearbyStoresSheet.kt` | 附近商店 |
+| `ui/screens/NearbyStoresAr.kt` | AR 附近商店 |
+| `ui/components/CinematicComponents.kt` | UI 動畫元件 |
+| `ui/components/CinematicInteractiveComponents.kt` | 互動式 UI 元件 |
+| `ui/utils/CategoryClassifier.kt` | 商品分類工具 |
+| `ui/utils/FoodIcons.kt` | 食物圖示 |
+| `model/*.kt` | 資料模型（購物項目、使用者設定等） |
+| `ui/theme/*.kt` | Material3 主題設定 |
+
+### 設定檔
+
+| 檔案 | 功能 |
+|------|------|
+| `.env` | 環境變數（VLM 後端、API Key、模組開關） |
+| `gradle/libs.versions.toml` | Android 依賴版本管理 |
+| `app/build.gradle.kts` | Android app 建置設定 |
+| `app/src/main/AndroidManifest.xml` | Android 權限宣告（相機、網路、位置） |
+| `app/src/main/res/xml/network_security_config.xml` | 允許 HTTP 明文連線（開發用） |
+| `backend/requirements-server.txt` | Python 套件清單 |
+| `backend/.gitignore` | Git 忽略規則（venv、模型權重、輸出檔案） |
 
 ---
 
-## 限制與容錯
+## 技術細節
 
-- **賣場視覺定位尚未完整串接**:`NavigationScreen` 逐幀分析目前僅記錄並關閉影像。
-- **OCR 受光學條件影響**:光線不足、反光、字體過小會降低 ML Kit / PaddleOCR 成功率。
-- **第三方 API 配額**:Groq、Places 受官方頻率 / 配額限制,需網路連線。
-- **容錯與安全**:LLM 呼叫以 `try-catch` 包覆並於對話回報錯誤;金鑰經 `.env`→`BuildConfig`(不入庫);資料僅存 `filesDir`;Email 未驗證帳號自動 `signOut()` 攔截。
+### 偵測參數
+
+| 參數 | 值 | 說明 |
+|------|------|------|
+| `GROUNDINGDINO_BOX_THRESHOLD` | 0.30 | 主要偵測信心門檻 |
+| `GROUNDINGDINO_BOX_THRESHOLD_FALLBACK` | 0.20 | 未偵測到時降低重試 |
+| `GROUNDINGDINO_TEXT_THRESHOLD` | 0.25 | 文字匹配門檻 |
+| `OCR_MIN_CONFIDENCE` | 0.3 | OCR 最低信心值 |
+| `OCR_LANGUAGES` | en, ch_tra | OCR 語言（英文 + 繁體中文） |
+
+### 效能參考（CPU 模式，Intel i5 + MX550）
+
+| 模組 | 耗時 |
+|------|------|
+| GroundingDINO | ~30-40 秒 |
+| EasyOCR | ~20-30 秒 |
+| VLM (GPT-4o) | ~3-5 秒 |
+| 總計（完整模式） | ~55-80 秒 |
+| 總計（快速模式） | ~3-5 秒 |
+
+### GPU 支援
+
+系統會自動偵測 GPU VRAM：
+- ≥ 3GB VRAM：自動使用 GPU（速度提升 5-10 倍）
+- < 3GB VRAM：自動降回 CPU 模式
+
+---
+
+## 疑難排解
+
+| 問題 | 解決方式 |
+|------|----------|
+| 手機連不到 server | 確認同一 Wi-Fi、IP 正確、防火牆允許 port 8000 |
+| `Perception unavailable` | 確認 `models/groundingdino_swint_ogc.pth` 存在 |
+| `transformers` BertModel 錯誤 | 安裝 `transformers<5`：`pip install "transformers>=4.40,<5"` |
+| 照片上傳 timeout | 改用快速模式（`PERCEPTION_ENABLED=0`）或增加手機端 timeout |
+| GroundingDINO 安裝失敗 | 安裝 Visual Studio C++ Build Tools，設定 `$env:PYTHONUTF8="1"` |
+| AGP 版本不相容 | `gradle/libs.versions.toml` 中 `agp` 設為 `9.0.0` |

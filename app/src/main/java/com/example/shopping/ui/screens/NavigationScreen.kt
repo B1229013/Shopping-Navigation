@@ -1,7 +1,6 @@
 package com.example.shopping.ui.screens
 
 import android.Manifest
-import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
 import android.net.Uri
@@ -11,17 +10,24 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
+import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -34,26 +40,35 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.example.shopping.model.ShoppingItem
+import com.example.shopping.network.NavigationApi
+import com.example.shopping.network.StartSessionRequest
 import com.example.shopping.ui.components.*
 import com.example.shopping.ui.theme.*
+import com.example.shopping.viewmodel.NavigationViewModel
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import java.util.concurrent.Executors
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeammateHomeScreen(navController: NavController) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val shoppingListJson = navController.previousBackStackEntry?.savedStateHandle?.get<String>("shopping_list_json")
     val initialItems = remember(shoppingListJson) {
         try {
@@ -67,6 +82,26 @@ fun TeammateHomeScreen(navController: NavController) {
     var nearbyLocation by remember { mutableStateOf<Location?>(null) }
     var showNearbySheet by remember { mutableStateOf(false) }
     var fetchingLocation by remember { mutableStateOf(false) }
+    var isCreatingSession by remember { mutableStateOf(false) }
+    var backendError by remember { mutableStateOf<String?>(null) }
+
+    // Neo4j map selection
+    var neo4jPlaces by remember { mutableStateOf<List<com.example.shopping.network.Neo4jPlaceInfo>>(emptyList()) }
+    var isLoadingPlaces by remember { mutableStateOf(false) }
+    var selectedPlace by remember { mutableStateOf<String?>(null) }
+    var placeDropdownExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        isLoadingPlaces = true
+        try {
+            val places = withContext(Dispatchers.IO) {
+                com.example.shopping.network.SensorNavApi.service.listNeo4jPlaces()
+            }
+            neo4jPlaces = places
+            if (places.size == 1) selectedPlace = places[0].place_name
+        } catch (_: Exception) { }
+        isLoadingPlaces = false
+    }
 
     fun fetchLocationThenShow() {
         fetchingLocation = true
@@ -106,6 +141,32 @@ fun TeammateHomeScreen(navController: NavController) {
         ) == PackageManager.PERMISSION_GRANTED
         if (hasPerm) fetchLocationThenShow()
         else locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+    fun startNavigation() {
+        if (initialItems.isEmpty()) return
+        isCreatingSession = true
+        backendError = null
+
+        val goalText = initialItems.joinToString(", ") { "${it.name} x${it.qty}" }
+
+        scope.launch {
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    NavigationApi.service.startSession(StartSessionRequest(goal = goalText, place_name = selectedPlace))
+                }
+                navController.currentBackStackEntry?.savedStateHandle?.set("nav_session_id", response.session_id)
+                navController.currentBackStackEntry?.savedStateHandle?.set("nav_goal", goalText)
+                navController.currentBackStackEntry?.savedStateHandle?.set("nav_guidance", response.guidance)
+                navController.currentBackStackEntry?.savedStateHandle?.set("nav_goal_photo_ids", response.goal_photo_ids.joinToString(","))
+                navController.navigate("ar_navigation")
+            } catch (e: Exception) {
+                Log.e("NavSession", "Failed to create session", e)
+                backendError = "無法連線導航伺服器，請確認伺服器已啟動後再試。"
+            } finally {
+                isCreatingSession = false
+            }
+        }
     }
 
     Scaffold(
@@ -194,9 +255,88 @@ fun TeammateHomeScreen(navController: NavController) {
                 }
             }
 
+            // Error message
+            backendError?.let { err ->
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    color = Color(0xFF3D1111),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        err,
+                        color = Color(0xFFFF6B6B),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+
+            // Map selection dropdown
+            if (neo4jPlaces.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                StaggeredItem(index = 2) {
+                    ExposedDropdownMenuBox(
+                        expanded = placeDropdownExpanded,
+                        onExpandedChange = { placeDropdownExpanded = it },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = selectedPlace ?: "選擇地圖（可選）",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("導航地圖") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = placeDropdownExpanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextSecondary,
+                                focusedBorderColor = Gold,
+                                unfocusedBorderColor = TextTertiary,
+                                focusedLabelColor = Gold,
+                                unfocusedLabelColor = TextTertiary,
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = placeDropdownExpanded,
+                            onDismissRequest = { placeDropdownExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("不使用地圖") },
+                                onClick = {
+                                    selectedPlace = null
+                                    placeDropdownExpanded = false
+                                }
+                            )
+                            neo4jPlaces.forEach { place ->
+                                DropdownMenuItem(
+                                    text = { Text("${place.place_name}（${place.node_count} 節點）") },
+                                    onClick = {
+                                        selectedPlace = place.place_name
+                                        placeDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (isLoadingPlaces) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Gold, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("載入地圖列表...", style = MaterialTheme.typography.bodySmall, color = TextTertiary)
+                }
+            }
+
             Spacer(Modifier.height(16.dp))
 
-            StaggeredItem(index = 2) {
+            StaggeredItem(index = 3) {
                 OutlinedButton(
                     onClick = { openNearbyStores() },
                     modifier = Modifier
@@ -225,21 +365,27 @@ fun TeammateHomeScreen(navController: NavController) {
 
             Spacer(Modifier.height(10.dp))
 
-            StaggeredItem(index = 3) {
+            StaggeredItem(index = 4) {
                 Button(
-                    onClick = { navController.navigate("ar_navigation") },
+                    onClick = { startNavigation() },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp),
-                    enabled = initialItems.isNotEmpty(),
+                    enabled = initialItems.isNotEmpty() && !isCreatingSession,
                     colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Noir),
                     shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text(
-                        "開始導航",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                    if (isCreatingSession) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = Noir,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text("建立導航中...", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    } else {
+                        Text("開始導航", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
 
@@ -254,12 +400,25 @@ fun TeammateHomeScreen(navController: NavController) {
     }
 }
 
+// ── Navigation Screen with Backend Integration ──
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NavigationScreen(navController: NavController) {
+fun NavigationScreen(navController: NavController, vm: NavigationViewModel = viewModel()) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
-    
+
+    val navSessionId = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_session_id")
+    val navGoal = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_goal") ?: ""
+    val navGuidance = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_guidance") ?: ""
+    val navGoalPhotoIds = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_goal_photo_ids")
+        ?.split(",")?.mapNotNull { it.toIntOrNull() } ?: emptyList()
+
+    LaunchedEffect(navSessionId) {
+        vm.init(navSessionId, navGoal, navGuidance, navGoalPhotoIds)
+    }
+
     var currentLocation by remember { mutableStateOf<Location?>(null) }
     var hasCameraPermission by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
@@ -267,19 +426,13 @@ fun NavigationScreen(navController: NavController) {
     var hasLocationPermission by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED)
     }
-    
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         hasCameraPermission = permissions[Manifest.permission.CAMERA] ?: hasCameraPermission
         hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: hasLocationPermission
     }
-
-    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { selectedImageUri = it }
-
-    var lastCaptureTime by remember { mutableLongStateOf(0L) }
-    val captureInterval = 3000L
 
     LaunchedEffect(Unit) {
         if (!hasCameraPermission || !hasLocationPermission) {
@@ -293,156 +446,367 @@ fun NavigationScreen(navController: NavController) {
                 fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
                     .addOnSuccessListener { location ->
                         currentLocation = location
-                        if (location != null) {
-                            Log.d("GPS", "Current location: ${location.latitude}, ${location.longitude}")
-                        }
                     }
-            } catch (e: SecurityException) {
-                Log.e("GPS", "Location permission error", e)
-            }
+            } catch (_: SecurityException) {}
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Noir)) {
-        if (selectedImageUri != null) {
-            AsyncImage(
-                model = selectedImageUri,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        } else if (hasCameraPermission) {
-            CameraWithAnalysis(lifecycleOwner, { image ->
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastCaptureTime >= captureInterval) {
-                    lastCaptureTime = currentTime
-                    processImageForModel(image)
-                } else {
-                    image.close()
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) vm.uploadFromGallery(context, uri)
+    }
+
+    // No session — show error and go back
+    if (vm.sessionId == null) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Noir),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("未建立導航 Session", color = TextPrimary, style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = { navController.popBackStack() }) {
+                    Text("返回")
                 }
-            })
+            }
+        }
+        return
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(Noir)) {
+        // Camera preview (full screen background)
+        if (hasCameraPermission) {
+            CameraPreviewWithCapture(lifecycleOwner, vm.imageCapture)
         }
 
-        // AR store markers — only while live camera is active
-        if (hasCameraPermission && selectedImageUri == null) {
+        // AR store markers
+        if (hasCameraPermission) {
             currentLocation?.let { loc ->
                 NearbyStoresAr(location = loc)
             }
         }
 
-        AROverlayUI(navController, selectedImageUri, { selectedImageUri = null }, photoPickerLauncher, currentLocation)
-
-        if (hasCameraPermission && selectedImageUri == null) {
-            Text(
-                "自動分析中 (每3秒)...",
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 80.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Noir.copy(alpha = 0.6f))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelMedium,
-                color = TextPrimary
-            )
-        }
-    }
-}
-
-private fun processImageForModel(image: ImageProxy) {
-    Log.d("NavigationAI", "正在分析影像: ${image.width}x${image.height}")
-    image.close()
-}
-
-@Composable
-fun CameraWithAnalysis(lifecycleOwner: LifecycleOwner, onImageAnalyzed: (ImageProxy) -> Unit) {
-    val context = LocalContext.current
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
-    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
-
-    AndroidView(factory = { ctx ->
-        val previewView = PreviewView(ctx)
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
-            val imageAnalysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-                .also { it.setAnalyzer(analysisExecutor) { image -> onImageAnalyzed(image) } }
-
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalysis)
-            } catch (e: Exception) { Log.e("CameraX", "綁定失敗", e) }
-        }, ContextCompat.getMainExecutor(ctx))
-        previewView
-    }, modifier = Modifier.fillMaxSize())
-}
-
-@Composable
-fun AROverlayUI(
-    navController: NavController,
-    uri: Uri?,
-    onClearUri: () -> Unit,
-    launcher: androidx.activity.result.ActivityResultLauncher<PickVisualMediaRequest>,
-    location: Location?
-) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (location != null) {
+        // ── Overlay: top status + middle guidance + bottom buttons ──
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        ) {
+            val maxH = maxHeight
+            Column(modifier = Modifier.fillMaxSize()) {
+            // ── Top: Status bar ──
             Surface(
+                color = Color(0xFF90CAF9).copy(alpha = 0.70f),
+                shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
                 modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp)
-                    .padding(top = 40.dp),
-                color = Noir.copy(alpha = 0.7f),
-                shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Gold.copy(alpha = 0.5f))
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.LocationOn, null, tint = Gold, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
+                Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        "GPS 已就緒",
-                        color = TextPrimary,
-                        style = MaterialTheme.typography.labelSmall
+                        if (vm.hasArrived) "已到達目標！"
+                        else if (vm.pendingArrival) "請確認是否到達目標"
+                        else "導航中",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF1A237E)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "目標　${vm.goal}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF1A237E).copy(alpha = 0.8f),
+                        maxLines = 2
                     )
                 }
             }
-        }
 
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(32.dp)
-                .navigationBarsPadding(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Button(
-                onClick = { if (uri != null) onClearUri() else navController.popBackStack() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Danger.copy(alpha = 0.85f),
-                    contentColor = TextPrimary
-                ),
-                shape = RoundedCornerShape(14.dp)
+            // ── Middle: camera view area (spacer) ──
+            Spacer(modifier = Modifier.weight(1f))
+
+            // ── Guidance panel (max 30% of screen, scrollable) ──
+            Surface(
+                color = Color(0xFFA5D6A7).copy(alpha = 0.75f),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .heightIn(max = maxH * 0.30f)
             ) {
-                Text(
-                    if (uri != null) "恢復相機" else "結束導航",
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
-
-            if (uri == null) {
-                OutlinedButton(
-                    onClick = { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, TextSecondary.copy(alpha = 0.5f))
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.Start
                 ) {
-                    Text("選取模擬圖片", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        "導航指引",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF1B5E20).copy(alpha = 0.7f)
+                    )
+
+                    // Multi-goal progress chips
+                    if (vm.totalGoals > 1 && vm.subGoals.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            vm.subGoals.forEachIndexed { idx, sg ->
+                                val isCurrent = idx == vm.currentGoalIdx
+                                Surface(
+                                    color = when {
+                                        sg.arrived -> Color(0xFF10B981)
+                                        isCurrent -> Color(0xFF3B82F6)
+                                        else -> Color(0xFF9CA3AF)
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        if (sg.arrived) {
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                        }
+                                        Text(
+                                            sg.name,
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        vm.guidance,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF1B5E20),
+                        lineHeight = 22.sp
+                    )
+
+                    // ASK flow
+                    if (vm.pendingQuestion != null && !vm.hasArrived) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            vm.pendingQuestion!!,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFE65100),
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = vm.answerText,
+                                onValueChange = { vm.answerText = it },
+                                placeholder = { Text("輸入回答...", color = Color(0xFF666666)) },
+                                modifier = Modifier.weight(1f),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color(0xFF1B5E20),
+                                    unfocusedTextColor = Color(0xFF1B5E20),
+                                    focusedBorderColor = Color(0xFF388E3C),
+                                    unfocusedBorderColor = Color(0xFF81C784),
+                                    cursorColor = Color(0xFF388E3C)
+                                ),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = { vm.submitAnswer() })
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Button(
+                                onClick = { vm.submitAnswer() },
+                                enabled = vm.answerText.isNotBlank() && !vm.isAnswering,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFFF9800),
+                                    contentColor = Color.White
+                                ),
+                                shape = CircleShape,
+                                contentPadding = PaddingValues(12.dp),
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                if (vm.isAnswering) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Default.Send, null, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    // Error
+                    vm.errorMessage?.let { err ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(err, color = Color(0xFFD32F2F), style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
-        }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ── Bottom: Action buttons ──
+            if (vm.pendingArrival) {
+                // Arrival confirmation buttons
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Button(
+                        onClick = { vm.confirmArrival("confirmed") },
+                        enabled = !vm.isConfirming,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF4CAF50),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier.fillMaxWidth().height(46.dp)
+                    ) {
+                        if (vm.isConfirming) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text("確認到達", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { vm.confirmArrival("false_positive") },
+                            enabled = !vm.isConfirming,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF9E9E9E),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).height(42.dp)
+                        ) {
+                            Text("不是目標", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                        Button(
+                            onClick = { vm.confirmArrival("wrong_instance") },
+                            enabled = !vm.isConfirming,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF9C27B0),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).height(42.dp)
+                        ) {
+                            Text("同類非目標", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = { navController.popBackStack() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (vm.hasArrived) Color(0xFF4CAF50) else Color(0xFFEF5350),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(24.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.weight(1f).height(46.dp)
+                    ) {
+                        Text(
+                            if (vm.hasArrived) "完成" else "結束導航",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+
+                    if (!vm.hasArrived && vm.pendingQuestion == null) {
+                        Button(
+                            onClick = { vm.captureAndUpload(context) },
+                            enabled = !vm.isUploading,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF66BB6A),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).height(46.dp)
+                        ) {
+                            if (vm.isUploading) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(4.dp))
+                                Text("分析中...", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            } else {
+                                Text("拍照分析", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                        }
+
+                        Button(
+                            onClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                            enabled = !vm.isUploading,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF42A5F5),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.weight(1f).height(46.dp)
+                        ) {
+                            Text("選擇照片", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                    }
+                }
+            }
+            } // Column
+        } // BoxWithConstraints
     }
+}
+
+// ── Camera preview with ImageCapture support ──
+
+@Composable
+fun CameraPreviewWithCapture(lifecycleOwner: LifecycleOwner, imageCapture: ImageCapture) {
+    val context = LocalContext.current
+    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+
+    AndroidView(factory = { ctx ->
+        val previewView = PreviewView(ctx).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        }
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+            val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    preview,
+                    imageCapture
+                )
+            } catch (e: Exception) {
+                Log.e("CameraX", "綁定失敗", e)
+            }
+        }, ContextCompat.getMainExecutor(ctx))
+        previewView
+    }, modifier = Modifier.fillMaxSize())
 }

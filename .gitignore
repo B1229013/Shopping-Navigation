@@ -15,3 +15,36 @@
 local.properties
 .env
 .env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Large model weights and generated session output (photos, maps, graphs)
+*.pth
+*.pt
+backend/output/
+output/
+
+# Node / logs / OS
+node_modules/
+*.log
+Thumbs.db
+
+# Test data
+backend/testPDR/
+
+# Build artifacts
+.vite/
+
+# Tooling
+.claude/
+
+# Test data / scratch
+backend/test_topomap&locate/
+backend/*.bak-*
+backend/benchmark_results/

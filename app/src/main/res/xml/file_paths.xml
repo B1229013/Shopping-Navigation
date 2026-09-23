@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="my_cache" path="." />
+    <external-files-path name="sensor_lab" path="sensor_lab/" />
+    <files-path name="snav_local" path="snav_local/" />
 </paths>

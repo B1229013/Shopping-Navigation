@@ -1,8 +1,9 @@
 # Shopping Navigation — 室內導航系統
 
 **VLM（視覺語言模型）視覺推理**即時室內導航 App。
-使用者邊走邊拍，系統透過物件偵測、文字辨識、VLM 決策與感測器航位推算，
-逐步建立帶有步數/距離/航向的拓樸地圖，並提供導航指引。
+使用者拍照上傳，系統透過物件偵測（GroundingDINO）、文字辨識（EasyOCR）與
+VLM（GPT-4o / Gemini / CGU gateway）分析環境，並在拓樸地圖上進行照片定位與
+路徑規劃，提供逐步導航指引。
 
 ---
 
@@ -11,12 +12,10 @@
 系統由 **Android App（前端）** 與 **Python FastAPI（後端）** 組成，後端為共用雲端服務，
 兩端透過 HTTP/JSON 溝通。完整功能如下：
 
-**導航（兩種模式）**
+**導航**
 
 - **VLM 拍照導航** — 輸入目標（如「找冰箱」），拍照後由物件偵測 + OCR + VLM
   綜合判斷，逐步回傳 MOVE / ARRIVED / ASK 指引，並在照片上標註偵測結果。
-- **Sensor-Nav / PDR 導航** — 開啟後 7 種感測器持續記錄步數與航向，邊走邊拍
-  自動建圖，指引會結合最短路徑給出「還需幾步 / 幾公尺」的量化提示。
 
 **地圖與定位**
 
@@ -26,27 +25,21 @@
 - **路徑規劃（route_planner）** — 地圖上的 A* 最短路徑與多目標 TSP 排序。
 - **Neo4j 雲端地圖** — 地圖存入/讀出 Neo4j Aura，供多人共用同一份場所地圖。
 
-**資料採集與工具**
+**工具與基礎設施**
 
-- **離線採集模式** — 不需後端，照片 + PDR + 原始感測器全存手機，可匯出 ZIP。
-- **感測器實驗室** — 8 種感測器即時錄製、CSV 匯出、歷史瀏覽與分享。
+- **感測器實驗室** — 8 種感測器即時錄製、CSV 匯出、歷史瀏覽與分享（開發/驗證用）。
 - **CGU LLM Gateway** — 一把 `CGU_API_KEY` 通吃 chat / vision / OCR / embedding。
 - **雲端部署** — 附 Dockerfile 與 render.yaml，可一鍵部署到 Render。
 
 | 功能 | 模組 | 說明 |
 |------|------|------|
 | VLM 拍照導航 | `server.py` + `vlm.py` | 拍照 → 物件偵測 + OCR + VLM 決策 → 逐步指引（MOVE/ARRIVED/ASK） |
-| Sensor-Nav / PDR 導航 | `sensor_nav.py` + Android `PdrTracker` | PDR 計步 + AI 視覺融合，邊走邊拍自動建圖（含步數/距離/航向） |
 | 拓樸地圖 v2 | `topomap_v2.py` | 場所等級地圖：照片節點 + 物件節點子圖、多方向、可跨多次導航重用 |
 | 照片定位 | `locate_v2.py` | 給一張照片，推理它對應到已建地圖中哪個節點 |
 | 路徑規劃 | `route_planner.py` | TopoGraphV2 上的 A* 最短路徑與多目標 TSP 排序 |
 | Neo4j 雲端地圖 | `neo4j_map_store.py` | 把地圖存入/讀出 Neo4j Aura，供多人共用 |
 | CGU LLM Gateway | `llm_gateway.py` | 長庚大學 OpenAI 相容 gateway：一把金鑰通吃 chat/vision/OCR/embedding |
-| 離線採集 | Android `LocalSessionStore` | 不需後端，照片 + 感測器全存手機，可匯出 ZIP |
 | 感測器實驗室 | Android `SensorLabScreen` | 8 種感測器即時錄製、CSV 匯出、歷史瀏覽與分享 |
-
-> Sensor-Nav / PDR 的完整說明（感測器規格、PDR 演算法、資料格式、離線模式）見
-> [`docs/sensor-nav-README.md`](docs/sensor-nav-README.md)。
 
 ---
 
@@ -61,17 +54,11 @@
    `adb reverse tcp:8000 tcp:8000` 或在設定頁填入後端 URL。
 3. 開啟 `http://<後端>/health` 回傳 `{"status":"ok"}` 即代表連線正常。
 
-**操作流程 A — VLM 拍照導航**
+**操作流程 — VLM 拍照導航**
 
 1. App 進入「導航」頁 → 輸入目標（如「找冰箱」）→ 開始導航。
 2. 拍照或選相簿照片 → 等待分析 → 依 MOVE/ARRIVED/ASK 指引移動。
 3. 重複拍照直到 ARRIVED；過程自動建立拓樸地圖。
-
-**操作流程 B — Sensor-Nav / PDR 導航**
-
-1. 設定頁 → 「感測器導航」→ 輸入目的地 → 開始導航（授予相機與活動辨識權限）。
-2. 邊走邊拍，畫面顯示步數/距離統計與小地圖軌跡，指引含「還需幾步」提示。
-3. 確認到達後可儲存為可重用地圖；或切「離線採集模式」把資料存手機、之後匯出 ZIP。
 
 **進階**
 
@@ -87,33 +74,23 @@
 │  Android App (Kotlin)    │ ◄────────────► │  Python FastAPI Backend                │
 │                          │   Retrofit     │                                        │
 │  Camera / Gallery ───────┼─ JPEG ───────► │  ┌─ GroundingDINO (物件偵測)          │
-│  PdrTracker (7 sensors) ─┼─ PDR JSON ───► │  ├─ EasyOCR (文字辨識)               │
-│                          │                │  ├─ VLM (GPT-4o / Gemini / CGU)       │
-│  NavigationScreen        │                │  ├─ Annotator (標註圖)                │
-│  SensorNavScreen ◄───────┼── TurnResponse │  ├─ TopoMap / TopoMap v2 (拓樸地圖)   │
-│  SensorLabScreen         │                │  ├─ locate_v2 (照片定位)             │
-│  Settings / ...          │                │  ├─ route_planner (路徑規劃)         │
+│                          │                │  ├─ EasyOCR (文字辨識)               │
+│  NavigationScreen ◄──────┼── TurnResponse │  ├─ VLM (GPT-4o / Gemini / CGU)       │
+│  Settings / ...          │                │  ├─ Annotator (標註圖)                │
+│                          │                │  ├─ TopoMap / TopoMap v2 (拓樸地圖)   │
+│                          │                │  ├─ locate_v2 (照片定位)             │
+│                          │                │  ├─ route_planner (路徑規劃)         │
 │                          │                │  └─ Neo4j / MapStore (地圖持久化)     │
 └──────────────────────────┘                └──────────────────────────────────────┘
 ```
 
-## 導航流程
-
-### VLM 拍照導航（`/session`）
+## 導航流程（VLM 拍照導航，`/session`）
 
 1. **建立 Session** — 使用者輸入目標（如「找冰箱」），VLM 分解出偵測關鍵字
 2. **拍照上傳** — GroundingDINO 偵測物件、EasyOCR 讀取文字
 3. **VLM 決策** — 綜合偵測結果 + 照片 + 歷史路徑，回傳 MOVE / ARRIVED / ASK
 4. **標註圖** — 在照片上標示所有偵測框和 OCR 文字（含信心值）
 5. **拓樸地圖** — 每一步自動建立並保存地圖（JSON + PNG）
-
-### Sensor-Nav / PDR 導航（`/snav`）
-
-1. **開始導航** — PdrTracker 註冊 7 種感測器，持續記錄步數/航向
-2. **邊走邊拍** — 每次拍照打包 PDR 快照（steps/distance/heading/x/y）+ 原始感測器資料
-3. **上傳融合** — 後端結合影像推理與 PDR 度量建立節點與邊
-4. **步數指引** — 回傳結合最短路徑的步數/距離預估
-5. **儲存地圖** — 可保存為可重用的場所地圖（含 PDR 度量）
 
 ---
 
@@ -250,14 +227,6 @@ python -m uvicorn server.server:app --host 0.0.0.0 --port 8000
 3. 拍照或從相簿選取 → 等待分析
 4. 依指引移動 → 再拍照 → 重複直到 ARRIVED
 
-### Sensor-Nav / PDR 導航
-
-1. 設定頁 → 「感測器導航」
-2. 輸入目的地 → 開始導航（PdrTracker 持續記錄步數/航向）
-3. 邊走邊拍，App 上傳照片 + PDR 資料，顯示步數指引與小地圖軌跡
-4. 確認到達後可儲存地圖
-5. 也可切換「離線採集模式」：不需後端，資料全存手機，之後匯出 ZIP
-
 ### 快速模式 vs 完整模式
 
 在 `.env` 中切換：
@@ -271,7 +240,7 @@ python -m uvicorn server.server:app --host 0.0.0.0 --port 8000
 
 ## API 端點
 
-### 導航 Session（VLM 拍照導航）
+### 導航 Session
 
 | Method | Path | 說明 |
 |--------|------|------|
@@ -285,17 +254,6 @@ python -m uvicorn server.server:app --host 0.0.0.0 --port 8000
 | `GET` | `/session/{id}/photo/{n}.jpg` | 取得第 n 張標註照片 |
 | `GET` | `/session/{id}/raw_photo/{node_id}` | 取得原始照片 |
 | `GET` | `/session/{id}/topo_photo/{photo_id}` | 取得拓樸地圖照片 |
-
-### Sensor-Nav（`/snav` router）
-
-| Method | Path | 說明 |
-|--------|------|------|
-| `POST` | `/snav/session` | 建立感測器導航 session |
-| `POST` | `/snav/{id}/photo` | 上傳照片 + PDR 資料（multipart） |
-| `POST` | `/snav/{id}/answer` / `/confirm` | 回答提問 / 確認抵達 |
-| `GET`/`POST`/`DELETE` | `/snav/maps...` | 儲存、列出、取得、刪除可重用地圖 |
-
-> `/snav` 端點的完整資料格式見 [`docs/sensor-nav-README.md`](docs/sensor-nav-README.md)。
 
 ### 工具與診斷
 
@@ -342,12 +300,11 @@ backend/
 output/sessions/{session_id}/
   ├── photo/        原始照片（0.jpg, 1.jpg, ...）
   ├── annotated/    標註照片（綠框=物件偵測，青框=OCR文字，含信心值）
-  ├── sensors/      Sensor-Nav 的原始感測器 JSON（含 PDR 摘要）
   ├── graph/        目標圖 / 場景圖 PNG
   └── map/          拓樸地圖（map_0.json / map_0.png / ...）
 
 output/maps/
-  └── {map_id}.json  可重用的持久化地圖（含 PDR 度量）
+  └── {map_id}.json  可重用的持久化地圖
 ```
 
 ---
@@ -359,7 +316,6 @@ output/maps/
 | 檔案 | 功能 |
 |------|------|
 | `server.py` | FastAPI 主程式。定義所有 API 端點，串接照片上傳→偵測→OCR→VLM→標註→地圖的完整流程 |
-| `sensor_nav.py` | `/snav` router。PDR + AI 視覺融合導航：EXIF 修正、偵測、TopoMap 建圖、VLM 決策、步數指引、原始感測器儲存 |
 | `config.py` | 全域設定。讀取 `.env`，定義模型路徑、偵測閾值、VLM 後端、OCR 語言、CGU/Neo4j 參數、label 正規化 |
 | `vlm.py` | VLM 呼叫層。支援 OpenAI / Gemini / Ollama / CGU gateway，負責圖片壓縮、prompt 組裝、API 呼叫 |
 | `llm_gateway.py` | 長庚大學 OpenAI 相容 gateway 共用 client：一把 `CGU_API_KEY` 路由 chat / vision / OCR / embedding |
@@ -386,18 +342,13 @@ output/maps/
 
 | 檔案 | 功能 |
 |------|------|
-| `MainActivity.kt` | App 進入點與 composable 路由（含 sensor_nav） |
-| `network/NavigationApi.kt` | Retrofit HTTP client（VLM 導航端點，OkHttp 30s connect / 300s read timeout） |
-| `network/SensorNavApi.kt` | Retrofit service → `/snav` 端點 |
+| `MainActivity.kt` | App 進入點與 composable 路由 |
+| `network/NavigationApi.kt` | Retrofit HTTP client（導航端點，OkHttp 30s connect / 300s read timeout） |
 | `network/BackendConfig.kt` | 後端 URL 動態設定（可在 App 內切換） |
-| `sensor/PdrTracker.kt` | PDR 引擎：7 感測器註冊、Weinberg 步長估計、原始緩衝、snapshot |
-| `sensor/LocalSessionStore.kt` | 離線模式本地儲存：session/photo/sensor JSON、ZIP 匯出 |
-| `viewmodel/NavigationViewModel.kt` | VLM 導航狀態管理 |
-| `viewmodel/SensorNavViewModel.kt` | 整合 PDR + 上傳 + 離線模式 + 地圖管理 |
-| `ui/screens/NavigationScreen.kt` | VLM 導航主畫面（CameraX、相簿、指引、標註圖） |
-| `ui/screens/SensorNavScreen.kt` | Sensor-Nav 畫面：目標輸入 + 離線切換 + 導航（PDR 統計 + 小地圖軌跡） |
+| `viewmodel/NavigationViewModel.kt` | 導航狀態管理 |
+| `ui/screens/NavigationScreen.kt` | 導航主畫面（CameraX、相簿、指引、標註圖） |
 | `ui/screens/SensorLabScreen.kt` | 感測器實驗室：8 種感測器即時錄製、CSV 匯出、歷史瀏覽與分享 |
-| `ui/screens/SettingsScreen.kt` | 設定頁面（含感測器導航入口、後端 URL 設定） |
+| `ui/screens/SettingsScreen.kt` | 設定頁面（後端 URL 設定等） |
 | `ui/screens/HomeScreen.kt` / `ShoppingListScreen.kt` / `AIScreen.kt` / `LoginScreen.kt` / `HistoryScreen.kt` / `IngredientsScreen.kt` / `MainContainer.kt` / `NearbyStoresSheet.kt` / `NearbyStoresAr.kt` | 其他頁面（首頁、購物清單、AI 助手、登入、歷史、食材推薦、主容器、附近商店） |
 | `ui/components/*.kt` | UI 動畫與互動元件 |
 | `ui/utils/*.kt` | 商品分類、食物圖示等工具 |
@@ -410,9 +361,9 @@ output/maps/
 | `.env` / `.env.example` | 環境變數（VLM 後端、API Key、模組開關、Neo4j） |
 | `gradle/libs.versions.toml` | Android 依賴版本管理 |
 | `app/build.gradle.kts` | Android app 建置設定 |
-| `app/src/main/AndroidManifest.xml` | Android 權限宣告（相機、網路、位置、ACTIVITY_RECOGNITION） |
+| `app/src/main/AndroidManifest.xml` | Android 權限宣告（相機、網路、位置） |
 | `app/src/main/res/xml/network_security_config.xml` | 允許 HTTP 明文連線（開發用） |
-| `app/src/main/res/xml/file_paths.xml` | FileProvider path（含離線採集 snav_local） |
+| `app/src/main/res/xml/file_paths.xml` | FileProvider path |
 | `backend/requirements-server.txt` | 本機完整版 Python 套件清單 |
 | `backend/requirements-cloud.txt` | 雲端輕量版（無 torch/easyocr） |
 | `backend/Dockerfile` / `render.yaml` | 雲端部署設定 |
@@ -430,14 +381,6 @@ output/maps/
 | `GROUNDINGDINO_TEXT_THRESHOLD` | 0.25 | 文字匹配門檻 |
 | `OCR_MIN_CONFIDENCE` | 0.3 | OCR 最低信心值 |
 | `OCR_LANGUAGES` | en, ch_tra | OCR 語言（英文 + 繁體中文） |
-
-### PDR 演算法（Sensor-Nav）
-
-- **步長估計**：Weinberg 方法 `stride = K × (a_max − a_min)^0.25`（K≈0.4667）
-- **航向**：Game Rotation Vector（不含磁力計，室內不受磁場干擾）
-- **位置更新**：`x += steps × stride × sin(yaw)`、`y += steps × stride × cos(yaw)`
-
-> 詳見 [`docs/sensor-nav-README.md`](docs/sensor-nav-README.md)。
 
 ### 效能參考（CPU 模式，Intel i5 + MX550）
 
@@ -467,14 +410,12 @@ output/maps/
 | 照片上傳 timeout | 改用快速模式（`PERCEPTION_ENABLED=0`）或增加手機端 timeout |
 | GroundingDINO 安裝失敗 | 安裝 Visual Studio C++ Build Tools，設定 `$env:PYTHONUTF8="1"` |
 | AGP 版本不相容 | `gradle/libs.versions.toml` 中 `agp` 設為 `9.0.0` |
-| PDR 步數沒偵測到 | 確認 `ACTIVITY_RECOGNITION` 權限已授予；模擬器通常無硬體計步器 |
 | CGU gateway 回 invalid key | `llm_gateway` 需要 base URL override，確認 `CGU_API_KEY` 與 gateway endpoint 正確 |
 
 ---
 
 ## 相關文件
 
-- [`docs/sensor-nav-README.md`](docs/sensor-nav-README.md) — Sensor-Nav / PDR 完整說明
 - [`backend/README_topomap_v2.md`](backend/README_topomap_v2.md) — 拓樸地圖 v2 資料結構
 - [`backend/README_locate_v2.md`](backend/README_locate_v2.md) — 照片定位邏輯
 - `http://localhost:8000/docs` — Swagger UI（所有 API 端點）

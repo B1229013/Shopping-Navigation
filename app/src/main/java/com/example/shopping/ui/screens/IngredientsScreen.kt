@@ -173,6 +173,7 @@ fun IngredientsScreen(
         "騎腳踏車" to 4.0,
         "爬樓梯" to 8.0
     )
+    val hasWeight = currentUser.weight.toDoubleOrNull() != null
     val userWeight = currentUser.weight.toDoubleOrNull() ?: 60.0
     val exerciseMinutes = if (currentTotalCal > 0) {
         val met = exerciseMETs[selectedExercise] ?: 1.0
@@ -225,8 +226,7 @@ fun IngredientsScreen(
     }
 
     val scope = rememberCoroutineScope()
-    val paddleOcrApiUrl = stringResource(id = R.string.paddleocr_api_url)
-    val paddleOcrToken = com.example.shopping.BuildConfig.PADDLEOCR_ACCESS_TOKEN
+    val openAiApiKey = com.example.shopping.BuildConfig.OPENAI_API_KEY
     val tempFile = remember { File(context.cacheDir, "ocr_scan.jpg") }
     val imageUri = remember { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempFile) }
 
@@ -237,7 +237,7 @@ fun IngredientsScreen(
                 try {
                     val bitmap = withContext(Dispatchers.IO) { decodeUriToBitmap(context, imageUri) }
                     if (bitmap != null) {
-                        val recognizedText = callPaddleOcr(bitmap, paddleOcrApiUrl, paddleOcrToken)
+                        val recognizedText = callOpenAiOcr(bitmap, openAiApiKey)
                         ingredientText = recognizedText.replace("\n", " ")
                     }
                 } catch (e: Exception) {} finally { isProcessing = false }
@@ -256,7 +256,7 @@ fun IngredientsScreen(
             item {
                 Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                     Text("每日推薦攝取量：$recommendedCal kcal", color = Gold, fontWeight = FontWeight.Bold)
-                    Text("疾病：${currentUser.disease}  ·  體重：${userWeight}kg", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text("疾病：${currentUser.disease}  ·  體重：${userWeight}kg${if (hasWeight) "" else "（預設，可至設定填寫）"}", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
                 }
             }
 

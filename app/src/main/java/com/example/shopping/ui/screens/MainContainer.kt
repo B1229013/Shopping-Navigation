@@ -84,8 +84,11 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
-// --- Groq API Models ---
-data class GroqRequest(val model: String = "llama-3.3-70b-versatile", val messages: List<GroqMessage>, val response_format: GroqResponseFormat? = null)
+// --- OpenAI Chat Completions API models (gpt-4o-mini; OpenAI-compatible JSON schema) ---
+// NOTE: data-class names kept as Groq* to minimise the cross-file diff; the base
+// URL below targets the CGU LLM gateway (air.cgu.edu.tw/cgullmapi), which is
+// OpenAI-compatible. The key (OPENAI_API_KEY in .env) is the CGU key; model gpt-4o-mini.
+data class GroqRequest(val model: String = "gpt-4o-mini", val messages: List<GroqMessage>, val response_format: GroqResponseFormat? = null)
 data class GroqMessage(val role: String, val content: String)
 data class GroqResponseFormat(val type: String = "json_object")
 data class GroqResponse(val choices: List<GroqChoice>)
@@ -100,7 +103,7 @@ val groqApi: GroqApiService by lazy {
     val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY }
     val client = OkHttpClient.Builder().addInterceptor(logging).build()
     Retrofit.Builder()
-        .baseUrl("https://api.groq.com/openai/")
+        .baseUrl("https://air.cgu.edu.tw/cgullmapi/")
         .addConverterFactory(GsonConverterFactory.create())
         .client(client)
         .build()
@@ -161,6 +164,75 @@ suspend fun callPaddleOcr(bitmap: Bitmap, apiUrl: String, accessToken: String): 
             }
         }
         allText.toString()
+    }
+}
+
+// --- OpenAI gpt-4o-mini vision OCR helper (replaces PaddleOCR) ---
+// Same String return type as callPaddleOcr(), so the call sites swap 1:1.
+suspend fun callOpenAiOcr(bitmap: Bitmap, apiKey: String): String {
+    return withContext(Dispatchers.IO) {
+        val stream = java.io.ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+        val base64Image = Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+
+        val ocrPrompt = "You are an OCR engine. Extract ALL text visible in this image exactly " +
+            "as written, preserving Traditional Chinese characters and line breaks. " +
+            "Return only the extracted text, with no commentary."
+
+        // OpenAI Chat Completions vision payload: message content is an array of parts.
+        val contentParts = org.json.JSONArray().apply {
+            put(JSONObject().apply {
+                put("type", "text")
+                put("text", ocrPrompt)
+            })
+            put(JSONObject().apply {
+                put("type", "image_url")
+                put("image_url", JSONObject().apply {
+                    put("url", "data:image/jpeg;base64,$base64Image")
+                })
+            })
+        }
+        val requestBody = JSONObject().apply {
+            put("model", "gpt-4o-mini")
+            put("temperature", 0)
+            put("max_tokens", 1024)
+            put("messages", org.json.JSONArray().put(
+                JSONObject().apply {
+                    put("role", "user")
+                    put("content", contentParts)
+                }
+            ))
+        }
+
+        val client = OkHttpClient.Builder()
+            .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+
+        val body = requestBody.toString()
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val request = okhttp3.Request.Builder()
+            .url("https://air.cgu.edu.tw/cgullmapi/v1/chat/completions")
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(body)
+            .build()
+
+        val response = client.newCall(request).execute()
+        val responseBody = response.body?.string() ?: ""
+
+        if (!response.isSuccessful) {
+            throw RuntimeException("OpenAI OCR API error (${response.code}): $responseBody")
+        }
+
+        val json = JSONObject(responseBody)
+        val choices = json.optJSONArray("choices") ?: return@withContext ""
+        if (choices.length() == 0) return@withContext ""
+        choices.getJSONObject(0)
+            .optJSONObject("message")
+            ?.optString("content", "")
+            ?.trim() ?: ""
     }
 }
 
@@ -481,9 +553,7 @@ fun BudgetScreen(
     var viewMode by remember { mutableStateOf(BudgetViewMode.CATEGORY) }
     var expandedCategoryId by remember { mutableStateOf<String?>(null) }
 
-    val groqApiKey = BuildConfig.GROQ_API_KEY
-    val paddleOcrApiUrl = stringResource(id = R.string.paddleocr_api_url)
-    val paddleOcrToken = BuildConfig.PADDLEOCR_ACCESS_TOKEN
+    val openAiApiKey = BuildConfig.OPENAI_API_KEY  // used for both gpt-4o-mini OCR and receipt parsing
     val tempPhotoFile = remember { File(context.cacheDir, "receipt_photo.jpg") }
     val photoUri = remember { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempPhotoFile) }
 
@@ -493,7 +563,7 @@ fun BudgetScreen(
             val bitmap = withContext(Dispatchers.IO) { decodeUriToBitmap(context, uri) }
             if (bitmap != null) {
                 try {
-                    val rawText = callPaddleOcr(bitmap, paddleOcrApiUrl, paddleOcrToken)
+                    val rawText = callOpenAiOcr(bitmap, openAiApiKey)
 
                     if (rawText.isBlank()) {
                         isProcessing = false
@@ -503,7 +573,7 @@ fun BudgetScreen(
 
                     Log.d("PaddleOCR", "Recognized text: $rawText")
 
-                    // ── Enhanced Groq prompt for 全聯 / 家樂福 templates ──
+                    // ── Enhanced gpt-4o-mini prompt for 全聯 / 家樂福 templates ──
                     val systemPrompt = """
                         You are a specialized Data Extraction and Budget Logic Engine for the "Smart AI Shopping Assistant" Android app.
                         Your sole responsibility is to process receipt/recipe images and output structured data for the Budget module.
@@ -564,7 +634,7 @@ fun BudgetScreen(
 
                     val response = withContext(Dispatchers.IO) {
                         groqApi.getCompletion(
-                            "Bearer $groqApiKey",
+                            "Bearer $openAiApiKey",
                             GroqRequest(
                                 messages = listOf(
                                     GroqMessage("system", systemPrompt),
@@ -625,7 +695,6 @@ fun BudgetScreen(
     }
 
     val currentMonth = remember { SimpleDateFormat("yyyy年M月", Locale.getDefault()).format(Date()) }
-    val currentMonthEn = remember { SimpleDateFormat("MMMM", Locale.ENGLISH).format(Date()) }
 
     val animatedTotal by animateIntAsState(totalSpent)
 
@@ -680,7 +749,7 @@ fun BudgetScreen(
                                 color = TextPrimary
                             )
                             Text(
-                                currentMonthEn,
+                                currentMonth,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextTertiary
                             )

@@ -22,6 +22,7 @@ import base64
 import io
 import json
 import logging
+import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -80,6 +81,7 @@ WEIGHT_SIGN = 3.0
 WEIGHT_EQUIPMENT = 2.0
 WEIGHT_NORMAL = 1.0
 WEIGHT_GENERIC = 0.3
+RARITY_ALPHA = 0.5
 
 _SIGN_WORDS = {'標示', '指示', '告示', '看板', '招牌', '吊牌', '吊旗', 'sign', 'banner'}
 _ZONE_MARKERS = {'走道', '區域', '出口', 'exit', 'aisle', 'zone', 'decathlon',
@@ -157,9 +159,43 @@ def _semantic_similarity(ql: str, rl: str) -> float:
     return max(scores) if scores else 0.0
 
 
+def _compute_label_rarity(ref_map: RefMap) -> Dict[str, float]:
+    """IDF-based rarity: label appearing in fewer DirPhotos → higher score [0, 1]."""
+    label_doc_freq: Dict[str, int] = defaultdict(int)
+    total_dp = 0
+
+    for _nid, node in ref_map.photos.items():
+        for dp in node.directional_photos:
+            total_dp += 1
+            seen: set[str] = set()
+            for obj in dp.objects:
+                ln = (obj.label_norm or obj.label or "").strip()
+                if ln and ln not in seen:
+                    seen.add(ln)
+                    label_doc_freq[ln] += 1
+        if not node.directional_photos and node.objects:
+            total_dp += 1
+            seen = set()
+            for obj in node.objects:
+                ln = (obj.label_norm or obj.label or "").strip()
+                if ln and ln not in seen:
+                    seen.add(ln)
+                    label_doc_freq[ln] += 1
+
+    if total_dp <= 1:
+        return {}
+
+    log_n = math.log(total_dp)
+    return {
+        label: math.log(total_dp / df) / log_n
+        for label, df in label_doc_freq.items()
+    }
+
+
 def weighted_grid_match(
     query_grid: Dict[str, list],
     ref_grid: Dict[str, list],
+    rarity_map: Optional[Dict[str, float]] = None,
 ) -> tuple[float, int, dict]:
     total_weighted = 0.0
     total_possible = 0.0
@@ -193,10 +229,20 @@ def weighted_grid_match(
                     best_s, best_m, best_i = s, ri["label"], ri_i
             if best_m and best_s > 0.25:
                 used.add((id(all_r[best_i]), best_m))
-                total_weighted += qw * best_s
+                q_pc = qi.get("piece_count", 0)
+                r_pc = all_r[best_i].get("piece_count", 0)
+                if q_pc and r_pc:
+                    size_sim = 1.0 - abs(q_pc - r_pc) / 9.0
+                    combined = best_s * 0.7 + size_sim * 0.3
+                else:
+                    combined = best_s
+                if rarity_map:
+                    rarity = rarity_map.get(best_m, 0.0)
+                    combined = min(combined * (1.0 + rarity * RARITY_ALPHA), 1.0)
+                total_weighted += qw * combined
                 matches_in_cell.append({
                     "q": ql, "r": best_m,
-                    "sim": round(best_s, 3), "cat": qi["cat"],
+                    "sim": round(combined, 3), "cat": qi["cat"],
                 })
                 if qi["cat"] == "landmark":
                     landmark_matches.append((cell, ql, best_m, best_s))
@@ -214,7 +260,8 @@ def _build_ref_grid(objects) -> Dict[str, list]:
         cell = obj.grid_cell or "mid-center"
         label = obj.label_norm or obj.label or ""
         weight, cat = classify_feature(label)
-        grid[cell].append({"label": label, "weight": weight, "cat": cat})
+        pc = getattr(obj, "piece_count", 0) or 0
+        grid[cell].append({"label": label, "weight": weight, "cat": cat, "piece_count": pc})
     return dict(grid)
 
 
@@ -223,10 +270,12 @@ def match_by_grid(
     ref_map: RefMap,
     *,
     top_k: int = 10,
+    store_zone: Optional[str] = None,
 ) -> List[tuple[int, float, str]]:
     """Score reference nodes using 3×3 grid weighted matching.
 
     detected_items: list of {"label": str, "box": [x1,y1,x2,y2] normalized [0,1]}
+    store_zone: VLM-identified store section — candidates with matching objects get a boost.
     """
     if not ref_map.photos or not detected_items:
         return []
@@ -236,12 +285,19 @@ def match_by_grid(
         label = item.get("label", "")
         if not label:
             continue
-        cell = box_to_grid(item.get("box"))
+        box = item.get("box")
+        cell = box_to_grid(box)
         weight, cat = classify_feature(label)
-        query_grid[cell].append({"label": label, "weight": weight, "cat": cat})
+        pc = 0
+        if box and len(box) == 4:
+            from server.grid_utils import compute_grid_cells
+            _, _, pc, _ = compute_grid_cells(box)
+        query_grid[cell].append({"label": label, "weight": weight, "cat": cat, "piece_count": pc})
 
     if not query_grid:
         return []
+
+    rarity_map = _compute_label_rarity(ref_map)
 
     scores: list[tuple[int, float, str]] = []
 
@@ -252,7 +308,7 @@ def match_by_grid(
 
         for dir_photo in ref_node.directional_photos:
             ref_grid = _build_ref_grid(dir_photo.objects)
-            score, lm_count, _ = weighted_grid_match(dict(query_grid), ref_grid)
+            score, lm_count, _ = weighted_grid_match(dict(query_grid), ref_grid, rarity_map=rarity_map)
             if score > best_score:
                 best_score = score
                 best_slot = dir_photo.slot
@@ -260,13 +316,23 @@ def match_by_grid(
 
         if not ref_node.directional_photos and ref_node.objects:
             ref_grid = _build_ref_grid(ref_node.objects)
-            score, lm_count, _ = weighted_grid_match(dict(query_grid), ref_grid)
+            score, lm_count, _ = weighted_grid_match(dict(query_grid), ref_grid, rarity_map=rarity_map)
             if score > best_score:
                 best_score = score
                 best_slot = "aggregate"
                 best_lm = lm_count
 
-        reason = f"grid={best_score:.3f}"
+        zone_bonus = 0.0
+        if store_zone:
+            all_objs = list(ref_node.objects or [])
+            for dp in (ref_node.directional_photos or []):
+                all_objs.extend(dp.objects or [])
+            zone_bonus = _zone_boost_for_candidate(store_zone, all_objs)
+            best_score += zone_bonus
+
+        reason = f"grid={best_score - zone_bonus:.3f}"
+        if zone_bonus:
+            reason += f" zone({store_zone})+{zone_bonus:.2f}"
         if best_slot:
             reason += f" slot={best_slot}"
         if best_lm:
@@ -374,8 +440,42 @@ def match_by_objects(
 
 # ── Main localization entry point ─────────────────────────────────────────
 
-CONFIDENT_THRESHOLD = 0.05
-AMBIGUITY_GAP = 0.10
+CONFIDENT_THRESHOLD = 0.15
+AMBIGUITY_GAP = 0.05
+
+
+_ZONE_KEYWORDS: Dict[str, set[str]] = {
+    "寵物食品": {"寵物", "飼料", "貓糧", "貓食", "狗糧", "狗食", "pet food", "pet-life"},
+    "冷藏食品": {"冷藏食品", "chilled food"},
+    "冷凍食品": {"冷凍食品", "冷凍櫃", "freezer", "冰櫃"},
+    "生鮮蔬果": {"蔬菜", "水果", "生鮮", "洋蔥", "橘子", "香蕉", "蘋果"},
+    "飲料":     {"飲料", "瓶裝水", "罐裝飲", "椰子水"},
+    "零食糖果": {"零食", "糖果", "餅乾", "巧克力", "堅果"},
+    "日用品":   {"日用", "清潔劑", "洗衣", "衛生紙", "紙盤", "免洗"},
+    "烘焙麵包": {"烘焙", "麵包", "蛋糕"},
+    "調味料":   {"調味", "醬油", "沖泡"},
+    "肉品海鮮": {"肉品", "肉片", "海鮮", "seafood"},
+    "乳製品":   {"乳品", "牛奶", "奶粉", "優酪"},
+    "結帳區":   {"結帳", "收銀", "收銀台"},
+    "出入口":   {"出口", "入口"},
+}
+
+
+def _zone_boost_for_candidate(zone: str, ref_objects: list) -> float:
+    """Return a score boost (0.0 to 0.12) if the waypoint's objects match the VLM zone."""
+    keywords = _ZONE_KEYWORDS.get(zone)
+    if not keywords:
+        return 0.0
+    hits = 0
+    for obj in ref_objects:
+        label = (getattr(obj, 'label_norm', '') or getattr(obj, 'label', '') or '').lower()
+        if any(kw in label for kw in keywords):
+            hits += 1
+    if hits >= 3:
+        return 0.12
+    elif hits >= 1:
+        return 0.06
+    return 0.0
 
 
 def estimate_node_heading(matched_ref, detected_labels, ocr_texts, confidence: float):
@@ -439,6 +539,7 @@ def localize(
     place: Optional[str] = None,
     hint_nid: Optional[int] = None,
     detected_items: Optional[List[dict]] = None,
+    store_zone: Optional[str] = None,
 ) -> LocalizationResult:
     """Match a user's live photo detections against the Neo4j reference map.
 
@@ -462,7 +563,8 @@ def localize(
 
     has_boxes = detected_items and any(it.get("box") for it in detected_items)
     if has_boxes:
-        candidates = match_by_grid(detected_items, ref_map, top_k=10)
+        candidates = match_by_grid(detected_items, ref_map, top_k=10,
+                                   store_zone=store_zone)
         match_method = "grid"
     else:
         candidates = match_by_objects(detected_labels, ocr_texts, ref_map, top_k=10)
@@ -473,6 +575,10 @@ def localize(
             matched_nid=None, confidence=0.0, method=match_method,
             reasoning="No candidates matched",
         )
+
+    if store_zone:
+        log.info("Zone-aware matching: zone=%s, top3: %s",
+                 store_zone, [(c[0], round(c[1], 3)) for c in candidates[:3]])
 
     best_nid, best_score, best_reason = candidates[0]
     runner_nid = candidates[1][0] if len(candidates) > 1 else None
@@ -505,7 +611,7 @@ def localize(
         # proximity-boosted ordering rather than the raw one.
         candidates = boosted
 
-    confidence = min(best_score / 0.6, 1.0)
+    confidence = min(best_score, 1.0)
 
     if best_score < CONFIDENT_THRESHOLD:
         return LocalizationResult(
@@ -513,6 +619,13 @@ def localize(
             reasoning=f"Best score {best_score:.2f} below threshold ({best_reason})",
             runner_up_nid=runner_nid, runner_up_score=runner_score,
         )
+
+    gap = best_score - runner_score
+    if gap < AMBIGUITY_GAP and best_score < 0.35:
+        log.info("Ambiguous match: WP%s=%.3f vs WP%s=%.3f (gap=%.3f < %.2f)",
+                 best_nid, best_score, runner_nid, runner_score, gap, AMBIGUITY_GAP)
+        confidence *= 0.5
+        best_reason += f" | ambiguous(gap={gap:.3f})"
 
     # ── Heading estimation via directional photos ────────────────────
     matched_ref = ref_map.photos.get(best_nid)

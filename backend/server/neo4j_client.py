@@ -21,6 +21,7 @@ Schema V1 (legacy — 1 photo per node):
 from __future__ import annotations
 
 import base64
+import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -44,6 +45,10 @@ class RefObject:
     ocr_text: str
     role: str
     grid_cell: str
+    grid_cells: List[str] = field(default_factory=list)
+    piece_count: int = 0
+    depth_class: str = ""
+    bbox: List[float] = field(default_factory=list)
 
 
 @dataclass
@@ -268,7 +273,11 @@ class Neo4jClient:
                    obj.score AS score,
                    obj.ocr_text AS ocr_text,
                    obj.role AS role,
-                   obj.grid_cell AS grid_cell
+                   obj.grid_cell AS grid_cell,
+                   obj.grid_cells AS grid_cells,
+                   obj.piece_count AS piece_count,
+                   obj.depth_class AS depth_class,
+                   obj.bbox AS bbox
         """, {"place": place})
 
         # Group by (nid, slot) to build DirectionalRef with its objects
@@ -283,6 +292,16 @@ class Neo4jClient:
                     "objects": [],
                 }
             if r["label"]:
+                gc_raw = r.get("grid_cells") or ""
+                try:
+                    gc_list = json.loads(gc_raw) if gc_raw else []
+                except (json.JSONDecodeError, TypeError):
+                    gc_list = []
+                bbox_raw = r.get("bbox") or ""
+                try:
+                    bbox_list = json.loads(bbox_raw) if bbox_raw else []
+                except (json.JSONDecodeError, TypeError):
+                    bbox_list = []
                 dir_data[key]["objects"].append(RefObject(
                     label=r["label"] or "",
                     label_norm=r["label_norm"] or "",
@@ -290,6 +309,10 @@ class Neo4jClient:
                     ocr_text=r["ocr_text"] or "",
                     role=r["role"] or "",
                     grid_cell=r["grid_cell"] or "",
+                    grid_cells=gc_list,
+                    piece_count=r.get("piece_count") or 0,
+                    depth_class=r.get("depth_class") or "",
+                    bbox=bbox_list,
                 ))
 
         obj_count = 0

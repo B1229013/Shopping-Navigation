@@ -41,7 +41,7 @@ import coil.request.ImageRequest
 import com.example.shopping.model.ShoppingItem
 import com.example.shopping.ui.components.FadeInScreen
 import com.example.shopping.ui.components.StaggeredItem
-import com.example.shopping.ui.utils.matchesHomeCategory
+import com.example.shopping.ui.utils.*
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.delay
@@ -69,13 +69,18 @@ private data class GroceryCategory(
     val bgColor: Color
 )
 
+// Order and names follow HOME_CATEGORIES in CategoryClassifier.kt.
 private val groceryCategories = listOf(
-    GroceryCategory("蔬菜", Icons.Default.Grass, Color(0xFF059669), Color(0xFFD1FAE5)),
-    GroceryCategory("水果", Icons.Default.Spa, Color(0xFFD97706), Color(0xFFFEF3C7)),
-    GroceryCategory("零食", Icons.Default.Cookie, Color(0xFFDB2777), Color(0xFFFCE7F3)),
-    GroceryCategory("蛋奶", Icons.Default.Egg, Color(0xFF92400E), Color(0xFFFDE68A)),
-    GroceryCategory("飲品", Icons.Default.LocalDrink, Color(0xFF2563EB), Color(0xFFDBEAFE)),
-    GroceryCategory("調味", Icons.Default.Blender, Color(0xFF7C3AED), Color(0xFFEDE9FE)),
+    GroceryCategory(HOME_PRODUCE, Icons.Default.Eco, Color(0xFF059669), Color(0xFFD1FAE5)),
+    GroceryCategory(HOME_MEAT_SEAFOOD, Icons.Default.SetMeal, Color(0xFFDC2626), Color(0xFFFEE2E2)),
+    GroceryCategory(HOME_EGG_DAIRY, Icons.Default.Egg, Color(0xFF92400E), Color(0xFFFDE68A)),
+    GroceryCategory(HOME_STAPLES, Icons.Default.RiceBowl, Color(0xFFB45309), Color(0xFFFFEDD5)),
+    GroceryCategory(HOME_SNACKS, Icons.Default.Cookie, Color(0xFFDB2777), Color(0xFFFCE7F3)),
+    GroceryCategory(HOME_BEVERAGES, Icons.Default.LocalDrink, Color(0xFF2563EB), Color(0xFFDBEAFE)),
+    GroceryCategory(HOME_SEASONING, Icons.Default.Blender, Color(0xFF7C3AED), Color(0xFFEDE9FE)),
+    GroceryCategory(HOME_CLEANING, Icons.Default.CleaningServices, Color(0xFF0891B2), Color(0xFFCFFAFE)),
+    GroceryCategory(HOME_KITCHEN, Icons.Default.Kitchen, Color(0xFF4B5563), Color(0xFFE5E7EB)),
+    GroceryCategory(HOME_OTHER, Icons.Default.MoreHoriz, Color(0xFF64748B), Color(0xFFF1F5F9)),
 )
 
 // ── Product image mapping ──────────────────────────────────
@@ -110,22 +115,15 @@ private val productImageMap = mapOf(
     "巧克力" to "https://images.unsplash.com/photo-1481391319762-47dff72954d9?w=400",
 )
 
-// Category icon fallbacks when no image URL matches
-private val categoryIcons = mapOf(
-    "食品" to Icons.Default.Restaurant,
-    "飲品" to Icons.Default.LocalDrink,
-    "生活用品" to Icons.Default.ShoppingBag,
-    "其他" to Icons.Default.MoreHoriz,
-)
-
 private fun getProductImageUrl(itemName: String): String? {
     return productImageMap.entries.firstOrNull { (key, _) ->
         itemName.contains(key)
     }?.value
 }
 
-private fun getCategoryIcon(location: String?): ImageVector {
-    return categoryIcons[location] ?: Icons.Default.ShoppingCart
+// Category icon fallback when no image URL matches
+private fun getCategoryIcon(homeCategory: String?): ImageVector {
+    return groceryCategories.firstOrNull { it.name == homeCategory }?.icon ?: Icons.Default.ShoppingCart
 }
 
 // ── Home Screen ────────────────────────────────────────────
@@ -143,7 +141,7 @@ fun HomeScreen(
 
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     val filteredItems = if (selectedCategory != null) {
-        pendingItems.filter { matchesHomeCategory(it.name, selectedCategory!!) }
+        pendingItems.filter { it.homeCategory == selectedCategory }
     } else pendingItems
 
     // Greeting based on time
@@ -631,7 +629,7 @@ private fun HomeProductCard(item: ShoppingItem) {
             } else {
                 // Fallback: bold category icon in colored container
                 Icon(
-                    getCategoryIcon(item.location),
+                    getCategoryIcon(item.homeCategory),
                     contentDescription = item.name,
                     tint = HomeAccent.copy(alpha = 0.4f),
                     modifier = Modifier.size(44.dp)
@@ -669,10 +667,10 @@ private fun HomeProductCard(item: ShoppingItem) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            if (item.location != null) {
+            if (item.homeCategory != null) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    item.location!!,
+                    item.homeCategory!!,
                     style = MaterialTheme.typography.labelSmall,
                     color = HomeTextLight
                 )
@@ -746,7 +744,7 @@ private fun HomeRecentCard(item: ShoppingItem) {
                 )
             } else {
                 Icon(
-                    getCategoryIcon(item.location),
+                    getCategoryIcon(item.homeCategory),
                     contentDescription = null,
                     tint = HomeAccent.copy(alpha = 0.5f),
                     modifier = Modifier.size(22.dp)

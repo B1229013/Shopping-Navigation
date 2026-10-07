@@ -56,8 +56,8 @@ import com.example.shopping.R
 import com.example.shopping.model.DietRecord
 import com.example.shopping.model.ShoppingItem
 import com.example.shopping.ui.components.*
-import com.example.shopping.ui.utils.normalizeCategory
-import com.example.shopping.ui.utils.reclassifyAll
+import com.example.shopping.ui.utils.classifyHomeCategories
+import com.example.shopping.ui.utils.withHomeCategory
 import com.example.shopping.ui.theme.*
 import android.util.Base64
 import com.google.mlkit.vision.common.InputImage
@@ -239,7 +239,7 @@ suspend fun callOpenAiOcr(bitmap: Bitmap, apiKey: String): String {
 @Serializable
 data class TidiedReceiptItem(
     val name: String,
-    val cat: String,
+    val cat: String? = null,  // no longer requested; categories come from classifyHomeCategories
     val qty: Int,
     val total_price: Double?
 )
@@ -285,7 +285,7 @@ fun MainContainer(rootNavController: NavController) {
         val items = try {
             if (shoppingFile.exists()) jsonFormatter.decodeFromString<List<ShoppingItem>>(shoppingFile.readText()) else emptyList()
         } catch (e: Exception) { emptyList() }
-        mutableStateOf(reclassifyAll(items))
+        mutableStateOf(items)
     }
 
     var dietRecords by remember {
@@ -305,6 +305,17 @@ fun MainContainer(rootNavController: NavController) {
     LaunchedEffect(shoppingItems) { try { shoppingFile.writeText(jsonFormatter.encodeToString(shoppingItems)) } catch (e: Exception) {} }
     LaunchedEffect(dietRecords) { try { dietFile.writeText(jsonFormatter.encodeToString(dietRecords)) } catch (e: Exception) {} }
     LaunchedEffect(budgetTotalStr) { try { budgetFile.writeText(budgetTotalStr) } catch (e: Exception) {} }
+
+    // One-time backfill: items saved before home categories existed are classified in one LLM batch.
+    // Once filled (by the LLM or the keyword fallback) they're saved and never re-classified here.
+    LaunchedEffect(Unit) {
+        val unclassified = shoppingItems.filter { it.homeCategory == null }
+        if (unclassified.isEmpty()) return@LaunchedEffect
+        val result = classifyHomeCategories(unclassified.map { it.name }, BuildConfig.OPENAI_API_KEY)
+        val byId = unclassified.map { it.id }.zip(result.categories).toMap()
+        shoppingItems = shoppingItems.map { item -> byId[item.id]?.let { item.withHomeCategory(it) } ?: item }
+        result.error?.let { Toast.makeText(context, "AI 分類失敗，已改用關鍵字分類：$it", Toast.LENGTH_LONG).show() }
+    }
 
     // Entrance animation
     var screenVisible by remember { mutableStateOf(false) }
@@ -514,9 +525,9 @@ data class CategoryInfo(
 )
 
 val dashboardCategories = listOf(
-    CategoryInfo("食品", "Food", Icons.Default.Restaurant, ChartBlue, "肉類、蔬菜、生鮮食品"),
+    CategoryInfo("食品", "Food", Icons.Default.Restaurant, ChartBlue, "蔬果、肉品、蛋奶、主食、零食、調味料"),
     CategoryInfo("飲品", "Beverages", Icons.Default.LocalDrink, ChartGreen, "牛奶、茶、飲料"),
-    CategoryInfo("生活用品", "Groceries", Icons.Default.ShoppingBag, ChartAmber, "調味料、居家用品"),
+    CategoryInfo("生活用品", "Groceries", Icons.Default.ShoppingBag, ChartAmber, "清潔用品、廚房用品"),
     CategoryInfo("其他", "Other", Icons.Default.MoreHoriz, ChartViolet, "點數、手續費、其他項目")
 )
 
@@ -612,13 +623,6 @@ fun BudgetScreen(
                         - If the text is a recipe (食譜), extract each ingredient as a line item and estimate reasonable prices if not provided.
                         - IMPORTANT: Do NOT include subtotal lines, tax lines, change lines, or payment method lines as items.
 
-                        2. CATEGORIZATION GUIDE
-                        Sort every item into these categories ONLY:
-                        - Food (食品): Meats, vegetables, fruits, dairy, eggs, snacks, cooking ingredients, frozen foods, bread, rice, noodles.
-                        - Beverages (飲品): Milk, tea, coffee, soda, juice, water, alcoholic drinks.
-                        - Groceries (生活用品): Cleaning supplies, toiletries, seasonings, kitchen tools, household items, tissue, detergent.
-                        - Other (其他): Points, fees, bags, discounts, misc.
-
                         Return ONLY a JSON object with this structure:
                         {
                           "budget_entry": {
@@ -626,7 +630,7 @@ fun BudgetScreen(
                             "timestamp": "YYYY/MM/DD",
                             "total_amount": 0.0,
                             "line_items": [
-                              {"name": "Item Name in Chinese", "cat": "Food/Beverages/Groceries/Other", "qty": 1, "total_price": 0.0}
+                              {"name": "Item Name in Chinese", "qty": 1, "total_price": 0.0}
                             ]
                           }
                         }
@@ -655,21 +659,26 @@ fun BudgetScreen(
                             ?: System.currentTimeMillis()
                     } catch (e: Exception) { System.currentTimeMillis() }
 
+                    val lineItems = tidied.budget_entry.line_items
+                    val classification = classifyHomeCategories(lineItems.map { it.name }, openAiApiKey)
+                    classification.error?.let {
+                        Toast.makeText(context, "AI 分類失敗，已改用關鍵字分類：$it", Toast.LENGTH_LONG).show()
+                    }
+
                     val newItems = shoppingItems.toMutableList()
-                    tidied.budget_entry.line_items.forEach { line ->
+                    lineItems.forEachIndexed { i, line ->
                         newItems.add(
                             ShoppingItem(
                                 id = UUID.randomUUID().toString(),
                                 name = line.name,
                                 price = (line.total_price ?: 0.0).toInt() / line.qty.coerceAtLeast(1),
                                 qty = line.qty,
-                                location = normalizeCategory(line.cat, line.name),
                                 storeName = storeName,
                                 isChecked = true,
                                 createdAt = receiptTimestamp,
                                 purchasedAt = receiptTimestamp,
                                 receiptId = receiptId
-                            )
+                            ).withHomeCategory(classification.categories[i])
                         )
                     }
                     onItemsUpdate(newItems)

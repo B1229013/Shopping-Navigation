@@ -28,9 +28,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.example.shopping.model.ShoppingItem
-import com.example.shopping.ui.utils.guessCategory
+import android.widget.Toast
+import com.example.shopping.BuildConfig
+import com.example.shopping.ui.utils.classifyHomeCategories
+import com.example.shopping.ui.utils.withHomeCategory
 import com.example.shopping.ui.components.*
 import com.example.shopping.ui.theme.*
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -41,6 +45,17 @@ fun ShoppingListScreen(
 ) {
     val context = LocalContext.current
     val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+    val scope = rememberCoroutineScope()
+    // The list may change while we wait for the classifier; always build on the newest one.
+    val latestItems by rememberUpdatedState(items)
+    var isClassifying by remember { mutableStateOf(false) }
+
+    // Ask the LLM for one item's home category; on failure the keyword fallback answers and we say so.
+    suspend fun classify(name: String): String {
+        val result = classifyHomeCategories(listOf(name), BuildConfig.OPENAI_API_KEY)
+        result.error?.let { Toast.makeText(context, "AI 分類失敗，已改用關鍵字分類：$it", Toast.LENGTH_LONG).show() }
+        return result.categories.first()
+    }
 
     var selectedDateText by remember { mutableStateOf("") }
     var newItemName by remember { mutableStateOf("") }
@@ -140,21 +155,30 @@ fun ShoppingListScreen(
                             }
                             Button(
                                 onClick = {
-                                    if (newItemName.isNotBlank()) {
+                                    if (newItemName.isNotBlank() && !isClassifying) {
                                         val dueDateLong = if (selectedDateText.isNotEmpty()) {
                                             try { sdf.parse(selectedDateText)?.time } catch(e: Exception) { null }
                                         } else null
-
-                                        onItemsUpdate(items + ShoppingItem(
+                                        val newItem = ShoppingItem(
                                             name = newItemName,
                                             qty = newItemQty.toIntOrNull() ?: 1,
                                             price = newItemPrice.toIntOrNull() ?: 0,
-                                            dueDate = dueDateLong,
-                                            location = guessCategory(newItemName)
-                                        ))
-                                        newItemName = ""; newItemPrice = ""; newItemQty = "1"
+                                            dueDate = dueDateLong
+                                        )
+
+                                        isClassifying = true
+                                        scope.launch {
+                                            try {
+                                                val category = classify(newItem.name)
+                                                onItemsUpdate(latestItems + newItem.withHomeCategory(category))
+                                                newItemName = ""; newItemPrice = ""; newItemQty = "1"
+                                            } finally {
+                                                isClassifying = false
+                                            }
+                                        }
                                     }
                                 },
+                                enabled = !isClassifying,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Gold,
                                     contentColor = Noir
@@ -162,7 +186,17 @@ fun ShoppingListScreen(
                                 shape = RoundedCornerShape(12.dp),
                                 contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp)
                             ) {
-                                Text("加入", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                                if (isClassifying) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Noir
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("分類中", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                                } else {
+                                    Text("加入", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
                     }
@@ -328,18 +362,30 @@ fun ShoppingListScreen(
                                     Spacer(Modifier.width(8.dp))
                                     Button(
                                         onClick = {
-                                            onItemsUpdate(items.map {
-                                                if (it.id == item.id) it.copy(
-                                                    name = editName,
-                                                    qty = editQty.toIntOrNull() ?: 1,
-                                                    price = editPrice.toIntOrNull() ?: 0
-                                                ) else it
-                                            })
-                                            editingItemId = null
+                                            val newName = editName
+                                            val newQty = editQty.toIntOrNull() ?: 1
+                                            val newPrice = editPrice.toIntOrNull() ?: 0
+                                            isClassifying = true
+                                            scope.launch {
+                                                try {
+                                                    // Only a renamed item needs a new category.
+                                                    val category = if (newName != item.name) classify(newName) else null
+                                                    onItemsUpdate(latestItems.map {
+                                                        if (it.id == item.id) {
+                                                            val updated = it.copy(name = newName, qty = newQty, price = newPrice)
+                                                            if (category != null) updated.withHomeCategory(category) else updated
+                                                        } else it
+                                                    })
+                                                    editingItemId = null
+                                                } finally {
+                                                    isClassifying = false
+                                                }
+                                            }
                                         },
+                                        enabled = !isClassifying,
                                         colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Noir),
                                         shape = RoundedCornerShape(12.dp)
-                                    ) { Text("儲存", fontWeight = FontWeight.SemiBold) }
+                                    ) { Text(if (isClassifying) "分類中" else "儲存", fontWeight = FontWeight.SemiBold) }
                                 }
                             }
                         } else {

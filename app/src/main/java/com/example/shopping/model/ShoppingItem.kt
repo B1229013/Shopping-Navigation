@@ -14,8 +14,9 @@ data class ShoppingItem(
     var purchasedAt: Long? = null,
     val dueDate: Long? = null,
     var storeName: String? = null,
-    var location: String? = null,
-    val receiptId: String? = null
+    var location: String? = null,          // budget category, derived from homeCategory
+    val receiptId: String? = null,
+    var homeCategory: String? = null       // HomeScreen chip (蔬果, 零食, ...); null = not classified yet
 )
 
 @Serializable

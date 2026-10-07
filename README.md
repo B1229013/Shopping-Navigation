@@ -353,7 +353,9 @@ output/maps/
 | `ui/screens/SettingsScreen.kt` | 設定頁面（後端 URL 設定等） |
 | `ui/screens/HomeScreen.kt` / `ShoppingListScreen.kt` / `AIScreen.kt` / `LoginScreen.kt` / `HistoryScreen.kt` / `IngredientsScreen.kt` / `MainContainer.kt` / `NearbyStoresSheet.kt` / `NearbyStoresAr.kt` | 其他頁面（首頁、購物清單、AI 助手、登入、歷史、食材推薦、主容器、附近商店） |
 | `ui/components/*.kt` | UI 動畫與互動元件 |
-| `ui/utils/*.kt` | 商品分類、食物圖示等工具 |
+| `ui/utils/CategoryClassifier.kt` | 商品分類規則：首頁 10 個分類按鈕、按鈕與預算類別的對應、人工修正的例外清單、關鍵字備案分類 |
+| `ui/utils/LlmCategoryClassifier.kt` | 用 LLM（`gpt-5.6-luna`，經長庚閘道）判斷商品屬於哪個首頁分類，失敗時改用關鍵字分類 |
+| `ui/utils/FoodIcons.kt` | 食物圖示 |
 | `model/*.kt` / `ui/theme/*.kt` | 資料模型與 Material3 主題 |
 
 ### 設定檔
@@ -399,6 +401,24 @@ output/maps/
 系統會自動偵測 GPU VRAM：
 - ≥ 3GB VRAM：自動使用 GPU（速度提升 5-10 倍）
 - < 3GB VRAM：自動降回 CPU 模式
+
+### 商品分類
+
+每個商品屬於一個首頁分類按鈕，再由按鈕換算成預算類別：
+
+| 首頁分類 | 預算類別 |
+|------|------|
+| 蔬果、肉品海鮮、蛋奶、主食、零食、調味料 | 食品（`Food`） |
+| 飲品 | 飲品（`Beverages`） |
+| 清潔用品、廚房用品 | 生活用品（`Groceries`） |
+| 其他 | 其他（`Other`） |
+
+判斷順序：**例外清單 → LLM（`gpt-5.6-luna`）→ 關鍵字備案**。
+
+- **何時分類**：手動新增商品、修改商品名稱、掃描收據時各分類一次；App 啟動時會把還沒分類的舊商品一次批次補完。結果存在 `shopping_list.json` 的 `homeCategory`（首頁分類）和 `location`（預算類別）欄位，之後不會重複呼叫 LLM。
+- **LLM 失敗時**（網路、模型名稱、回覆格式）：畫面會顯示「AI 分類失敗，已改用關鍵字分類」，並改用關鍵字分類。
+- **修正誤判**：若 LLM 一直把某個商品分錯，在 `CategoryClassifier.kt` 的 `productOverrides` 加一行（例如 `"可樂果" to HOME_SNACKS`）。名稱只要包含該字串就會套用，且優先於 LLM。
+- **掃描收據**：辨識文字和整理收據仍用 `gpt-4o-mini`，只有商品分類用 `gpt-5.6-luna`。
 
 ---
 

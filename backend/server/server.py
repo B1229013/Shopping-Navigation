@@ -17,7 +17,7 @@ logging.basicConfig(
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, JSONResponse, Response
 from PIL import Image, ImageOps
 
 from server import scene
@@ -32,7 +32,9 @@ from server.config import (
     PERCEPTION_ENABLED, OCR_ENABLED, OCR_LANGUAGES,
     OCR_MIN_CONFIDENCE, OCR_MAX_RESULTS, ARRIVED_MIN_DETECTION_SCORE,
     GOAL_CROP_VERIFY, GENERIC_INDOOR_OBJECTS, ensure_output_dir, OUTPUT_ROOT,
+    VLM_ROUNDS, VLM_PASS3, GRID_N,
 )
+import server.config as _config
 from server.sensor_test_render import render_sensor_test_png
 from server.goal_decomposer import decompose_goal, split_goal_objects
 from server.ocr import OCR
@@ -53,7 +55,6 @@ from server.models import (
 from server.perception import Detection as PerceptionDetection, Perception, verify_goal_detection
 from server.ocr import OCRResult
 from server.session import SessionStore
-
 import re as _re
 
 
@@ -90,6 +91,9 @@ def _clean_vlm_ocr(ocr_results: list[OCRResult], img_h: int = 0) -> list[OCRResu
 from server.vlm import (
     decide as _vlm_decide_impl,
     perceive as _vlm_perceive,
+    perceive_two_pass as _vlm_perceive_two_pass,
+    perceive_three_pass as _vlm_perceive_three_pass,
+    perceive_multi_round as _vlm_perceive_multi_round,
     perceive_and_decide as _vlm_perceive_and_decide,
     warm_up as _vlm_warm_up,
     ask_about_image as _vlm_ask_about_image,
@@ -294,6 +298,33 @@ def _node_area_name(nid: int, ref_map, goal_keywords=None) -> str:
 
 _BASE_SLOT_ORDER = ["front", "right", "back", "left"]
 _SLOT_ZH = {"front": "前方", "right": "右手邊", "back": "後方", "left": "左手邊"}
+
+_LANDMARK_KEYWORDS = frozenset({
+    "區", "櫃", "架", "標示", "指示牌", "指示", "專區", "走道", "通道",
+    "section", "aisle", "shelf", "display", "sign", "refrigerator", "cooler",
+})
+
+
+def _classify_arrival_objects(goal: str, goal_objects: list[str]) -> list[str]:
+    """Return only goal_objects that represent the actual product (not landmarks).
+
+    Landmark terms (冷藏展示櫃, 貨架, 乳製品區 …) are useful for navigation
+    but must NOT trigger ARRIVED — only the product itself should.
+    """
+    base_items = [_re.sub(r'\s*x\d+\s*$', '', g.strip()).strip().lower()
+                  for g in goal.split(",")]
+    base_items = [g for g in base_items if g]
+
+    arrival = []
+    for obj in goal_objects:
+        obj_clean = obj.lower().strip("「」")
+        if any(base in obj_clean or obj_clean in base for base in base_items):
+            arrival.append(obj)
+            continue
+        if not any(kw in obj for kw in _LANDMARK_KEYWORDS):
+            arrival.append(obj)
+    return arrival if arrival else goal_objects
+
 
 _CHECKOUT_KW = ['收銀台', '收銀機', '結帳機', 'pos', 'cashier counter', 'cash register',
                 '自助結帳機', 'self-checkout kiosk']
@@ -520,21 +551,11 @@ def _infer_target_direction(matched_node, target_nid, ref_map,
 
 
 PHONE_HEADING_CONFIDENCE = 0.85
-# Below this, the facing is only a guess from matching reference photos and must
-# not be used to name a side: left/right is route bearing minus facing, so a wrong
-# guess turns 左轉 into 右轉. The phone's own compass sits above it.
 TURN_DIRECTION_MIN_HEADING_CONFIDENCE = 0.6
-# The photo could not be placed on the map. It is shown on the app's map line,
-# but it is not a route step — see the route-first override in upload_photo.
 LOCALIZE_FAILED_HINT = "這張照片對不到地圖上的位置，請換個角度、拍到走道標示牌或招牌再試一次"
 
 
 def _useful_area_name(area: str) -> Optional[str]:
-    """A node area name worth saying out loud in a turn instruction.
-
-    "走道14／調味" or "結帳區" tells the user where the turn leads; "「貨架」附近"
-    does not, and reading it aloud at every turn buries the actual instruction.
-    """
     if not area or not any(k in area for k in ("走道", "結帳", "出口", "收銀")):
         return None
     clean = area.replace("「", "").replace("」", "").split("附近")[0].strip()
@@ -542,13 +563,6 @@ def _useful_area_name(area: str) -> Optional[str]:
 
 
 def _apply_phone_heading(s, loc_result, heading: Optional[float]) -> None:
-    """Prefer the phone's own compass/gyro heading over the reference-photo guess.
-
-    The slot match inherits whatever compass value the map recorder had when the
-    reference photos were taken — one node tagged 90° off turns "直走" into
-    "右轉". The phone's PDR tracker reports heading in the same frame as the map
-    (0° = +y), so when the app sends it, it wins.
-    """
     if heading is None:
         return
     h = float(heading) % 360.0
@@ -560,12 +574,6 @@ def _apply_phone_heading(s, loc_result, heading: Optional[float]) -> None:
 
 
 def _walkway_distances(ref_map) -> dict[tuple[int, int], float]:
-    """{(a, b): metres} for both directions of every walkway edge.
-
-    The map stores distance_m on each WALKWAY relationship; an edge that was
-    never measured (0/None) falls back to the straight-line distance between
-    the two waypoints' PDR coordinates so guidance can still say "約 N 公尺".
-    """
     out: dict[tuple[int, int], float] = {}
     if not ref_map:
         return out
@@ -584,15 +592,6 @@ def _walkway_distances(ref_map) -> dict[tuple[int, int], float]:
 
 
 def _path_from_current(ref_map, current_nid, leg_path: list[int], target_nid: int) -> list[int]:
-    """The part of the route still ahead of the user.
-
-    The leg was planned once from the route's start node, but every photo
-    re-localizes the user. If the localized node lies on the planned leg, drop
-    the nodes already walked; if it lies off the leg (wrong aisle, overshoot),
-    re-plan on the walkway graph from there; otherwise fall back to the leg as
-    planned. Without this, "右轉" keeps describing the turn at the leg's origin
-    no matter how far the user has walked.
-    """
     if current_nid is None:
         return leg_path
     if current_nid in leg_path:
@@ -676,8 +675,11 @@ def _build_route_context(s, loc_result, detections=None,
         leg_idx = min(s.current_leg_index, len(s.route_plan.legs) - 1)
         current_leg = s.route_plan.legs[leg_idx]
 
-        # Re-plan route when user is localized but NOT on the current leg's path
+        # Re-plan route when user is localized with sufficient confidence
+        # Lower threshold on first localization (no prior position known)
+        _replan_threshold = 0.25 if is_first_localization else 0.45
         if (localized and ref_map
+                and loc_result.confidence >= _replan_threshold
                 and loc_result.matched_nid not in current_leg.path):
             try:
                 from server.path_planner import plan_route as _plan_route
@@ -757,8 +759,8 @@ def _build_route_context(s, loc_result, detections=None,
                 f"重要：使用者的照片中已經可以看到目標相關物件（{obj_text}），"
                 f"位於畫面的「{photo_dir_zh}」。請直接引導使用者往那個方向走。\n"
             )
-        elif localized:
-            # --- Priority 2: infer from directional reference photos (needs localization) ---
+        elif localized and loc_result.confidence >= 0.45:
+            # --- Priority 2: infer from directional reference photos (needs reliable localization) ---
             matched_node = ref_map.photos.get(loc_result.matched_nid) if ref_map else None
             dir_zh, dir_slot, dir_landmarks = _infer_target_direction(
                 matched_node, current_leg.to_node, ref_map, loc_result.matched_slot,
@@ -787,9 +789,11 @@ def _build_route_context(s, loc_result, detections=None,
                 )
         else:
             # Not localized — can't infer direction from map, but still guide toward target
+            _clean_target = target_area.replace("「", "").replace("」", "")
             direction_hint = (
                 f"目前尚未精確定位，無法從地圖推斷方向。"
-                f"請根據照片中的標示和地標引導使用者前往「{goal_item}」所在的「{target_area}」。\n"
+                f"請根據照片中看得到的物件來引導使用者繼續前進。"
+                f"目標「{goal_item}」在「{_clean_target}」區域。\n"
             )
 
         # user_heading=None makes the route read as if the user faces along the
@@ -892,24 +896,39 @@ def _build_route_context(s, loc_result, detections=None,
                 f"{phase_status}"
             )
         else:
+
+            if s.phase == "checkout":
+                phase_status = "所有商品已找到，正前往收銀台"
+            elif s.phase == "exit":
+                phase_status = "已結帳完成，正前往出口"
+            else:
+                phase_status = f"還有 {len(remaining)} 項商品待尋找"
+
+            area_steps = ""
+            if localized and ref_map and current_leg.path and len(current_leg.path) > 1:
+                areas_on_route = []
+                for step_nid in current_leg.path[1:6]:
+                    area = _node_area_name(step_nid, ref_map)
+                    if area and area not in areas_on_route[-1:]:
+                        areas_on_route.append(area)
+                if areas_on_route:
+                    area_steps = f"路線經過的區域：{'→'.join(areas_on_route)}\n"
+
             route_desc = (
                 f"目前目標：「{goal_item}」\n"
                 f"位於：{target_area}\n"
                 f"{direction_hint}"
+                f"{area_steps}"
                 f"{phase_status}"
             )
 
-        # Fallback next_instruction: only when localized (we know where the user is)
-        # Without localization, the fallback is meaningless — let VLM guide by photo
+        # Fallback next_instruction
         if not next_instruction and localized:
             if s.phase in ("checkout", "exit"):
                 next_instruction = f"前往{target_area}"
             else:
                 next_instruction = f"前往{target_area}找「{goal_item}」"
         elif not next_instruction and s.place:
-            # The app's map line would otherwise go blank while localization keeps
-            # failing, which reads as "the map was ignored". This is a hint, not a
-            # route step, so it never replaces the VLM's photo-based guidance.
             next_instruction = LOCALIZE_FAILED_HINT
     else:
         route_desc = "尚未規劃路線，請根據照片中的標示和商品引導使用者。"
@@ -924,12 +943,38 @@ def _build_route_context(s, loc_result, detections=None,
     return context_block, next_instruction
 
 
-def _current_goal_objects(s) -> list[str]:
-    """Return only the goal object(s) for the current route leg.
+def _current_goal_node_id(s) -> int | None:
+    """Return the node the user should walk toward right now (for AR arrow)."""
+    if s.route_plan and hasattr(s.route_plan, 'legs') and s.route_plan.legs:
+        leg_idx = min(s.current_leg_index, len(s.route_plan.legs) - 1)
+        return s.route_plan.legs[leg_idx].to_node
+    return s.goal_node
 
-    When a route plan exists, we guide the user one item at a time.
-    In checkout/exit phases, return checkout/exit related objects.
-    When there's no route plan, fall back to all goal objects.
+
+def _shopping_progress(s) -> tuple[list[str], list[str], str | None]:
+    """Return (goal_item_names, visited_item_names, current_target_name) for shopping checklist."""
+    if not s.target_node_to_item:
+        return None, None, None
+    visit_order = s.route_plan.visit_order if s.route_plan else s.target_nodes
+    goal_items = [s.target_node_to_item.get(n, f"WP{n}") for n in visit_order
+                  if n in s.target_node_to_item]
+    visited = [s.target_node_to_item[n] for n in s.visited_targets
+               if n in s.target_node_to_item]
+    current = None
+    if s.phase == "shopping" and s.route_plan and s.route_plan.legs:
+        leg_idx = min(s.current_leg_index, len(s.route_plan.legs) - 1)
+        leg = s.route_plan.legs[leg_idx]
+        if leg.purpose == "target":
+            current = s.target_node_to_item.get(leg.to_node)
+    return goal_items, visited, current
+
+
+def _current_goal_objects(s) -> list[str]:
+    """Return ALL remaining goal objects so VLM can recognize any target in the photo.
+
+    When a route plan exists, the current leg's target is listed first (primary focus),
+    but all unvisited targets are included so VLM can trigger ARRIVED opportunistically
+    if the user happens to pass by a non-current target.
     """
     if s.phase == "checkout":
         return ["收銀台", "結帳", "cashier", "checkout"]
@@ -946,20 +991,32 @@ def _current_goal_objects(s) -> list[str]:
 
     neo4j = get_neo4j()
     ref_map = neo4j.load_reference_map(s.place) if neo4j and s.place else None
-    if not ref_map or target_nid not in ref_map.photos:
-        return goal_objects
 
-    node = ref_map.photos[target_nid]
+    primary = None
+    if ref_map and target_nid in ref_map.photos:
+        node = ref_map.photos[target_nid]
+        for g in goal_objects:
+            for obj in node.objects:
+                if (obj.ocr_text and g.lower() in obj.ocr_text.lower()) or \
+                   g.lower() in obj.label.lower():
+                    primary = g
+                    break
+            if primary:
+                break
+
+    result = []
+    if primary:
+        result.append(primary)
     for g in goal_objects:
-        for obj in node.objects:
-            if (obj.ocr_text and g.lower() in obj.ocr_text.lower()) or \
-               g.lower() in obj.label.lower():
-                return [g]
-    return goal_objects[:1]
+        if g not in result:
+            result.append(g)
+    return result
 
 
 def _build_localization_items(detections, ocr_results, img_w, img_h):
-    """Build detected_items (with normalized [0,1] bboxes) for grid matching."""
+    """Build detected_items (with normalized [0,1] bboxes) for grid matching.
+    OCR items are now handled separately via _build_ocr_items with dedicated weight.
+    """
     items = []
     for d in detections:
         box = getattr(d, 'box', None) or getattr(d, 'bbox', None)
@@ -969,30 +1026,33 @@ def _build_localization_items(detections, ocr_results, img_w, img_h):
             items.append({"label": d.label, "box": norm_box})
         else:
             items.append({"label": d.label, "box": None})
+    return items
+
+
+def _build_ocr_items(ocr_results, img_w, img_h):
+    """Build normalized OCR items with polygon bboxes for grid-level OCR matching."""
+    items = []
     for r in ocr_results:
-        bbox = getattr(r, 'bbox', None)
         text = getattr(r, 'text', "")
-        if not text:
+        if not text or len(text.strip()) < 2:
             continue
-        if bbox:
-            if isinstance(bbox[0], (list, tuple)):
-                xs = [p[0] for p in bbox]
-                ys = [p[1] for p in bbox]
-                norm_box = [min(xs) / img_w, min(ys) / img_h,
-                            max(xs) / img_w, max(ys) / img_h]
-            elif len(bbox) == 4:
-                norm_box = [bbox[0] / img_w, bbox[1] / img_h,
-                            bbox[2] / img_w, bbox[3] / img_h]
-            else:
-                norm_box = None
-            items.append({"label": text, "box": norm_box})
+        bbox = getattr(r, 'bbox', None)
+        if bbox and isinstance(bbox[0], (list, tuple)):
+            norm_bbox = [[p[0] / img_w, p[1] / img_h] for p in bbox]
+        elif bbox and len(bbox) == 4:
+            norm_bbox = [[bbox[0] / img_w, bbox[1] / img_h],
+                         [bbox[2] / img_w, bbox[1] / img_h],
+                         [bbox[2] / img_w, bbox[3] / img_h],
+                         [bbox[0] / img_w, bbox[3] / img_h]]
         else:
-            items.append({"label": text, "box": None})
+            norm_bbox = None
+        items.append({"text": text.strip(), "bbox": norm_bbox})
     return items
 
 
 def _run_early_localization(s, session_id, detected_labels, ocr_texts,
-                            detected_items=None, image_path=None):
+                            detected_items=None, image_path=None,
+                            store_zone=None, ocr_items=None):
     """Run Neo4j localization early (before VLM decide) so route context is available.
 
     Returns the LocalizationResult, or None if localization is skipped/failed.
@@ -1017,6 +1077,9 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             hint_nid=getattr(s, "last_corrected_nid", None),
             place=s.place,
             detected_items=detected_items,
+            store_zone=store_zone,
+            ocr_items=ocr_items,
+            grid_n=_config.GRID_N,
         )
 
         ref_map = neo4j.load_reference_map(s.place)
@@ -1045,26 +1108,57 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             log.info("⏱ rerank: %.1fs (%d candidate nodes)", time.time() - t_rerank, len(top))
             if reranked and reranked[0][0] != loc_result.matched_nid:
                 new_nid = reranked[0][0]
-                new_ref = ref_map.photos.get(new_nid)
-                log.info("[session %s] rerank changed: WP%d → WP%d",
-                         session_id, loc_result.matched_nid, new_nid)
-                loc_result.matched_nid = new_nid
-                loc_result.ref_node = new_ref
-                loc_result.method = "grid+rerank"
-                loc_result.reasoning = reranked[0][2]
-                # The heading was estimated against the OLD node's directional
-                # photos; redo it for the node we actually ended up on — a heading
-                # carried over from another node makes every relative turn wrong.
-                (loc_result.matched_heading, loc_result.matched_slot,
-                 loc_result.heading_confidence) = _estimate_node_heading(
-                    new_ref, detected_labels, ocr_texts, loc_result.confidence)
-                if loc_result.matched_heading is not None:
-                    log.info("[session %s] rerank: recomputed heading=%.0f° slot=%s for WP%d",
-                             session_id, loc_result.matched_heading,
-                             loc_result.matched_slot, new_nid)
+                grid_top_score = top[0][1] if top else 0
+                grid_runner_score = top[1][1] if len(top) > 1 else 0
+                grid_gap = grid_top_score - grid_runner_score
+                rerank_nid_score = next((sc for nid, sc, _ in top if nid == new_nid), 0)
+                score_drop = grid_top_score - rerank_nid_score
+                if grid_gap > 0.08 and score_drop > 0.1:
+                    log.info("[session %s] rerank REJECTED: grid gap=%.3f, score drop=%.3f (WP%d→WP%d)",
+                             session_id, grid_gap, score_drop, top[0][0], new_nid)
                 else:
-                    log.info("[session %s] rerank: WP%d has no reliable heading data",
-                             session_id, new_nid)
+                    new_ref = ref_map.photos.get(new_nid)
+                    log.info("[session %s] rerank accepted: WP%d → WP%d (gap=%.3f, drop=%.3f)",
+                             session_id, loc_result.matched_nid, new_nid, grid_gap, score_drop)
+                    loc_result.matched_nid = new_nid
+                    loc_result.ref_node = new_ref
+                    loc_result.method = "grid+rerank"
+                    loc_result.reasoning = reranked[0][2]
+
+                if new_ref and new_ref.directional_photos:
+                    from server.heading import estimate_heading, best_matching_slot, DirectionalPhoto
+                    _live_labels = {l.lower().strip() for l in detected_labels if l}
+                    _live_ocr = {t.lower().strip() for t in ocr_texts if t}
+                    _dir_photos = [
+                        DirectionalPhoto(
+                            slot=dp.slot, heading_deg=dp.heading_deg,
+                            photo_file=dp.photo_file,
+                            objects=[{"label": o.label, "ocr_text": o.ocr_text}
+                                     for o in dp.objects],
+                        )
+                        for dp in new_ref.directional_photos
+                    ]
+                    new_heading = estimate_heading(_live_labels, _live_ocr, _dir_photos)
+                    new_slot = best_matching_slot(_live_labels, _live_ocr, _dir_photos)
+                    new_slot_str = new_slot if isinstance(new_slot, str) else (
+                        new_slot.value if new_slot else None)
+                    all_h = [dp.heading_deg for dp in new_ref.directional_photos]
+                    has_real = len(set(all_h)) > 1
+                    if has_real and new_heading is not None:
+                        loc_result.matched_heading = new_heading
+                        loc_result.matched_slot = new_slot_str
+                        unique_sets = len({
+                            frozenset(o.label for o in dp.objects)
+                            for dp in new_ref.directional_photos
+                        })
+                        loc_result.heading_confidence = min(loc_result.confidence, 0.8) if unique_sets > 1 else 0.2
+                        log.info("[session %s] rerank: recomputed heading=%.0f° slot=%s for WP%d",
+                                 session_id, new_heading, new_slot_str, new_nid)
+                    else:
+                        loc_result.matched_heading = None
+                        loc_result.matched_slot = None
+                        loc_result.heading_confidence = 0.0
+                        log.info("[session %s] rerank: WP%d has no reliable heading data", session_id, new_nid)
 
         # Spatial continuity: penalise jumps that are too large for walking
         prev_nid = getattr(s, "last_corrected_nid", None)
@@ -1196,6 +1290,8 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
         log.info("New session | goal: %s | place: %s | goal_objects: %s", req.goal, selected_place, goal_objects)
     s = _store.create(goal=req.goal, goal_objects=goal_objects, place=selected_place,
                       target_objects=target_objects, context_objects=context_objects)
+    s.arrival_goal_objects = _classify_arrival_objects(req.goal, goal_objects)
+    log.info("arrival_goal_objects: %s", s.arrival_goal_objects)
 
     # Generate goal graph
     out_dir = ensure_output_dir(s.id)
@@ -1231,32 +1327,66 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                 goal_items = [_re_auto.sub(r'\s*x\d+\s*$', '', g).strip() for g in goal_items]
                 goal_items = [g for g in goal_items if g]
 
+                # Synonym groups for fuzzy goal matching
+                _GOAL_SYNONYMS = {
+                    "文旦": ["柚子", "pomelo", "grapefruit", "文旦柚"],
+                    "柚子": ["文旦", "pomelo", "grapefruit"],
+                    "優格": ["yogurt", "yoghurt", "優酪乳", "酸奶"],
+                    "可樂": ["cola", "coke", "coca-cola", "百事可樂", "pepsi"],
+                    "牛奶": ["鮮奶", "milk", "鮮乳"],
+                    "鮮奶": ["牛奶", "milk", "鮮乳"],
+                    "泡麵": ["方便麵", "instant noodle", "杯麵", "碗麵"],
+                    "餅乾": ["cookie", "biscuit", "cracker"],
+                    "洋芋片": ["薯片", "potato chips", "chips"],
+                    "啤酒": ["beer", "台啤", "海尼根", "heineken"],
+                    "醬油": ["soy sauce", "醬料"],
+                    "麵包": ["bread", "吐司", "toast"],
+                    "衛生紙": ["toilet paper", "面紙", "tissue"],
+                }
+
+                def _expand_search_terms(item: str) -> list[str]:
+                    terms = [item]
+                    for key, synonyms in _GOAL_SYNONYMS.items():
+                        if item == key or item.lower() == key.lower():
+                            terms.extend(synonyms)
+                        elif key in item or item in key:
+                            terms.extend(synonyms)
+                    return terms
+
                 # Search Neo4j map: match each goal item against node OCR/objects
                 target_nodes: list[int] = []
                 for item in goal_items:
-                    item_lower = item.lower()
+                    search_terms = _expand_search_terms(item)
                     best_nid = None
                     best_score = 0.0
                     for nid, node in ref_map.photos.items():
+                        node_best = 0.0
+                        match_count = 0
                         for obj in node.objects:
-                            score = 0.0
-                            # OCR exact/partial match
-                            if obj.ocr_text:
-                                ocr_lower = obj.ocr_text.lower()
-                                if item_lower == ocr_lower:
-                                    score = 1.0
-                                elif item_lower in ocr_lower or ocr_lower in item_lower:
-                                    score = 0.8
-                            # Object label match
-                            label_lower = obj.label.lower()
-                            if item_lower in label_lower or label_lower in item_lower:
-                                score = max(score, 0.7)
-                            if score > best_score:
-                                best_score = score
-                                best_nid = nid
+                            obj_score = 0.0
+                            for term in search_terms:
+                                term_lower = term.lower()
+                                if obj.ocr_text:
+                                    ocr_lower = obj.ocr_text.lower()
+                                    if term_lower == ocr_lower:
+                                        obj_score = max(obj_score, 1.0)
+                                    elif term_lower in ocr_lower or ocr_lower in term_lower:
+                                        obj_score = max(obj_score, 0.8)
+                                label_lower = obj.label.lower()
+                                if term_lower in label_lower or label_lower in term_lower:
+                                    obj_score = max(obj_score, 0.7)
+                            if obj_score > 0:
+                                match_count += 1
+                            node_best = max(node_best, obj_score)
+                        # Bonus for nodes with multiple matching objects (more relevant)
+                        node_score = node_best + min(match_count * 0.02, 0.1)
+                        if node_score > best_score:
+                            best_score = node_score
+                            best_nid = nid
                     if best_nid is not None and best_score >= 0.5:
                         if best_nid not in target_nodes:
                             target_nodes.append(best_nid)
+                        s.target_node_to_item[best_nid] = item
                         log.info("[session %s] Goal '%s' → node #%d (score=%.2f)",
                                  s.id, item, best_nid, best_score)
                     else:
@@ -1297,17 +1427,18 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                     from server.path_planner import plan_route as _plan_route
                     neo4j_graph = _build_nav_graph(ref_map)
                     if neo4j_graph.number_of_nodes() > 0:
-                        # Use node 0 as default start; if missing, use smallest nid
-                        start_nid = 0 if 0 in neo4j_graph else min(neo4j_graph.nodes())
-                        # Filter targets to only nodes that exist in graph
-                        valid_targets = [t for t in target_nodes if t in neo4j_graph]
-
-                        # Auto-detect checkout and exit nodes
+                        # Auto-detect checkout and exit nodes (need exit_nid for default start)
                         checkout_nid, exit_nid = _find_checkout_exit_nodes(ref_map)
                         if checkout_nid and checkout_nid not in neo4j_graph:
                             checkout_nid = None
                         if exit_nid and exit_nid not in neo4j_graph:
                             exit_nid = None
+
+                        # Placeholder start — will be re-planned from actual position after first photo
+                        start_nid = 0 if 0 in neo4j_graph else min(neo4j_graph.nodes())
+                        # Filter targets to only nodes that exist in graph
+                        valid_targets = [t for t in target_nodes if t in neo4j_graph]
+
                         s.checkout_node = checkout_nid
                         s.exit_node = exit_nid
 
@@ -1320,6 +1451,9 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                             s.visited_targets = set()
                             s.route_plan = route
                             s.current_leg_index = 0
+                            # Set goal_node to the first target so the AR arrow works immediately
+                            if route.visit_order:
+                                s.goal_node = route.visit_order[0]
                             auto_route = {
                                 "visit_order": route.visit_order,
                                 "total_cost": route.total_cost,
@@ -1338,12 +1472,19 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
         guidance="Upload a starting photo so I can see where you are.",
         goal_objects=goal_objects,
         place=selected_place,
+        goal_node_id=_current_goal_node_id(s),
     )
 
 
 @app.post("/session/{session_id}/photo", response_model=TurnResponse)
-async def upload_photo(session_id: str, photo: UploadFile = File(...),
-                       heading: Optional[float] = Form(default=None)) -> TurnResponse:
+async def upload_photo(
+    session_id: str,
+    photo: UploadFile = File(...),
+    dino_node_hint: Optional[int] = Form(None),
+    pdr_x: Optional[float] = Form(None),
+    pdr_y: Optional[float] = Form(None),
+    heading: Optional[float] = Form(None),
+) -> TurnResponse:
     s = _store.get(session_id)
     if s is None:
         raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
@@ -1353,6 +1494,12 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...),
         raise HTTPException(status_code=409, detail={"error": "confirm_pending", "detail": "POST /confirm first"})
     if s.pending_question is not None:
         raise HTTPException(status_code=409, detail={"error": "answer_pending", "detail": "POST /answer first"})
+
+    if dino_node_hint is not None or pdr_x is not None:
+        log.info("[session %s] iOS sensor data: dino_hint=%s pdr=(%.1f, %.1f) heading=%s",
+                 session_id, dino_node_hint,
+                 pdr_x or 0, pdr_y or 0,
+                 f"{heading:.1f}" if heading is not None else "N/A")
 
     t_start = time.time()
     out_dir = ensure_output_dir(session_id)
@@ -1426,9 +1573,11 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...),
 
         # ── Early localization for route-aware VLM prompt ──────────────
         _loc_items = _build_localization_items(detections, ocr_results or [], img_w, img_h)
+        _ocr_items = _build_ocr_items(ocr_results or [], img_w, img_h)
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
-                                             image_path=str(photo_path))
+                                             image_path=str(photo_path),
+                                             ocr_items=_ocr_items)
         _apply_phone_heading(s, _early_loc, heading)
         _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
                                                        img_w=img_w, img_h=img_h, ocr_results=ocr_results)
@@ -1493,17 +1642,35 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...),
                 summary += "  SIGN MATCH: " + "; ".join(matches)
             return summary
 
-        # ── Stage 1: VLM perceive ──────────────────────────────────────
+        # ── Stage 1: VLM perceive (multi-round if VLM_ROUNDS > 1) ────────
         _active_goals = _current_goal_objects(s)
         _active_goal_str = "找到：" + "、".join(_active_goals)
         t_vlm_start = time.time()
-        vlm_perception = _vlm_perceive(
-            image_path=str(photo_path),
-            goal=_active_goal_str,
-            goal_objects=_active_goals,
-            img_w=img_w,
-            img_h=img_h,
-        )
+        if _config.VLM_ROUNDS > 1:
+            vlm_perception, _perception_debug = _vlm_perceive_multi_round(
+                image_path=str(photo_path),
+                goal=_active_goal_str,
+                goal_objects=_active_goals,
+                img_w=img_w,
+                img_h=img_h,
+                num_rounds=_config.VLM_ROUNDS,
+            )
+        elif _config.VLM_PASS3:
+            vlm_perception, _perception_debug = _vlm_perceive_three_pass(
+                image_path=str(photo_path),
+                goal=_active_goal_str,
+                goal_objects=_active_goals,
+                img_w=img_w,
+                img_h=img_h,
+            )
+        else:
+            vlm_perception, _perception_debug = _vlm_perceive_two_pass(
+                image_path=str(photo_path),
+                goal=_active_goal_str,
+                goal_objects=_active_goals,
+                img_w=img_w,
+                img_h=img_h,
+            )
 
         detections = [
             PerceptionDetection(label=d.label, box=d.bbox, score=d.score,
@@ -1511,6 +1678,43 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...),
             for d in vlm_perception.detections
         ]
         detected_labels = [d.label for d in detections]
+
+        # ── Generate pass1 / pass2 / merged annotated images ──
+        _pass1_dets = [
+            PerceptionDetection(label=d["label"], box=d["box"], score=d["score"],
+                                position=d.get("position"))
+            for d in _perception_debug.get("pass1", {}).get("detections", [])
+            if d.get("box") and len(d["box"]) == 4
+        ]
+        _pass2_dets = [
+            PerceptionDetection(label=d["label"], box=d["box"], score=d["score"],
+                                position=d.get("position"))
+            for d in _perception_debug.get("pass2", {}).get("detections", [])
+            if d.get("box") and len(d["box"]) == 4
+        ]
+        _pass1_ocr = [
+            OCRResult(text=t["text"], confidence=t.get("score", 0.5), bbox=t["bbox"])
+            for t in _perception_debug.get("pass1", {}).get("ocr", [])
+            if t.get("bbox")
+        ]
+        _pass2_ocr = [
+            OCRResult(text=t["text"], confidence=t.get("score", 0.5), bbox=t["bbox"])
+            for t in _perception_debug.get("pass2", {}).get("ocr", [])
+            if t.get("bbox")
+        ]
+        _ann_dir = ensure_output_dir(session_id) / "annotated"
+        if _pass1_dets or _pass1_ocr:
+            annotate(str(photo_path), str(_ann_dir / f"{nid}_pass1.jpg"),
+                     _pass1_dets,
+                     banner_text=f"Pass 1: {len(_pass1_dets)} detections, {len(_pass1_ocr)} OCR",
+                     ocr_results=_pass1_ocr if _pass1_ocr else None,
+                     goal_objects=s.goal_objects, region_mode=True)
+        if _pass2_dets or _pass2_ocr:
+            annotate(str(photo_path), str(_ann_dir / f"{nid}_pass2.jpg"),
+                     _pass2_dets,
+                     banner_text=f"Pass 2: {len(_pass2_dets)} detections, {len(_pass2_ocr)} OCR",
+                     ocr_results=_pass2_ocr if _pass2_ocr else None,
+                     goal_objects=s.goal_objects, region_mode=True)
 
         vlm_ocr_results = [
             OCRResult(text=t.text, confidence=t.score, bbox=t.bbox)
@@ -1524,14 +1728,46 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...),
         ocr_results = _clean_vlm_ocr(ocr_results, img_h)
         ocr_texts = [r.text for r in ocr_results]
 
-        # ── Localize with detection labels + OCR BEFORE decide ────────
+        # ── Localize with detection labels + OCR + zone BEFORE decide ──
+        _is_first_localization = s.last_corrected_nid is None
         _loc_items = _build_localization_items(detections, ocr_results, img_w, img_h)
+        _ocr_items = _build_ocr_items(ocr_results, img_w, img_h)
+        _store_zone = vlm_perception.store_zone or ""
+        log.info("[session %s] VLM store_zone: %s | scene: %s",
+                 session_id, _store_zone or "(none)", vlm_perception.scene_description[:80])
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
-                                             image_path=str(photo_path))
+                                             image_path=str(photo_path),
+                                             store_zone=_store_zone,
+                                             ocr_items=_ocr_items)
         _apply_phone_heading(s, _early_loc, heading)
         _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
                                                        img_w=img_w, img_h=img_h, ocr_results=ocr_results)
+
+        # ── Store debug info ──
+        _loc_debug = {}
+        if _early_loc:
+            _loc_debug = {
+                "matched_nid": _early_loc.matched_nid,
+                "confidence": round(_early_loc.confidence, 3),
+                "method": _early_loc.method,
+                "reasoning": _early_loc.reasoning,
+                "runner_up_nid": _early_loc.runner_up_nid,
+                "runner_up_score": round(_early_loc.runner_up_score, 3),
+                "top_candidates": [(c[0], round(c[1], 3), c[2]) for c in (_early_loc.top_candidates or [])[:10]],
+            }
+        s.debug_perception = {
+            **_perception_debug,
+            "localization": _loc_debug,
+            "store_zone": _store_zone,
+            "photo_turn": len(s.history),
+            "images": {
+                "pass1": f"/session/{session_id}/photo/{nid}/pass1.jpg",
+                "pass2": f"/session/{session_id}/photo/{nid}/pass2.jpg",
+                "merged": f"/session/{session_id}/photo/{nid}.jpg",
+                "original": f"/session/{session_id}/original/{nid}.jpg",
+            },
+        }
 
         if _route_ctx:
             log.info("🟢 [session %s] Mode B: VLM will receive route context (%d chars), next_instr=%s",
@@ -1592,11 +1828,13 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...),
     # get more than one item confirmed from the same photo.
     goal_verified = None
     verified_labels: list[str] = []
+    if s.phase in ("checkout", "exit"):
+        _arrival_goals = _active_goals
+    else:
+        _arrival_goals = s.arrival_goal_objects or s.goal_objects
     if GOAL_CROP_VERIFY and vlm_resp.action == VLMAction.ARRIVED:
-        candidates = _top_goal_detections(detections, s.target_objects)
+        candidates = _top_goal_detections(detections, _arrival_goals)
         if not has_grounding:
-            # VLM-only mode: the "detection" and the crop verdict come from the same
-            # model, so a yes cannot rescue a detection it scored below the floor.
             candidates = [(g, d) for g, d in candidates if d.score >= ARRIVED_MIN_DETECTION_SCORE]
         any_checked = False
         any_true = False
@@ -1619,7 +1857,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...),
     # Gate ARRIVED on real evidence (a fresh photo can't be answering a confirm).
     _raw_action = vlm_resp.action
     vlm_resp = scene.verify_arrival(
-        vlm_resp, detections, ocr_matches=ocr_matches, goal_objects=s.target_objects,
+        vlm_resp, detections, ocr_matches=ocr_matches, goal_objects=_arrival_goals,
         min_score=ARRIVED_MIN_DETECTION_SCORE, img_w=img_w, img_h=img_h,
         goal_verified=goal_verified,
     )
@@ -1735,14 +1973,9 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...),
     # the decide step. Mode A ran it with GroundingDINO labels earlier.
     loc_result = _early_loc
 
-    # ── Route-first: override VLM MOVE guidance with path planner ─────
-    # The path planner's next_instruction is the primary navigation text.
-    # VLM guidance is only used when: (1) VLM says ARRIVED, or (2) no
-    # route instruction available.
+    # VLM already receives route_context (map + path plan) in its prompt,
+    # so its guidance is photo-aware AND route-aware.  No override needed.
     _final_guidance = vlm_resp.guidance
-    # The "this photo does not match the map" hint belongs on the app's map line
-    # only: it is not a route step, and swapping it in for the VLM's photo-based
-    # guidance would leave the user with nothing to act on.
     _route_step = _next_instr if _next_instr != LOCALIZE_FAILED_HINT else None
     if vlm_resp.action == VLMAction.MOVE and _route_step:
         _final_guidance = _route_step
@@ -1760,6 +1993,7 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...),
     else:  # MOVE
         s.last_planned_action = _final_guidance
 
+    _g_items, _v_items, _c_target = _shopping_progress(s)
     return TurnResponse(
         action=vlm_resp.action,
         guidance=_final_guidance,
@@ -1775,6 +2009,10 @@ async def upload_photo(session_id: str, photo: UploadFile = File(...),
         next_instruction=_next_instr,
         remaining_targets=len(s.remaining_targets) if s.target_nodes else None,
         phase=s.phase,
+        goal_item_names=_g_items,
+        visited_item_names=_v_items,
+        current_target_name=_c_target,
+        goal_node_id=_current_goal_node_id(s),
     )
 
 
@@ -1847,6 +2085,7 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
             "kind": "answer", "user_answer": req.answer,
             "vlm_action": vlm_resp.action.value, "vlm_guidance": vlm_resp.guidance,
         })
+        _g_items, _v_items, _c_target = _shopping_progress(s)
         return TurnResponse(
             action=vlm_resp.action,
             guidance=vlm_resp.guidance,
@@ -1854,6 +2093,10 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
             node_id=nid,
             remaining_targets=len(s.remaining_targets) if s.target_nodes else None,
             phase=s.phase,
+            goal_item_names=_g_items,
+            visited_item_names=_v_items,
+            current_target_name=_c_target,
+            goal_node_id=_current_goal_node_id(s),
         )
 
     # Normal answer flow (not a confirm question)
@@ -1894,10 +2137,11 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
 
     log.info("[session %s] VLM → %s | %s", session_id, vlm_resp.action.value, vlm_resp.guidance[:120])
 
-    # Gate ARRIVED on real evidence
+    # Gate ARRIVED on real evidence — use arrival-specific goal objects
+    _answer_arrival_goals = s.arrival_goal_objects or _active_goals
     _raw_action = vlm_resp.action
     vlm_resp = scene.verify_arrival(
-        vlm_resp, s.last_detections, ocr_matches=s.last_ocr_matches, goal_objects=_active_goals,
+        vlm_resp, s.last_detections, ocr_matches=s.last_ocr_matches, goal_objects=_answer_arrival_goals,
         min_score=ARRIVED_MIN_DETECTION_SCORE, img_w=img_w, img_h=img_h,
         prior_was_confirm=False,
     )
@@ -1922,6 +2166,7 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
     else:
         s.last_planned_action = vlm_resp.guidance
 
+    _g_items, _v_items, _c_target = _shopping_progress(s)
     return TurnResponse(
         action=vlm_resp.action,
         guidance=vlm_resp.guidance,
@@ -1929,6 +2174,10 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
         node_id=s.last_node_id,
         annotated_photo_url=f"/session/{session_id}/photo/{s.last_node_id}.jpg",
         phase=s.phase,
+        goal_item_names=_g_items,
+        visited_item_names=_v_items,
+        current_target_name=_c_target,
+        goal_node_id=_current_goal_node_id(s),
     )
 
 
@@ -1960,12 +2209,12 @@ def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
             if arrived_ocr:
                 node_data["arrived_ocr"] = arrived_ocr
 
-        _active_goals = _current_goal_objects(s)
-
         if s.phase == "shopping":
             # Advance route: mark current target as visited and move to next leg
+            found_item_name = None
             if s.route_plan and s.target_nodes:
                 current_leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
+                found_item_name = s.target_node_to_item.get(current_leg.to_node)
                 s.mark_target_visited(current_leg.to_node)
                 s.current_leg_index = min(s.current_leg_index + 1, len(s.route_plan.legs) - 1)
                 log.info("[session %s] route advanced: visited node #%d, leg %d/%d, remaining=%s",
@@ -1973,24 +2222,25 @@ def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
                          len(s.route_plan.legs), s.remaining_targets)
 
             remaining = len(s.remaining_targets) if s.target_nodes else 0
+            found_label = found_item_name or "商品"
             if remaining > 0:
-                next_goals = _current_goal_objects(s)
-                msg = f"已找到「{'、'.join(_active_goals)}」！接下來找「{'、'.join(next_goals)}」，請拍一張照片讓我定位。"
+                _, _, next_target = _shopping_progress(s)
+                next_label = next_target or "下一項商品"
+                msg = f"已找到「{found_label}」！接下來找「{next_label}」，請拍一張照片讓我定位。"
                 s.arrived = False
             else:
-                # All items found — transition to checkout or exit phase
                 if s.checkout_node is not None:
                     s.phase = "checkout"
-                    msg = f"已找到所有商品！現在帶您前往收銀台結帳，請拍一張照片讓我定位。"
+                    msg = f"已找到「{found_label}」！所有商品都找到了，現在帶您前往收銀台結帳，請拍一張照片讓我定位。"
                     s.arrived = False
                     log.info("[session %s] phase → checkout (WP%d)", session_id, s.checkout_node)
                 elif s.exit_node is not None:
                     s.phase = "exit"
-                    msg = f"已找到所有商品！現在帶您前往出口，請拍一張照片讓我定位。"
+                    msg = f"已找到「{found_label}」！所有商品都找到了，現在帶您前往出口，請拍一張照片讓我定位。"
                     s.arrived = False
                     log.info("[session %s] phase → exit (WP%d)", session_id, s.exit_node)
                 else:
-                    msg = f"已找到「{'、'.join(_active_goals)}」！所有商品都找到了！"
+                    msg = f"已找到「{found_label}」！所有商品都找到了！"
                     s.arrived = True
                     s.phase = "done"
         elif s.phase == "checkout":
@@ -2081,6 +2331,7 @@ def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
     render_scene_graph(observations, s.goal, s.goal_objects,
                        str(graph_dir / f"scene_graph_{arrived_node}_confirm.png"))
 
+    _g_items, _v_items, _c_target = _shopping_progress(s)
     return TurnResponse(
         action=action,
         guidance=msg,
@@ -2088,6 +2339,10 @@ def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
         node_id=arrived_node,
         annotated_photo_url=f"/session/{session_id}/photo/{arrived_node}.jpg",
         phase=s.phase,
+        goal_item_names=_g_items,
+        visited_item_names=_v_items,
+        current_target_name=_c_target,
+        goal_node_id=_current_goal_node_id(s),
     )
 
 
@@ -2364,18 +2619,21 @@ async def localize_photo(photo: UploadFile = File(...), place: str = Query(defau
         im.save(tmp, format="JPEG", quality=85)
         im.close()
 
-        # Use VLM to perceive the scene
-        perception, _ = _vlm_perceive_and_decide(
-            image_path=tmp,
-            goal="定位",
-            goal_objects=[],
-            topomap_summary="(localization only)",
-            img_w=img_w,
-            img_h=img_h,
-            prior_question=None,
-            prior_answer=None,
-            ocr_formatter=lambda vlm_ocr: "(localization)",
-        )
+        if _config.VLM_ROUNDS > 1:
+            perception, _ = _vlm_perceive_multi_round(
+                image_path=tmp, goal="定位", goal_objects=[],
+                img_w=img_w, img_h=img_h, num_rounds=_config.VLM_ROUNDS,
+            )
+        elif _config.VLM_PASS3:
+            perception, _ = _vlm_perceive_three_pass(
+                image_path=tmp, goal="定位", goal_objects=[],
+                img_w=img_w, img_h=img_h,
+            )
+        else:
+            perception, _ = _vlm_perceive_two_pass(
+                image_path=tmp, goal="定位", goal_objects=[],
+                img_w=img_w, img_h=img_h,
+            )
 
         detected_labels = [d.label for d in perception.detections]
         ocr_texts = [t.text for t in perception.ocr_texts]
@@ -2396,6 +2654,7 @@ async def localize_photo(photo: UploadFile = File(...), place: str = Query(defau
         ocr_texts=ocr_texts,
         neo4j=neo4j,
         place=place or None,
+        grid_n=_config.GRID_N,
     )
 
     resp = {
@@ -2452,6 +2711,22 @@ def get_reference_map(place: str = Query(default="")):
             for p in ref.photos.values()
         ],
     }
+
+
+@app.post("/test/config")
+def set_test_config(grid_n: int = Query(default=None), vlm_rounds: int = Query(default=None), vlm_pass3: bool = Query(default=None)):
+    """Runtime config override for testing different grid sizes and VLM rounds."""
+    changed = {}
+    if grid_n is not None and grid_n in (3, 4, 5):
+        _config.GRID_N = grid_n
+        changed["grid_n"] = grid_n
+    if vlm_rounds is not None and vlm_rounds in (1, 2, 3):
+        _config.VLM_ROUNDS = vlm_rounds
+        changed["vlm_rounds"] = vlm_rounds
+    if vlm_pass3 is not None:
+        _config.VLM_PASS3 = vlm_pass3
+        changed["vlm_pass3"] = vlm_pass3
+    return {"status": "ok", "changed": changed, "current": {"grid_n": _config.GRID_N, "vlm_rounds": _config.VLM_ROUNDS, "vlm_pass3": _config.VLM_PASS3}}
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2763,6 +3038,19 @@ def dashboard():
     return FileResponse(str(html_path), media_type="text/html")
 
 
+@app.get("/debug")
+def debug_latest():
+    """Redirect to the latest session's debug page."""
+    from fastapi.responses import RedirectResponse
+    latest = None
+    for s in _store._sessions.values():
+        if latest is None or s.created_at > latest.created_at:
+            latest = s
+    if not latest:
+        return HTMLResponse("<h1>尚無 session</h1>", status_code=404)
+    return RedirectResponse(f"/session/{latest.id}/debug-page")
+
+
 @app.get("/sessions")
 def list_sessions():
     """List all active sessions (newest first)."""
@@ -2805,6 +3093,47 @@ def get_session(session_id: str):
     }
 
 
+@app.get("/session/{session_id}/debug")
+def session_debug(session_id: str):
+    """Perception & localization debug report for the last photo."""
+    s = _store.get(session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
+    route_info = None
+    if s.route_plan:
+        visit_order = s.route_plan.visit_order if hasattr(s.route_plan, 'visit_order') else []
+        route_info = {
+            "visit_order": visit_order,
+            "visit_order_items": [s.target_node_to_item.get(n, f"WP{n}") for n in visit_order],
+            "total_cost": round(s.route_plan.total_cost, 1) if hasattr(s.route_plan, 'total_cost') else None,
+            "current_leg_index": s.current_leg_index,
+            "legs": [{"from": lg.from_node, "to": lg.to_node, "purpose": lg.purpose,
+                       "cost": round(lg.cost, 1)}
+                      for lg in s.route_plan.legs] if hasattr(s.route_plan, 'legs') else [],
+        }
+    return {
+        "session_id": s.id,
+        "goal": s.goal,
+        "phase": s.phase,
+        "target_nodes": s.target_nodes,
+        "target_node_to_item": s.target_node_to_item,
+        "visited_targets": list(s.visited_targets),
+        "last_corrected_nid": s.last_corrected_nid,
+        "route": route_info,
+        "perception": s.debug_perception,
+    }
+
+
+@app.get("/session/{session_id}/debug-page")
+def session_debug_page(session_id: str):
+    """HTML debug page for perception & localization diagnostics."""
+    html_path = Path(__file__).parent / "debug_page.html"
+    if not html_path.exists():
+        return HTMLResponse("<h1>debug_page.html not found</h1>", status_code=500)
+    template = html_path.read_text(encoding="utf-8")
+    return HTMLResponse(template.replace("{{SESSION_ID}}", session_id))
+
+
 @app.get("/session/{session_id}/photo/{node_id}.jpg")
 def serve_annotated_photo(session_id: str, node_id: int):
     s = _store.get(session_id)
@@ -2812,6 +3141,18 @@ def serve_annotated_photo(session_id: str, node_id: int):
         raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
     out_dir = ensure_output_dir(session_id)
     p = out_dir / "annotated" / f"{node_id}.jpg"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail={"error": "photo_not_found", "detail": str(p)})
+    return FileResponse(str(p), media_type="image/jpeg")
+
+
+@app.get("/session/{session_id}/photo/{node_id}/{pass_name}.jpg")
+def serve_pass_photo(session_id: str, node_id: int, pass_name: str):
+    """Serve pass1 / pass2 annotated photos."""
+    if pass_name not in ("pass1", "pass2"):
+        raise HTTPException(status_code=400, detail={"error": "bad_pass", "detail": pass_name})
+    out_dir = ensure_output_dir(session_id)
+    p = out_dir / "annotated" / f"{node_id}_{pass_name}.jpg"
     if not p.exists():
         raise HTTPException(status_code=404, detail={"error": "photo_not_found", "detail": str(p)})
     return FileResponse(str(p), media_type="image/jpeg")

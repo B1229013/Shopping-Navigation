@@ -83,6 +83,7 @@ class RefMap:
     schema_version: int = 1
     photos: Dict[int, RefPhotoNode] = field(default_factory=dict)
     walkway_edges: List[dict] = field(default_factory=list)
+    adjacent_map: Dict[tuple, Dict[tuple, str]] = field(default_factory=dict)
 
 
 # ── HTTP-based Neo4j client ───────────────────────────────────────────────
@@ -159,17 +160,27 @@ class Neo4jClient:
             "statement": cypher,
             "parameters": parameters or {},
         }
-        resp = http.post(
-            self._endpoint,
-            json=body,
-            headers={
-                "Authorization": self._auth_header,
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
+        for _retry in range(3):
+            try:
+                resp = http.post(
+                    self._endpoint,
+                    json=body,
+                    headers={
+                        "Authorization": self._auth_header,
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                    timeout=60,
+                )
+                resp.raise_for_status()
+                break
+            except Exception as e:
+                if _retry < 2:
+                    import time as _t
+                    log.warning("Neo4j query retry %d/3: %s", _retry + 1, e)
+                    _t.sleep(3)
+                else:
+                    raise
         payload = resp.json()
 
         errors = payload.get("errors", [])
@@ -202,6 +213,18 @@ class Neo4jClient:
 
     # ── Load reference map ────────────────────────────────────────────────
 
+    def _resolve_place_name(self, place: str) -> str:
+        """Resolve a partial place name to the exact name in the database."""
+        places = self.list_places()
+        for p in places:
+            if p["name"] == place:
+                return place
+        for p in places:
+            if place in p["name"] or p["name"] in place:
+                log.info("Fuzzy place match: '%s' → '%s'", place, p["name"])
+                return p["name"]
+        return place
+
     def load_reference_map(self, place: Optional[str] = None) -> RefMap:
         """Load the full reference topological map for the given place.
 
@@ -215,6 +238,10 @@ class Neo4jClient:
         if not self._connected:
             log.warning("Neo4j not connected — returning empty reference map")
             return RefMap(place=place)
+
+        place = self._resolve_place_name(place)
+        if self._ref_map_cache and self._ref_map_cache.place == place:
+            return self._ref_map_cache
 
         version = self._detect_schema(place)
         log.info("Detected schema V%d for '%s'", version, place)
@@ -366,6 +393,9 @@ class Neo4jClient:
                 ref.photos[from_nid].neighbor_nids.append(to_nid)
 
         log.info("V2: loaded %d walkway edges", len(ref.walkway_edges))
+
+        # 4) ADJACENT spatial relationships — disabled until build_object_graph completes
+        # TODO: re-enable after batch write script finishes populating Object+ADJACENT nodes
         return ref
 
     # ── Schema V1 (legacy): TopoNode:Photo → Object ─────────────────────

@@ -41,13 +41,12 @@ PER_TURN_PROMPT = """\
 最重要：你可以直接看到照片！不要只依賴下方的偵測清單。請自己仔細看照片，判斷目標商品是否出現在畫面中。
 
 引導原則：
-- 你在照片中看到目標商品本身或其包裝（看得到商品實體、或包裝上印的品名）→ 回覆 ARRIVED，告訴顧客「就在您的左手邊/前方/右手邊」。即使偵測清單沒有列出該物品，只要你自己在照片中看得清楚就算找到了
-- 只看到擺放目標的貨架、冷藏櫃、分類招牌或區域標示牌，卻看不到商品本身 → 絕對不可以回 ARRIVED。這些只是線索，請回 MOVE，引導顧客再走近一點拍一張確認
+- ARRIVED：你在照片中看到「目標商品本身」（例如優格的包裝、泡麵的袋子、牛奶瓶）→ 回覆 ARRIVED，告訴顧客「就在您的左手邊/前方/右手邊」。即使偵測清單沒有列出，只要你自己在照片中看得到商品本身就算找到
+- 重要：只看到貨架、冷藏展示櫃、冷凍櫃等「容器/設備」但沒看到商品本身 → 不算 ARRIVED，應該回覆 MOVE 引導往那個方向走
 - 需要確認方向 → ASK，問一個簡短的是非題
 - 照片中完全看不到任何目標相關物件 → MOVE，給一句具體的走法指引
 - 其他情況 → MOVE，給一句具體的走法指引
 - 方向判斷：以照片中物品的實際位置為準。畫面左側 → 說「左手邊」，右側 → 說「右手邊」，中間 → 說「正前方」
-- 不要引導使用者去遠處的地標（如冷藏展示櫃、冷凍櫃），如果目標就在附近就直接引導到目標
 
 嚴格禁止：
 - guidance 和 vlm_summary 裡提到的每一個地標、設備、區域，都必須出自上方「偵測物件」清單或「OCR 文字」清單
@@ -78,25 +77,98 @@ ROUTE_CONTEXT_BLOCK = """\
 目前位置：{position_description}
 面向：{heading_description}
 {route_description}
-指引風格：
-- 如果照片中已經看到目標商品，直接說 ARRIVED + 方向，不需要再繼續引導
-- 如果照片中看不到目標，請嚴格遵循上方的路線指引（目標、區域、方向）來引導使用者
-- 一次只引導找一樣東西，找到後系統會自動切到下一項
-- 用照片裡看得到的物件來描述位置和方向
-- 說話要自然簡短，像真人導購員帶路
+
+【人設限制】
+你是一位溫柔、貼心的隨身導遊。你的任務是一步一步引導使用者前進。
+
+【溝通原則】
+1. 不要報數據：不要說「X公尺」「X度」，請改用「幾步路」「稍微向左」等口語。
+2. 先講結論：先告訴使用者該怎麼做（如「停下」「右轉」），再解釋原因。
+3. 人本視角：以使用者的身體方向為中心描述，不要用絕對座標。
+4. 一次一步：只引導到下一個轉彎或交叉路口，不要一次講完所有步驟。到了之後使用者會再拍照讓你繼續引導。
+
+【引導規則】
+- 照片中看到任何一個目標商品 → ARRIVED，告訴顧客位置（左手邊/前方/右手邊）
+- 照片中看不到目標 → MOVE，結合導航參考資訊中的「路線經過的區域」和「建議走法」，告訴使用者：沿著什麼走、會經過什麼區域、到哪裡停下來
+- 用照片裡看得到的物件當參照物來描述起點和方向
+- 說話要自然簡短，像朋友帶路
+- 如果有多個目標，任何一個目標都算找到
 """
 
 
 PERCEIVE_PROMPT = """\
-You are looking at a photo taken inside a building (store, office, or similar) to
-help someone find "{goal}".
+你正在分析一張超市內部的照片，用來建立室內定位用的物件地圖。目標是找出能**唯一識別這個位置**的物件，而不是列出每張照片都有的通用物件。
 
-Goal-related items to look for: {goal_objects}
+仔細觀察照片，回報你**確實看到**的物品。回覆格式為一個 JSON 物件，不要加其他文字：
 
-Look at the attached photo and report what you see. Reply with EXACTLY one JSON
-object on one line, nothing else:
+{{"scene": "<用繁體中文描述這是什麼區域>", "items": [{{"zh": "<繁體中文名稱>", "en": "<English name>", "conf": <0.0-1.0 信心值>, "box": [x1,y1,x2,y2], "text": "<物件上可見的文字，沒有則留空>"}}]}}
 
-{{"scene_description": "<one short phrase describing the general area>", "detections": [{{"label": "<object name>", "box": [x1,y1,x2,y2], "score": <0-1>}}], "ocr_texts": [{{"text": "<visible text>", "score": <0-1>, "box": [x1,y1,x2,y2]}}]}}
+嚴格規則：
+- box 座標是圖片的比例值（0.0 到 1.0），格式 [左, 上, 右, 下]。框要緊密包住物件。
+- 禁止大框：單個框的寬度和高度都不應超過圖片的50%。
+- 只回報你**確實看到**的具體物件，不要猜測或編造。
+- text 欄位：回報物件上**確實可見**的文字（招牌、價格標籤、走道編號、品牌名等），沒有文字就寫空字串 ""。
+
+【回報優先順序】（從最重要到最不重要）：
+1. ★★★ 可讀文字標示：走道編號（走道5）、區域分類標示（堅果海苔、飲料）、品牌招牌上的文字、天花板吊牌。text 欄位務必填寫！
+2. ★★★ 具體品牌/商品：可辨識的品牌或商品名（可口可樂、舒潔衛生紙、Heineken啤酒、3M商品），越具體越好
+3. ★★ 具體貨架內容：辨識貨架上的商品類別（零食貨架、飲料貨架、寵物食品貨架），不要只寫「貨架」
+4. ★★ 獨特設備：磅秤、收銀機、自助結帳機、烘焙設備、熟食櫃台等不是每個走道都有的設備
+5. ★ 空間地標：出口標示、樓梯、走道交叉口、有特殊標記的柱子
+6. ☆ 通用物件：冷藏櫃、一般貨架、購物車、價格標籤、促銷海報 — 這些幾乎每張照片都有，**最多報 3 個**作為空間參考
+
+回報數量：**15-25 個**偵測，但其中**至少 10 個**必須是★★以上的獨特物件。遠處的標示牌和品牌也要報出。
+"""
+
+
+PERCEIVE_REFINE_PROMPT = """\
+你正在第二次、更仔細地分析同一張超市照片。目標是找出第一次漏掉的**獨特、可識別**的物件。
+
+第一次分析已經找到了這些物件：
+{prev_items}
+
+請再看一次照片，**逐區掃描**（左上→右上→左中→右中→左下→右下），重點補充：
+1. **漏掉的文字/標示**：天花板吊牌上的文字、走道編號、區域分類標示、品牌招牌 — 這些是定位最重要的線索！
+2. **漏掉的品牌/商品名**：貨架上可辨識的具體品牌或商品（包裝上的品牌名、logo）
+3. **漏掉的商品分區**：同一個貨架上如果有不同商品類別（上層 vs 下層、左側 vs 右側），要分開報，寫出具體類別
+4. **遠處的標示牌**：照片深處可見的吊牌、招牌、方向指示
+5. **漏掉的獨特設備**：不是通用設備（冷藏櫃、貨架），而是特殊的（磅秤、自助結帳、特殊展示架）
+
+不需要補充：通用物件（購物車、價格標籤、普通貨架）第一次已經夠了。
+
+回覆格式同上，只回報**新發現的**物件（不要重複第一次已報過的）：
+
+{{"scene": "<更新後的區域描述>", "items": [{{"zh": "<繁體中文名稱>", "en": "<English name>", "conf": <0.0-1.0 信心值>, "box": [x1,y1,x2,y2], "text": "<物件上可見的文字，沒有則留空>"}}]}}
+
+規則同上：box 是 0-1 比例值，禁止大框，只報確實看到的。目標補上 **8-15 個**獨特物件。
+"""
+
+
+PERCEIVE_DISTINCTIVE_PROMPT = """\
+You are looking at the SAME photo for a THIRD pass, focusing on DISTINCTIVE features
+that the previous two passes may have missed.
+
+Goal: "{goal}"
+Goal-related items: {goal_objects}
+
+Previous passes already found these objects: {prev_detections}
+Previous passes already found this text: {prev_ocr}
+
+Now look SPECIFICALLY for high-distinctiveness features:
+1. Aisle numbers, zone/section signs with text
+2. Brand names, product names (readable text on packaging)
+3. Special equipment (scales, ovens, self-checkout machines, etc.)
+4. Ceiling-mounted signs, hanging banners, directional signs
+5. Floor markings, pillar signs
+6. Decorations, seasonal displays
+7. Small or easily-missed objects
+
+Do NOT re-report objects already listed above. Only report NEW objects and text
+that were NOT in the previous passes.
+
+Reply with EXACTLY one JSON object (same format), only containing NEW findings:
+
+{{"scene_description": "<keep same>", "store_zone": "<keep same>", "detections": [{{"label": "<NEW object name>", "box": [x1,y1,x2,y2], "score": <0-1>}}], "ocr_texts": [{{"text": "<NEW visible text>", "score": <0-1>, "box": [x1,y1,x2,y2]}}]}}
 
 Rules:
 - box coordinates are FRACTIONS of the image (0.0 to 1.0), [left, top, right, bottom].

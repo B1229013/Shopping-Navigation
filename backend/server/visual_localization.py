@@ -29,12 +29,92 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import numpy as np
 import requests
 from PIL import Image, ImageOps
 
 from server.neo4j_client import Neo4jClient, RefMap, RefPhotoNode
 
 log = logging.getLogger(__name__)
+
+# ── Embedding cache for hybrid_max similarity ───────────────────────────
+_emb_cache: Dict[str, np.ndarray] = {}
+_emb_loaded = False
+
+
+def _load_embedding_cache() -> bool:
+    """Load pre-computed label embeddings from cache file. Returns True if loaded."""
+    global _emb_cache, _emb_loaded
+    if _emb_loaded:
+        return bool(_emb_cache)
+    _emb_loaded = True
+
+    from server.config import EMBEDDING_ENABLED, EMBEDDING_CACHE_PATH
+    if not EMBEDDING_ENABLED or not EMBEDDING_CACHE_PATH:
+        return False
+
+    cache_path = Path(EMBEDDING_CACHE_PATH)
+    if not cache_path.exists():
+        log.warning("Embedding cache not found: %s", cache_path)
+        return False
+
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        _emb_cache.update({label: np.array(vec, dtype=np.float32) for label, vec in data.items()})
+        log.info("Loaded %d label embeddings from %s", len(_emb_cache), cache_path)
+        return True
+    except Exception as e:
+        log.warning("Failed to load embedding cache: %s", e)
+        return False
+
+
+def _compute_query_embeddings(labels: List[str]) -> Dict[str, np.ndarray]:
+    """Compute embeddings for query labels not in cache, via OpenAI API."""
+    missing = [l for l in labels if l and l not in _emb_cache]
+    if not missing:
+        return {}
+
+    from server.config import OPENAI_API_KEY, EMBEDDING_MODEL
+    if not OPENAI_API_KEY:
+        return {}
+
+    try:
+        resp = requests.post(
+            "https://api.openai.com/v1/embeddings",
+            json={"input": missing, "model": EMBEDDING_MODEL},
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        result = {}
+        for item in resp.json()["data"]:
+            idx = item["index"]
+            vec = np.array(item["embedding"], dtype=np.float32)
+            result[missing[idx]] = vec
+            _emb_cache[missing[idx]] = vec
+        log.info("Computed %d new query embeddings", len(result))
+        return result
+    except Exception as e:
+        log.warning("Query embedding computation failed: %s", e)
+        return {}
+
+
+def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
+    dot = np.dot(a, b)
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    if na < 1e-9 or nb < 1e-9:
+        return 0.0
+    return float(dot / (na * nb))
+
+
+def _hybrid_max_sim(ql: str, rl: str) -> float:
+    """max(character similarity, embedding cosine similarity)."""
+    s_char = _semantic_similarity(ql, rl)
+    q_emb = _emb_cache.get(ql)
+    r_emb = _emb_cache.get(rl)
+    if q_emb is not None and r_emb is not None:
+        return max(s_char, _cosine_sim(q_emb, r_emb))
+    return s_char
 
 
 @dataclass
@@ -58,30 +138,114 @@ class LocalizationResult:
 
 # ── Grid-based weighted matching (primary) ────────────────────────────────
 
-GRID_ORDER = [
-    "top-left", "top-center", "top-right",
-    "mid-left", "mid-center", "mid-right",
-    "bottom-left", "bottom-center", "bottom-right",
-]
+def _make_grid(n: int):
+    """Generate GRID_ORDER and ADJACENT for an n×n grid using (row, col) cell names."""
+    order = [f"{r}-{c}" for r in range(n) for c in range(n)]
+    adj: Dict[str, list] = {}
+    for r in range(n):
+        for c in range(n):
+            cell = f"{r}-{c}"
+            neighbors = []
+            for dr in (-1, 0, 1):
+                for dc in (-1, 0, 1):
+                    nr, nc = r + dr, c + dc
+                    if (dr == 0 and dc == 0) or nr < 0 or nc < 0 or nr >= n or nc >= n:
+                        continue
+                    neighbors.append(f"{nr}-{nc}")
+            adj[cell] = neighbors
+    return order, adj
 
-ADJACENT = {
-    "top-left": ["top-center", "mid-left", "mid-center"],
-    "top-center": ["top-left", "top-right", "mid-center", "mid-left", "mid-right"],
-    "top-right": ["top-center", "mid-right", "mid-center"],
-    "mid-left": ["top-left", "top-center", "mid-center", "bottom-left", "bottom-center"],
-    "mid-center": GRID_ORDER,
-    "mid-right": ["top-right", "top-center", "mid-center", "bottom-right", "bottom-center"],
-    "bottom-left": ["mid-left", "mid-center", "bottom-center"],
-    "bottom-center": ["bottom-left", "bottom-right", "mid-center", "mid-left", "mid-right"],
-    "bottom-right": ["mid-right", "mid-center", "bottom-center"],
+_grid_cache: Dict[int, tuple] = {}
+
+def _get_grid(n: int):
+    if n not in _grid_cache:
+        _grid_cache[n] = _make_grid(n)
+    return _grid_cache[n]
+
+def _box_to_grid_cell(box, n: int) -> str:
+    """Map a normalized [0,1] bbox to an n×n grid cell name."""
+    if not box or len(box) != 4:
+        mid = n // 2
+        return f"{mid}-{mid}"
+    cx = (box[0] + box[2]) / 2
+    cy = (box[1] + box[3]) / 2
+    col = min(int(cx * n), n - 1)
+    row = min(int(cy * n), n - 1)
+    return f"{row}-{col}"
+
+# Legacy 3×3 string-based cell names for reference data compatibility
+_LEGACY_GRID_MAP_3 = {
+    "top-left": "0-0", "top-center": "0-1", "top-right": "0-2",
+    "mid-left": "1-0", "mid-center": "1-1", "mid-right": "1-2",
+    "bottom-left": "2-0", "bottom-center": "2-1", "bottom-right": "2-2",
 }
+
+def _legacy_cell_to_new(cell_str: str, from_n: int, to_n: int) -> str:
+    """Remap a cell name from from_n grid to the closest cell in to_n grid."""
+    if from_n == to_n and "-" in cell_str and cell_str[0].isdigit():
+        return cell_str
+    mapped = _LEGACY_GRID_MAP_3.get(cell_str, cell_str)
+    if "-" not in mapped or not mapped[0].isdigit():
+        mid = to_n // 2
+        return f"{mid}-{mid}"
+    parts = mapped.split("-")
+    old_r, old_c = int(parts[0]), int(parts[1])
+    new_r = min(int(old_r / from_n * to_n), to_n - 1)
+    new_c = min(int(old_c / from_n * to_n), to_n - 1)
+    return f"{new_r}-{new_c}"
 
 WEIGHT_LANDMARK = 5.0
 WEIGHT_SIGN = 3.0
 WEIGHT_EQUIPMENT = 2.0
 WEIGHT_NORMAL = 1.0
 WEIGHT_GENERIC = 0.3
-RARITY_ALPHA = 0.5
+RARITY_ALPHA = 1.0
+SPATIAL_BONUS_COEFF = 0.10
+IDF_AGGRESSIVE_THRESHOLD = 0.35
+
+
+def _size_importance(bbox_area: float) -> float:
+    """Larger objects (closer) get higher matching weight."""
+    if bbox_area < 0.005:
+        return 0.8
+    return 1.0 + 0.5 * math.log2(max(bbox_area, 0.01) / 0.01)
+
+
+def _compute_aggressive_rarity(ref_map: RefMap) -> Dict[str, float]:
+    """IDF with heavy penalty for labels appearing in >35% of photos."""
+    label_doc_freq: Dict[str, int] = defaultdict(int)
+    total_dp = 0
+    for _nid, node in ref_map.photos.items():
+        for dp in node.directional_photos:
+            total_dp += 1
+            seen: set[str] = set()
+            for obj in dp.objects:
+                ln = (obj.label_norm or obj.label or "").strip()
+                if ln and ln not in seen:
+                    seen.add(ln)
+                    label_doc_freq[ln] += 1
+                ocr = (getattr(obj, "ocr_text", "") or "").strip()
+                if ocr and len(ocr) >= 2 and ocr not in seen:
+                    seen.add(ocr)
+                    label_doc_freq[ocr] += 1
+        if not node.directional_photos and node.objects:
+            total_dp += 1
+            seen = set()
+            for obj in node.objects:
+                ln = (obj.label_norm or obj.label or "").strip()
+                if ln and ln not in seen:
+                    seen.add(ln)
+                    label_doc_freq[ln] += 1
+    if total_dp <= 1:
+        return {}
+    rarity: Dict[str, float] = {}
+    for label, df in label_doc_freq.items():
+        freq = df / total_dp
+        if freq > IDF_AGGRESSIVE_THRESHOLD:
+            rarity[label] = max(0.03, 0.15 * (1.0 - freq))
+        else:
+            rarity[label] = math.log(total_dp / df) / math.log(total_dp)
+    return rarity
 
 _SIGN_WORDS = {'標示', '指示', '告示', '看板', '招牌', '吊牌', '吊旗', 'sign', 'banner'}
 _ZONE_MARKERS = {'走道', '區域', '出口', 'exit', 'aisle', 'zone', 'decathlon',
@@ -118,44 +282,166 @@ def classify_feature(label: str, label2: str = "") -> tuple[float, str]:
     return WEIGHT_NORMAL, "normal"
 
 
-def box_to_grid(box: Optional[List[float]]) -> str:
-    if not box or len(box) != 4:
-        return "mid-center"
-    cx = (box[0] + box[2]) / 2
-    cy = (box[1] + box[3]) / 2
-    col = "left" if cx < 1 / 3 else ("right" if cx > 2 / 3 else "center")
-    row = "top" if cy < 1 / 3 else ("bottom" if cy > 2 / 3 else "mid")
-    return f"{row}-{col}"
+def box_to_grid(box: Optional[List[float]], n: int = 3) -> str:
+    return _box_to_grid_cell(box, n)
+
+
+def compute_query_spatial(items: List[dict]) -> Dict[tuple, dict]:
+    """Compute pairwise spatial relationships for query objects from bboxes.
+
+    Returns {(label_a, label_b): {'v': str, 'h': str, 'overlap': bool}}
+    where 'v' is 'above'/'below'/'same_row' and 'h' is 'left'/'right'/'same_col'.
+    """
+    rels: Dict[tuple, dict] = {}
+    for i, a in enumerate(items):
+        for j, b in enumerate(items):
+            if i >= j:
+                continue
+            ba, bb = a.get("box"), b.get("box")
+            if not ba or not bb or len(ba) != 4 or len(bb) != 4:
+                continue
+            a_cx = (ba[0] + ba[2]) / 2
+            a_cy = (ba[1] + ba[3]) / 2
+            b_cx = (bb[0] + bb[2]) / 2
+            b_cy = (bb[1] + bb[3]) / 2
+            dy = b_cy - a_cy
+            dx = b_cx - a_cx
+            rel = {
+                "v": "above" if dy > 0.08 else ("below" if dy < -0.08 else "same_row"),
+                "h": "left" if dx > 0.08 else ("right" if dx < -0.08 else "same_col"),
+            }
+            a_area = (ba[2] - ba[0]) * (ba[3] - ba[1])
+            b_area = (bb[2] - bb[0]) * (bb[3] - bb[1])
+            ix1, iy1 = max(ba[0], bb[0]), max(ba[1], bb[1])
+            ix2, iy2 = min(ba[2], bb[2]), min(ba[3], bb[3])
+            inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+            union = a_area + b_area - inter
+            rel["overlap"] = union > 0 and inter / union > 0.3
+
+            la = a.get("label", "")
+            lb = b.get("label", "")
+            rels[(la, lb)] = rel
+            rels[(lb, la)] = {
+                "v": {"above": "below", "below": "above", "same_row": "same_row"}[rel["v"]],
+                "h": {"left": "right", "right": "left", "same_col": "same_col"}[rel["h"]],
+                "overlap": rel["overlap"],
+            }
+    return rels
+
+
+def _spatial_direction_match(q_rel: dict, ref_cell_pairs: str) -> float:
+    """Score how well a query spatial relationship matches reference ADJACENT cell_pairs."""
+    if not ref_cell_pairs:
+        return 0.0
+    try:
+        pairs = json.loads(ref_cell_pairs) if isinstance(ref_cell_pairs, str) else ref_cell_pairs
+    except (json.JSONDecodeError, TypeError):
+        return 0.0
+    if not pairs:
+        return 0.0
+    ref_dirs: set = set()
+    for p in pairs:
+        d = p.get("dir", "")
+        if "above" in d:
+            ref_dirs.add("above")
+        if "below" in d:
+            ref_dirs.add("below")
+        if "left" in d:
+            ref_dirs.add("left")
+        if "right" in d:
+            ref_dirs.add("right")
+        if d == "overlap":
+            ref_dirs.add("overlap")
+    matches = 0.0
+    checks = 3
+    if q_rel["v"] == "above" and "above" in ref_dirs:
+        matches += 1
+    elif q_rel["v"] == "below" and "below" in ref_dirs:
+        matches += 1
+    if q_rel["h"] == "left" and "left" in ref_dirs:
+        matches += 1
+    elif q_rel["h"] == "right" and "right" in ref_dirs:
+        matches += 1
+    if q_rel["overlap"] and "overlap" in ref_dirs:
+        matches += 1
+    elif not q_rel["overlap"] and "overlap" not in ref_dirs:
+        matches += 0.5
+    return matches / checks
 
 
 def _extract_numbers(text: str) -> set:
     return set(re.findall(r'\d+', text))
 
 
+_DIR_RE = re.compile(
+    r'^(?:右前方|左前方|右後方|左後方|'
+    r'左上方|右上方|左下方|右下方|'
+    r'走道盡頭(?:左側|右側)?|'
+    r'前方|後方|左方|右方|左側|右側|上方|下方|中央)')
+_POS_RE = re.compile(r'上層|中層|下層|頂部|底部|上部')
+_ENG_POS_RE = re.compile(
+    r'\b(?:top|middle|bottom|upper|lower|left|right|front|back|rear)\b',
+    re.IGNORECASE)
+
+
+def _strip_direction(s: str) -> str:
+    """Strip directional/positional qualifiers for cross-angle matching."""
+    orig = s
+    s = _DIR_RE.sub('', s)
+    s = _POS_RE.sub('', s)
+    s = _ENG_POS_RE.sub('', s)
+    s = re.sub(r'  +', ' ', s).strip()
+    return s if s else orig
+
+
 def _semantic_similarity(ql: str, rl: str) -> float:
     ql_low, rl_low = ql.lower(), rl.lower()
+    if ql_low == rl_low:
+        return 1.0
+
+    ql_n = _strip_direction(ql_low)
+    rl_n = _strip_direction(rl_low)
+    if ql_n == rl_n:
+        return 0.95
+
     scores: list[float] = []
-    ql_words = set(ql_low.split())
-    rl_words = set(rl_low.split())
+
+    ql_words = set(ql_n.split())
+    rl_words = set(rl_n.split())
     if ql_words and rl_words:
         common = ql_words & rl_words
         if common:
             scores.append(len(common) / max(len(ql_words), len(rl_words)))
-    ql_chars = set(ql_low)
-    rl_chars = set(rl_low)
-    char_common = ql_chars & rl_chars - {' ', '/', '／', '（', '）', '「', '」'}
-    if char_common:
-        scores.append(len(char_common) / max(len(ql_chars), len(rl_chars)) * 0.8)
+
+    q_cats = {cw for cw in _CATEGORY_SIGNS if cw in ql_low}
+    r_cats = {cw for cw in _CATEGORY_SIGNS if cw in rl_low}
+    if q_cats or r_cats:
+        if q_cats and r_cats and q_cats == r_cats:
+            scores.append(0.4)
+        elif q_cats and r_cats and q_cats & r_cats:
+            scores.append(0.3)
+        elif q_cats != r_cats and q_cats and r_cats:
+            return max(scores) if scores else 0.0
+
     q_nums = _extract_numbers(ql)
     r_nums = _extract_numbers(rl)
     if q_nums and r_nums:
-        scores.append(0.9 if q_nums & r_nums else -0.3)
-    q_cats = {cw for cw in _CATEGORY_SIGNS if cw in ql_low}
-    r_cats = {cw for cw in _CATEGORY_SIGNS if cw in rl_low}
-    if q_cats and r_cats and q_cats & r_cats:
-        scores.append(0.85)
-    if ql_low in rl_low or rl_low in ql_low:
-        scores.append(min(len(ql), len(rl)) / max(len(ql), len(rl)))
+        if q_nums & r_nums:
+            scores.append(0.9)
+        else:
+            return max(max(scores) - 0.3, 0.0) if scores else 0.0
+
+    if ql_n in rl_n or rl_n in ql_n:
+        ratio = min(len(ql_n), len(rl_n)) / max(len(ql_n), len(rl_n))
+        scores.append(ratio if ratio > 0.4 else ratio * 0.5)
+
+    ql_chars = set(ql_n) - {' ', '/', '／', '（', '）', '「', '」'}
+    rl_chars = set(rl_n) - {' ', '/', '／', '（', '）', '「', '」'}
+    if ql_chars and rl_chars:
+        char_common = ql_chars & rl_chars
+        jaccard = len(char_common) / len(ql_chars | rl_chars)
+        scores.append(jaccard * 0.7)
+
     return max(scores) if scores else 0.0
 
 
@@ -173,6 +459,10 @@ def _compute_label_rarity(ref_map: RefMap) -> Dict[str, float]:
                 if ln and ln not in seen:
                     seen.add(ln)
                     label_doc_freq[ln] += 1
+                ocr = (getattr(obj, "ocr_text", "") or "").strip()
+                if ocr and len(ocr) >= 2 and ocr not in seen:
+                    seen.add(ocr)
+                    label_doc_freq[ocr] += 1
         if not node.directional_photos and node.objects:
             total_dp += 1
             seen = set()
@@ -181,6 +471,10 @@ def _compute_label_rarity(ref_map: RefMap) -> Dict[str, float]:
                 if ln and ln not in seen:
                     seen.add(ln)
                     label_doc_freq[ln] += 1
+                ocr = (getattr(obj, "ocr_text", "") or "").strip()
+                if ocr and len(ocr) >= 2 and ocr not in seen:
+                    seen.add(ocr)
+                    label_doc_freq[ocr] += 1
 
     if total_dp <= 1:
         return {}
@@ -196,73 +490,108 @@ def weighted_grid_match(
     query_grid: Dict[str, list],
     ref_grid: Dict[str, list],
     rarity_map: Optional[Dict[str, float]] = None,
+    grid_n: int = 3,
+    query_spatial: Optional[Dict[tuple, dict]] = None,
+    ref_adjacent: Optional[Dict[tuple, str]] = None,
 ) -> tuple[float, int, dict]:
+    """Set-based matching: flatten grids, match all query vs all ref objects."""
+    sim_func = _hybrid_max_sim if _emb_cache else _semantic_similarity
+
+    query_items = [qi for items in query_grid.values() for qi in items]
+    ref_items = [ri for items in ref_grid.values() for ri in items]
+
+    if not query_items or not ref_items:
+        total_possible = sum(
+            qi["weight"] * _size_importance(qi.get("bbox_area", 0.0))
+            for qi in query_items
+        )
+        return 0.0, 0, {}
+
     total_weighted = 0.0
     total_possible = 0.0
-    landmark_matches: list[tuple] = []
-    cell_matches: dict = {}
+    landmark_count = 0
+    obj_matches: list[tuple] = []
 
-    for cell in GRID_ORDER:
-        q_items = query_grid.get(cell, [])
-        r_same = ref_grid.get(cell, [])
-        r_adj: list[dict] = []
-        for ac in ADJACENT.get(cell, []):
-            for ri in ref_grid.get(ac, []):
-                r_adj.append({**ri, "_p": 0.7})
-        all_r = [{**ri, "_p": 1.0} for ri in r_same] + r_adj
+    used: set[int] = set()
+    for qi in query_items:
+        ql, qw = qi["label"], qi["weight"]
+        si = _size_importance(qi.get("bbox_area", 0.0))
+        total_possible += qw * si
 
-        if not q_items or not all_r:
-            total_possible += sum(it["weight"] for it in q_items)
-            continue
+        best_s, best_m, best_i = 0.0, None, -1
+        for ri_i, ri in enumerate(ref_items):
+            if ri_i in used:
+                continue
+            s = sim_func(ql, ri["label"])
+            if s > best_s:
+                best_s, best_m, best_i = s, ri["label"], ri_i
 
-        used: set = set()
-        matches_in_cell: list[dict] = []
-        for qi in q_items:
-            ql, qw = qi["label"], qi["weight"]
-            best_m, best_s, best_i = None, 0.0, -1
-            for ri_i, ri in enumerate(all_r):
-                k = (id(ri), ri["label"])
-                if k in used:
+        if best_m and best_s > 0.25:
+            used.add(best_i)
+            combined = best_s
+            if rarity_map:
+                rarity = rarity_map.get(best_m, 0.0)
+                combined = min(combined * (1.0 + rarity * RARITY_ALPHA), 1.0)
+            ew = qw * si
+            total_weighted += ew * combined
+            obj_matches.append((ql, best_m, combined, ew))
+            if qi["cat"] == "landmark":
+                landmark_count += 1
+
+    base_score = total_weighted / max(total_possible, 1.0)
+
+    if len(obj_matches) >= 2 and query_spatial and ref_adjacent:
+        spatial_hits = 0
+        spatial_checks = 0
+        spatial_weight = 0.0
+        for i, (ql_a, rl_a, _, w_a) in enumerate(obj_matches):
+            for j, (ql_b, rl_b, _, w_b) in enumerate(obj_matches):
+                if i >= j:
                     continue
-                s = _semantic_similarity(ql, ri["label"]) * ri.get("_p", 1.0)
-                if s > best_s:
-                    best_s, best_m, best_i = s, ri["label"], ri_i
-            if best_m and best_s > 0.25:
-                used.add((id(all_r[best_i]), best_m))
-                q_pc = qi.get("piece_count", 0)
-                r_pc = all_r[best_i].get("piece_count", 0)
-                if q_pc and r_pc:
-                    size_sim = 1.0 - abs(q_pc - r_pc) / 9.0
-                    combined = best_s * 0.7 + size_sim * 0.3
-                else:
-                    combined = best_s
-                if rarity_map:
-                    rarity = rarity_map.get(best_m, 0.0)
-                    combined = min(combined * (1.0 + rarity * RARITY_ALPHA), 1.0)
-                total_weighted += qw * combined
-                matches_in_cell.append({
-                    "q": ql, "r": best_m,
-                    "sim": round(combined, 3), "cat": qi["cat"],
-                })
-                if qi["cat"] == "landmark":
-                    landmark_matches.append((cell, ql, best_m, best_s))
-            total_possible += qw
+                q_rel = query_spatial.get((ql_a, ql_b))
+                if not q_rel:
+                    continue
+                ref_cp = ref_adjacent.get((rl_a, rl_b)) or ref_adjacent.get((rl_b, rl_a))
+                if not ref_cp:
+                    continue
+                spatial_checks += 1
+                score = _spatial_direction_match(q_rel, ref_cp)
+                if score > 0.3:
+                    spatial_hits += 1
+                    spatial_weight += min(w_a, w_b) * score
+        if spatial_checks > 0:
+            ratio = spatial_hits / spatial_checks
+            total_match_weight = sum(m[3] for m in obj_matches)
+            bonus = ratio * SPATIAL_BONUS_COEFF * (
+                spatial_weight / max(total_match_weight, 1.0))
+            base_score += bonus
 
-        if matches_in_cell:
-            cell_matches[cell] = matches_in_cell
-
-    return total_weighted / max(total_possible, 1.0), len(landmark_matches), cell_matches
+    return base_score, landmark_count, {}
 
 
-def _build_ref_grid(objects) -> Dict[str, list]:
+def _build_ref_grid(objects, grid_n: int = 3) -> Dict[str, list]:
     grid: Dict[str, list] = defaultdict(list)
     for obj in objects:
-        cell = obj.grid_cell or "mid-center"
+        bbox = getattr(obj, "bbox", None) or []
+        if bbox and len(bbox) == 4:
+            cell = _box_to_grid_cell(bbox, grid_n)
+        else:
+            stored = obj.grid_cell or ""
+            cell = _legacy_cell_to_new(stored, 3, grid_n) if stored else _box_to_grid_cell(None, grid_n)
         label = obj.label_norm or obj.label or ""
         weight, cat = classify_feature(label)
         pc = getattr(obj, "piece_count", 0) or 0
-        grid[cell].append({"label": label, "weight": weight, "cat": cat, "piece_count": pc})
+        bbox_area = 0.0
+        if bbox and len(bbox) == 4:
+            bbox_area = max(0.0, (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]))
+        grid[cell].append({"label": label, "weight": weight, "cat": cat, "piece_count": pc, "bbox_area": bbox_area})
+        ocr = getattr(obj, "ocr_text", "") or ""
+        if ocr.strip() and len(ocr.strip()) >= 2:
+            grid[cell].append({"label": ocr.strip(), "weight": WEIGHT_OCR, "cat": "ocr", "piece_count": 0})
     return dict(grid)
+
+
+WEIGHT_OCR = 4.0
 
 
 def match_by_grid(
@@ -271,14 +600,24 @@ def match_by_grid(
     *,
     top_k: int = 10,
     store_zone: Optional[str] = None,
+    ocr_items: Optional[List[dict]] = None,
+    grid_n: int = 3,
 ) -> List[tuple[int, float, str]]:
-    """Score reference nodes using 3×3 grid weighted matching.
+    """Score reference nodes using n×n grid weighted matching.
 
     detected_items: list of {"label": str, "box": [x1,y1,x2,y2] normalized [0,1]}
+    ocr_items: list of {"text": str, "bbox": [[x1,y1],[x2,y2],[x3,y3],[x4,y4]] normalized}
     store_zone: VLM-identified store section — candidates with matching objects get a boost.
+    grid_n: grid dimension (3=3×3, 4=4×4, 5=5×5)
     """
     if not ref_map.photos or not detected_items:
         return []
+
+    # Load embedding cache and compute query embeddings for hybrid_max
+    use_hybrid = _load_embedding_cache()
+    if use_hybrid:
+        query_labels = [item.get("label", "") for item in detected_items if item.get("label")]
+        _compute_query_embeddings(query_labels)
 
     query_grid: Dict[str, list] = defaultdict(list)
     for item in detected_items:
@@ -286,18 +625,35 @@ def match_by_grid(
         if not label:
             continue
         box = item.get("box")
-        cell = box_to_grid(box)
+        cell = box_to_grid(box, grid_n)
         weight, cat = classify_feature(label)
-        pc = 0
+        bbox_area = 0.0
         if box and len(box) == 4:
-            from server.grid_utils import compute_grid_cells
-            _, _, pc, _ = compute_grid_cells(box)
-        query_grid[cell].append({"label": label, "weight": weight, "cat": cat, "piece_count": pc})
+            bbox_area = max(0.0, (box[2] - box[0]) * (box[3] - box[1]))
+        query_grid[cell].append({"label": label, "weight": weight, "cat": cat, "bbox_area": bbox_area})
+
+    if ocr_items:
+        for oi in ocr_items:
+            text = oi.get("text", "").strip()
+            if not text or len(text) < 2:
+                continue
+            bbox = oi.get("bbox")
+            if bbox and len(bbox) >= 2:
+                xs = [pt[0] for pt in bbox]
+                ys = [pt[1] for pt in bbox]
+                box = [min(xs), min(ys), max(xs), max(ys)]
+                cell = box_to_grid(box, grid_n)
+            else:
+                cell = _box_to_grid_cell(None, grid_n)
+            query_grid[cell].append({
+                "label": text, "weight": WEIGHT_OCR, "cat": "ocr", "piece_count": 0,
+            })
 
     if not query_grid:
         return []
 
-    rarity_map = _compute_label_rarity(ref_map)
+    query_spatial = compute_query_spatial(detected_items)
+    rarity_map = _compute_aggressive_rarity(ref_map)
 
     scores: list[tuple[int, float, str]] = []
 
@@ -307,16 +663,21 @@ def match_by_grid(
         best_lm = 0
 
         for dir_photo in ref_node.directional_photos:
-            ref_grid = _build_ref_grid(dir_photo.objects)
-            score, lm_count, _ = weighted_grid_match(dict(query_grid), ref_grid, rarity_map=rarity_map)
+            ref_grid = _build_ref_grid(dir_photo.objects, grid_n=grid_n)
+            ref_adj = ref_map.adjacent_map.get((nid, dir_photo.slot), None)
+            score, lm_count, _ = weighted_grid_match(
+                dict(query_grid), ref_grid, rarity_map=rarity_map, grid_n=grid_n,
+                query_spatial=query_spatial, ref_adjacent=ref_adj)
             if score > best_score:
                 best_score = score
                 best_slot = dir_photo.slot
                 best_lm = lm_count
 
         if not ref_node.directional_photos and ref_node.objects:
-            ref_grid = _build_ref_grid(ref_node.objects)
-            score, lm_count, _ = weighted_grid_match(dict(query_grid), ref_grid, rarity_map=rarity_map)
+            ref_grid = _build_ref_grid(ref_node.objects, grid_n=grid_n)
+            score, lm_count, _ = weighted_grid_match(
+                dict(query_grid), ref_grid, rarity_map=rarity_map, grid_n=grid_n,
+                query_spatial=query_spatial)
             if score > best_score:
                 best_score = score
                 best_slot = "aggregate"
@@ -540,6 +901,8 @@ def localize(
     hint_nid: Optional[int] = None,
     detected_items: Optional[List[dict]] = None,
     store_zone: Optional[str] = None,
+    ocr_items: Optional[List[dict]] = None,
+    grid_n: int = 3,
 ) -> LocalizationResult:
     """Match a user's live photo detections against the Neo4j reference map.
 
@@ -564,7 +927,8 @@ def localize(
     has_boxes = detected_items and any(it.get("box") for it in detected_items)
     if has_boxes:
         candidates = match_by_grid(detected_items, ref_map, top_k=10,
-                                   store_zone=store_zone)
+                                   store_zone=store_zone, ocr_items=ocr_items,
+                                   grid_n=grid_n)
         match_method = "grid"
     else:
         candidates = match_by_objects(detected_labels, ocr_texts, ref_map, top_k=10)
@@ -840,9 +1204,10 @@ def vlm_rerank(
     body = {
         "model": api_model,
         "messages": [{"role": "user", "content": content}],
-        "temperature": 0.1,
-        "max_completion_tokens": 512,
+        "max_completion_tokens": 4096 if "luna" in api_model else 512,
     }
+    if "luna" not in api_model:
+        body["temperature"] = 0.1
 
     keys = [api_key]
     if backup_key:

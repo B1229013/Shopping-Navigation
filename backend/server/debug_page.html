@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>感知定位診斷</title>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
+  --green: #3fb950; --yellow: #d29922; --red: #f85149; --purple: #bc8cff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, "SF Pro Text", sans-serif; background: var(--bg); color: var(--text); padding: 16px; }
+h1 { font-size: 18px; color: var(--accent); margin-bottom: 4px; }
+.meta { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.card h2 { font-size: 14px; color: var(--accent); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+.badge-green { background: rgba(63,185,80,.15); color: var(--green); }
+.badge-yellow { background: rgba(210,153,34,.15); color: var(--yellow); }
+.badge-red { background: rgba(248,81,73,.15); color: var(--red); }
+.badge-purple { background: rgba(188,140,255,.15); color: var(--purple); }
+.badge-blue { background: rgba(88,166,255,.15); color: var(--accent); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+td { padding: 4px 8px; border-bottom: 1px solid rgba(48,54,61,.5); }
+.score { font-variant-numeric: tabular-nums; }
+.score-high { color: var(--green); font-weight: 600; }
+.score-mid { color: var(--yellow); }
+.score-low { color: var(--red); }
+.candidate-bar { height: 6px; border-radius: 3px; background: var(--accent); margin-top: 2px; }
+.route-leg { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 13px; }
+.route-leg .arrow { color: var(--muted); }
+.route-leg.active { color: var(--yellow); font-weight: 600; }
+.checklist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.checklist .item { font-size: 12px; padding: 3px 10px; border-radius: 12px; border: 1px solid var(--border); }
+.checklist .done { background: rgba(63,185,80,.12); color: var(--green); border-color: rgba(63,185,80,.3); text-decoration: line-through; }
+.checklist .current { background: rgba(210,153,34,.12); color: var(--yellow); border-color: rgba(210,153,34,.3); font-weight: 600; }
+.checklist .pending { color: var(--muted); }
+.no-data { color: var(--muted); font-style: italic; font-size: 13px; padding: 8px; }
+.refresh-btn { position: fixed; bottom: 20px; right: 20px; background: var(--accent); color: #fff; border: none; border-radius: 24px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+.refresh-btn:active { transform: scale(.95); }
+.pass-label { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-right: 4px; }
+.p1 { background: rgba(88,166,255,.15); color: var(--accent); }
+.p2 { background: rgba(188,140,255,.15); color: var(--purple); }
+#loading { text-align: center; padding: 40px; color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>感知 & 定位診斷報告</h1>
+<div class="meta">Session: <code>{{SESSION_ID}}</code> · <span id="timestamp"></span></div>
+<div id="loading">載入中...</div>
+<div id="content" style="display:none">
+
+<!-- Localization result -->
+<div class="card" id="loc-card">
+  <h2>定位結果</h2>
+  <div id="loc-result"></div>
+</div>
+
+<!-- Route & shopping progress -->
+<div class="card" id="route-card">
+  <h2>路徑規劃 & 購物進度</h2>
+  <div id="route-info"></div>
+</div>
+
+<!-- Top candidates -->
+<div class="card">
+  <h2>匹配候選（Top 10）</h2>
+  <div id="candidates"></div>
+</div>
+
+<!-- Pass 1 detections -->
+<div class="card">
+  <h2><span class="pass-label p1">Pass 1</span> 物件偵測</h2>
+  <div id="pass1-det"></div>
+</div>
+<div class="card">
+  <h2><span class="pass-label p1">Pass 1</span> OCR 文字</h2>
+  <div id="pass1-ocr"></div>
+</div>
+
+<!-- Pass 2 detections -->
+<div class="card">
+  <h2><span class="pass-label p2">Pass 2</span> 物件偵測</h2>
+  <div id="pass2-det"></div>
+</div>
+<div class="card">
+  <h2><span class="pass-label p2">Pass 2</span> OCR 文字</h2>
+  <div id="pass2-ocr"></div>
+</div>
+
+<!-- Merged -->
+<div class="card">
+  <h2>合併結果（送入定位）</h2>
+  <div id="merged-info"></div>
+</div>
+
+</div>
+<button class="refresh-btn" onclick="load()">重新整理</button>
+
+<script>
+const SID = '{{SESSION_ID}}';
+const API = `/session/${SID}/debug`;
+
+function scoreClass(s) {
+  if (s >= 0.3) return 'score-high';
+  if (s >= 0.15) return 'score-mid';
+  return 'score-low';
+}
+
+function renderDetTable(dets) {
+  if (!dets || !dets.length) return '<div class="no-data">無偵測</div>';
+  let h = '<table><tr><th>物件</th><th>信心度</th><th>位置</th></tr>';
+  for (const d of dets) {
+    h += `<tr><td>${d.label}</td><td class="score ${scoreClass(d.score)}">${d.score}</td><td style="color:var(--muted)">${d.position||''}</td></tr>`;
+  }
+  return h + '</table>';
+}
+
+function renderOcrTable(ocrs) {
+  if (!ocrs || !ocrs.length) return '<div class="no-data">無 OCR 文字</div>';
+  let h = '<table><tr><th>文字</th><th>信心度</th><th>位置</th></tr>';
+  for (const t of ocrs) {
+    h += `<tr><td><strong>${t.text}</strong></td><td class="score ${scoreClass(t.score)}">${t.score}</td><td style="color:var(--muted)">${t.position||''}</td></tr>`;
+  }
+  return h + '</table>';
+}
+
+function renderCandidates(cands) {
+  if (!cands || !cands.length) return '<div class="no-data">無候選節點</div>';
+  const maxScore = cands[0][1] || 1;
+  let h = '<table><tr><th>節點</th><th>分數</th><th>原因</th><th></th></tr>';
+  for (const [nid, score, reason] of cands) {
+    const pct = Math.round((score / maxScore) * 100);
+    h += `<tr>
+      <td><strong>WP${nid}</strong></td>
+      <td class="score ${scoreClass(score)}">${score}</td>
+      <td style="color:var(--muted);font-size:11px;max-width:200px;word-break:break-all">${reason}</td>
+      <td style="width:100px"><div class="candidate-bar" style="width:${pct}%"></div></td>
+    </tr>`;
+  }
+  return h + '</table>';
+}
+
+function load() {
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('content').style.display = 'none';
+
+  fetch(API).then(r => r.json()).then(data => {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+    document.getElementById('timestamp').textContent = new Date().toLocaleTimeString();
+
+    const p = data.perception || {};
+    const loc = p.localization || {};
+
+    // Localization
+    let locH = '';
+    if (loc.matched_nid != null) {
+      locH = `<div style="font-size:20px;font-weight:700;color:var(--green)">WP${loc.matched_nid}</div>
+        <div style="margin-top:4px">信心度: <span class="score ${scoreClass(loc.confidence)}" style="font-size:16px">${loc.confidence}</span>
+        · 方法: <span class="badge badge-blue">${loc.method}</span></div>`;
+      if (loc.runner_up_nid != null) {
+        locH += `<div style="margin-top:4px;color:var(--muted);font-size:13px">次高: WP${loc.runner_up_nid} (${loc.runner_up_score})</div>`;
+      }
+    } else {
+      locH = `<div style="font-size:16px;color:var(--red)">定位失敗</div>
+        <div style="color:var(--muted);font-size:13px">${loc.reasoning || '無資料'}</div>`;
+    }
+    locH += `<div style="margin-top:6px;color:var(--muted);font-size:12px">場景區域: <span class="badge badge-purple">${p.store_zone || '未知'}</span></div>`;
+    document.getElementById('loc-result').innerHTML = locH;
+
+    // Route
+    const route = data.route;
+    let routeH = '';
+    if (route) {
+      routeH += `<div style="font-size:13px;margin-bottom:8px">TSP 順序: ${route.visit_order_items.join(' → ')} · 總距離: ${route.total_cost}m</div>`;
+      const visited = new Set(data.visited_targets || []);
+      const itemMap = data.target_node_to_item || {};
+      routeH += '<div class="checklist">';
+      for (const nid of route.visit_order) {
+        const name = itemMap[nid] || `WP${nid}`;
+        const isDone = visited.has(nid);
+        const isCurrent = route.legs[route.current_leg_index] && route.legs[route.current_leg_index].to === nid && !isDone;
+        const cls = isDone ? 'done' : isCurrent ? 'current' : 'pending';
+        routeH += `<span class="item ${cls}">${isDone ? '✓ ' : isCurrent ? '▸ ' : ''}${name}</span>`;
+      }
+      routeH += '</div>';
+      routeH += '<div style="margin-top:10px;font-size:12px;color:var(--muted)">路線腿:</div>';
+      for (let i = 0; i < route.legs.length; i++) {
+        const lg = route.legs[i];
+        const active = i === route.current_leg_index;
+        const purposeBadge = lg.purpose === 'target' ? 'badge-green' : lg.purpose === 'checkout' ? 'badge-yellow' : 'badge-purple';
+        routeH += `<div class="route-leg ${active ? 'active' : ''}">
+          ${active ? '▸' : ' '} WP${lg.from} <span class="arrow">→</span> WP${lg.to}
+          <span class="badge ${purposeBadge}">${lg.purpose}</span>
+          <span style="color:var(--muted);font-size:11px">${lg.cost}m</span>
+        </div>`;
+      }
+    } else {
+      routeH = '<div class="no-data">無路徑規劃</div>';
+    }
+    document.getElementById('route-info').innerHTML = routeH;
+
+    // Candidates
+    document.getElementById('candidates').innerHTML = renderCandidates(loc.top_candidates);
+
+    // Pass 1
+    const p1 = p.pass1 || {};
+    document.getElementById('pass1-det').innerHTML = renderDetTable(p1.detections);
+    document.getElementById('pass1-ocr').innerHTML = renderOcrTable(p1.ocr);
+
+    // Pass 2
+    const p2 = p.pass2 || {};
+    document.getElementById('pass2-det').innerHTML = renderDetTable(p2.detections);
+    document.getElementById('pass2-ocr').innerHTML = renderOcrTable(p2.ocr);
+
+    // Merged
+    const mg = p.merged || {};
+    let mgH = `<div style="font-size:13px;margin-bottom:6px">場景: ${mg.scene||'?'} · 區域: <span class="badge badge-purple">${mg.zone||'?'}</span> · 物件: ${(mg.detections||[]).length} · OCR: ${(mg.ocr||[]).length}</div>`;
+    mgH += renderDetTable(mg.detections);
+    mgH += '<div style="margin-top:8px"></div>';
+    mgH += renderOcrTable(mg.ocr);
+    document.getElementById('merged-info').innerHTML = mgH;
+
+  }).catch(e => {
+    document.getElementById('loading').innerHTML = `<div style="color:var(--red)">載入失敗: ${e.message}<br>尚未上傳照片？</div>`;
+  });
+}
+
+load();
+</script>
+</body>
+</html>

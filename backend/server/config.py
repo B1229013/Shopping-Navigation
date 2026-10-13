@@ -86,7 +86,7 @@ NEO4J_URI = os.environ.get("NEO4J_URI", "")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "")
 NEO4J_DATABASE = os.environ.get("NEO4J_DATABASE", "neo4j")
-NEO4J_PLACE = os.environ.get("NEO4J_PLACE", "A7家樂福")
+NEO4J_PLACE = os.environ.get("NEO4J_PLACE", "A7家樂福（9/16)")
 
 # Server
 SERVER_HOST = os.environ.get("SERVER_HOST", "0.0.0.0")
@@ -123,6 +123,23 @@ OCR_ENABLED = os.environ.get("OCR_ENABLED", "0") != "0"
 OCR_LANGUAGES = os.environ.get("OCR_LANGUAGES", "en,ch_tra").split(",")
 OCR_MIN_CONFIDENCE = float(os.environ.get("OCR_MIN_CONFIDENCE", "0.3"))
 OCR_MAX_RESULTS = int(os.environ.get("OCR_MAX_RESULTS", "15"))
+
+# Grid size for spatial matching (3 = 3×3, 4 = 4×4, 5 = 5×5)
+GRID_N = int(os.environ.get("GRID_N", "4"))
+
+# VLM multi-round perception (3 = run 3 rounds, keep stable detections appearing 2+/3)
+VLM_ROUNDS = int(os.environ.get("VLM_ROUNDS", "1"))
+
+# VLM 3rd pass — extra perception pass focusing on distinctive features
+VLM_PASS3 = os.environ.get("VLM_PASS3", "1") != "0"
+
+# Hybrid embedding similarity (hybrid_max = max(char_sim, embedding_cosine_sim))
+EMBEDDING_ENABLED = os.environ.get("EMBEDDING_ENABLED", "1") != "0"
+EMBEDDING_CACHE_PATH = os.environ.get(
+    "EMBEDDING_CACHE_PATH",
+    str(Path(os.environ.get("REF_PHOTO_ROOT", "")) / "檢索圖片" / "embedding_cache" / "label_embeddings.json")
+) if os.environ.get("REF_PHOTO_ROOT") else ""
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 
 # VLM Re-ranking (optional, adds ~10s per photo for improved accuracy)
 RERANK_ENABLED = os.environ.get("RERANK_ENABLED", "0") != "0"

@@ -37,6 +37,7 @@ class StartSessionResponse(BaseModel):
     action: Literal["TAKE_PHOTO"] = "TAKE_PHOTO"
     goal_objects: List[str]
     place: Optional[str] = None  # the resolved place used for this session
+    goal_node_id: Optional[int] = None  # first target node for AR arrow
 
 
 class AnswerRequest(BaseModel):
@@ -71,6 +72,12 @@ class TurnResponse(BaseModel):
     remaining_targets: Optional[int] = None        # how many targets left
     # Navigation phase
     phase: Optional[str] = None                    # "shopping" | "checkout" | "exit" | "done"
+    # Per-item shopping progress
+    visited_item_names: Optional[List[str]] = None   # items already found
+    current_target_name: Optional[str] = None        # item being navigated to now
+    goal_item_names: Optional[List[str]] = None      # all items in route order
+    # Active goal node for AR arrow (the node the user should walk toward)
+    goal_node_id: Optional[int] = None
 
 
 class PathStart(BaseModel):

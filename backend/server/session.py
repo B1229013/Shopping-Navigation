@@ -14,6 +14,7 @@ class Session:
     id: str
     goal: str
     goal_objects: List[str]
+    arrival_goal_objects: List[str] = field(default_factory=list)
     place: Optional[str] = None  # which map/place this session navigates in
     # Product words only (goal_objects minus section/landmark context). This is
     # what the arrival gate, crop-verify and "goal visible" checks match against;
@@ -62,6 +63,11 @@ class Session:
     exit_node: Optional[int] = None
     # Navigation phase: shopping → checkout → exit → done
     phase: str = "shopping"
+    # Mapping from target node ID → user's original item name (e.g. {14: "文旦"})
+    target_node_to_item: Dict[int, str] = field(default_factory=dict)
+
+    # ── Perception debug (last photo) ─────────────────────────────────
+    debug_perception: Optional[Dict] = None
 
     @property
     def remaining_targets(self) -> List[int]:

@@ -12,15 +12,28 @@ final class NavigationSessionManager: ObservableObject {
     @Published private(set) var nodeCount = 0
     @Published private(set) var lastLoopEvent: LoopEvent?
 
+    /// Live heading from the magnetometer, updated continuously (~5Hz) even while
+    /// standing still — used by the AR arrow overlay in NavigationCameraView.
+    @Published private(set) var currentHeading: Double = 0
+
     /// Fires alongside `lastLoopEvent` for callers that want a callback instead of
     /// observing @Published state (e.g. a navigation coordinator deciding to reroute).
     var onLoopDetected: ((LoopEvent) -> Void)?
 
     var isAvailable: Bool { MotionPathTracker.isAvailable }
 
+    /// The store/place this session's calibration was loaded for. Nil = generic.
+    private(set) var currentPlace: String?
+
     private let tracker = MotionPathTracker()
     private let map: TopologicalMap
     private let loopDetector: LoopDetector
+
+    /// Current PDR-estimated position (meters, origin = tracking start).
+    var pdrPosition: (x: Double, y: Double) {
+        guard let p = currentPoint else { return (0, 0) }
+        return (p.x, p.y)
+    }
 
     init(mergeRadius: Double = 3.0, loopDetector: LoopDetector = LoopDetector()) {
         self.map = TopologicalMap(mergeRadius: mergeRadius)
@@ -29,24 +42,37 @@ final class NavigationSessionManager: ObservableObject {
         tracker.onPathPoint = { [weak self] point in
             self?.handle(point)
         }
+        tracker.onHeadingUpdate = { [weak self] heading in
+            self?.currentHeading = heading
+        }
         self.loopDetector.onLoopDetected = { [weak self] event in
             self?.lastLoopEvent = event
             self?.onLoopDetected?(event)
         }
     }
 
-    func start() {
+    func start(place: String? = nil) {
         guard !isTracking else { return }
         map.reset()
         loopDetector.reset()
         nodeCount = 0
         currentPoint = nil
         lastLoopEvent = nil
+        currentHeading = 0
+        currentPlace = place
+
+        if let place, !place.isEmpty {
+            tracker.loadStoreCalibration(place)
+        }
+
         tracker.start()
         isTracking = tracker.isTracking
     }
 
     func stop() {
+        if let place = currentPlace, !place.isEmpty {
+            tracker.saveStoreCalibration(place)
+        }
         tracker.stop()
         isTracking = false
     }

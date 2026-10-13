@@ -8,6 +8,7 @@ import SwiftUI
 struct NavigationCameraView: View {
     let sessionId: String
     let goal: String
+    let place: String?
     let onExit: () -> Void
 
     @StateObject private var camera = CameraController()
@@ -29,12 +30,25 @@ struct NavigationCameraView: View {
     @State private var loopBanner: String?
     @State private var lastCapturedImage: UIImage?
     @State private var navPhase: String = "shopping"
+    @State private var goalItems: [String] = []
+    @State private var visitedItems: Set<String> = []
+    @State private var currentTarget: String?
 
-    init(sessionId: String, goal: String, initialGuidance: String, onExit: @escaping () -> Void) {
+    // AR arrow: target node — set from route plan at session start, updated per photo
+    @State private var targetNodeId: Int?
+    @State private var dinoReady = false
+    // PDR ↔ reference frame calibration: recorded when DINOv2 localizes
+    @State private var pdrOffset: (dx: Double, dy: Double)?
+
+    init(sessionId: String, goal: String, place: String? = nil,
+         initialGuidance: String, initialTargetNodeId: Int? = nil,
+         onExit: @escaping () -> Void) {
         self.sessionId = sessionId
         self.goal = goal
+        self.place = place
         self.onExit = onExit
         _guidance = State(initialValue: initialGuidance)
+        _targetNodeId = State(initialValue: initialTargetNodeId)
     }
 
     var body: some View {
@@ -46,12 +60,27 @@ struct NavigationCameraView: View {
                     .ignoresSafeArea()
             }
 
+            // AR directional arrow — top-right, always visible during navigation
+            if !hasArrived, !pendingArrival {
+                DirectionArrowView(
+                    relativeBearingDegrees: arrowBearing,
+                    isLocalized: pdrOffset != nil
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(.trailing, 12)
+                .padding(.top, 130)
+                .allowsHitTesting(false)
+            }
+
             VStack(spacing: 12) {
                 HStack(alignment: .top, spacing: 10) {
                     if let lastCapturedImage {
                         lastPhotoThumbnail(lastCapturedImage)
                     }
                     statusCard
+                }
+                if !goalItems.isEmpty {
+                    shoppingChecklist
                 }
                 if camera.isTorchAvailable && !camera.isTorchOn {
                     Text("光線不足嗎？點擊右上角燈泡圖示開啟閃光燈輔助拍照")
@@ -81,42 +110,27 @@ struct NavigationCameraView: View {
             requestCameraAccessIfNeeded()
             camera.configure()
             camera.start()
-            // Reset loop banner from any previous session
             loopBanner = nil
-            // Loop detection disabled — PDR node revisits trigger false
-            // positives that confuse users during normal navigation.
             sensorSession.onLoopDetected = nil
-            sensorSession.start()
+            sensorSession.start(place: place)
             Task { await routeModel.load(sessionId: sessionId) }
-        }
-        .onReceive(sensorSession.$currentPoint) { point in
-            guard let point else { return }
-            routeModel.ingest(point)
-            if routeModel.shouldReplan() {
-                Task { await routeModel.load(sessionId: sessionId, fromPhone: true) }
-            }
-        }
-        .sheet(isPresented: $showFullMap) {
-            if let route = routeModel.route {
-                VStack(spacing: 8) {
-                    Text("路線：找「\(route.goalItem)」 · 共 \(Int(route.distanceM.rounded())) 公尺")
-                        .font(.headline)
-                    RouteMapView(route: route, state: routeModel.state)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    ForEach(Array(route.turns.enumerated()), id: \.offset) { _, turn in
-                        Text("• \(turn.textZh)").font(.subheadline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding()
-                .background(Color.black)
-                .foregroundColor(.white)
+
+            // Load DINOv2 model + node coordinates for on-device fusion
+            Task {
+                let dino = DINOLocalizationService.shared
+                if !dino.isLoaded { try? dino.load() }
+                let coords = NodeCoordinateStore.shared
+                if !coords.isLoaded { coords.load() }
+                dinoReady = dino.isLoaded && coords.isLoaded
             }
         }
         .onDisappear {
             camera.stop()
             let snapshot = sensorSession.exportSnapshot()
             sensorSession.stop()
+            // Free DINOv2 model + embeddings from memory
+            DINOLocalizationService.shared.unload()
+            NodeCoordinateStore.shared.unload()
             Task {
                 try? await NavigationAPI.shared.uploadSensorMap(sessionId: sessionId, snapshot: snapshot)
             }
@@ -162,7 +176,7 @@ struct NavigationCameraView: View {
                 }
                 Text(navPhase == "checkout" ? "前往收銀台" :
                      navPhase == "exit" ? "前往出口" :
-                     "目標　\(goal)")
+                     currentTarget != nil ? "正在找　\(currentTarget!)" : "目標　\(goal)")
                     .font(.subheadline)
                     .foregroundColor(.white.opacity(0.85))
                     .lineLimit(2)
@@ -186,6 +200,33 @@ struct NavigationCameraView: View {
             Color.blue.opacity(0.55)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var shoppingChecklist: some View {
+        HStack(spacing: 8) {
+            ForEach(goalItems, id: \.self) { item in
+                let isDone = visitedItems.contains(item)
+                let isCurrent = item == currentTarget && !isDone
+                HStack(spacing: 4) {
+                    Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(isDone ? .green : isCurrent ? .yellow : .white.opacity(0.5))
+                    Text(item)
+                        .font(.caption2.weight(isCurrent ? .bold : .regular))
+                        .foregroundColor(isDone ? .green.opacity(0.7) : isCurrent ? .yellow : .white.opacity(0.6))
+                        .strikethrough(isDone)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    isCurrent ? Color.yellow.opacity(0.15) :
+                    isDone ? Color.green.opacity(0.1) :
+                    Color.white.opacity(0.05)
+                )
+                .clipShape(Capsule())
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var flashButton: some View {
@@ -255,7 +296,7 @@ struct NavigationCameraView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("導航指引")
                     .font(.caption.weight(.bold))
-                    .foregroundColor(.green.opacity(0.8))
+                    .foregroundColor(.white.opacity(0.7))
                 Text(guidance)
                     .font(.subheadline)
                     .foregroundColor(.white)
@@ -297,7 +338,7 @@ struct NavigationCameraView: View {
             .padding(16)
         }
         .frame(maxHeight: 180)
-        .background(Color.green.opacity(0.25))
+        .background(Color.gray.opacity(0.45))
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
@@ -358,6 +399,44 @@ struct NavigationCameraView: View {
         }
     }
 
+    // MARK: - AR arrow computed properties
+
+    /// Bearing the arrow should display.
+    /// Before localization (no target node): points north (compensates for phone heading).
+    /// After localization: points toward the target node.
+    private var arrowBearing: Double {
+        guard let nodeId = targetNodeId,
+              let targetCoord = NodeCoordinateStore.shared.coordinate(for: nodeId),
+              pdrOffset != nil else {
+            return 0 // Not calibrated — fixed pointing up
+        }
+        let pos = adjustedPosition
+        let bearing = NodeCoordinateStore.shared.bearing(from: pos, to: targetCoord)
+        var relative = bearing - sensorSession.currentHeading
+        while relative > 180 { relative -= 360 }
+        while relative < -180 { relative += 360 }
+        return relative
+    }
+
+    /// Run DINOv2 on-device localization and fuse with PDR position.
+    /// Returns the best-match node ID as a hint for the backend.
+    private func dinoFusedNodeHint(image: UIImage) -> Int? {
+        guard dinoReady else { return nil }
+        let matches = DINOLocalizationService.shared.localize(image: image, topK: 5)
+        guard !matches.isEmpty else { return nil }
+        let candidates = matches.map { (nodeId: $0.nodeId, similarity: $0.similarity) }
+        return NodeCoordinateStore.shared.fuseDINOWithPDR(
+            candidates: candidates, pdrPosition: adjustedPosition
+        )
+    }
+
+    /// Current position in the reference coordinate frame.
+    private var adjustedPosition: (x: Double, y: Double) {
+        let pdr = sensorSession.pdrPosition
+        guard let offset = pdrOffset else { return pdr }
+        return (x: pdr.x + offset.dx, y: pdr.y + offset.dy)
+    }
+
     // MARK: - Actions
 
     private func requestCameraAccessIfNeeded() {
@@ -377,7 +456,12 @@ struct NavigationCameraView: View {
     @State private var mapInstruction: String?
 
     private func applyTurn(_ response: TurnResponse) {
-        // Show friendly location (with match confidence) if localization succeeded
+        // Calibrate PDR offset when backend confirms localization
+        if let locNodeId = response.correctedNodeId,
+           let refCoord = NodeCoordinateStore.shared.coordinate(for: locNodeId) {
+            let pdr = sensorSession.pdrPosition
+            pdrOffset = (dx: refCoord.x - pdr.x, dy: refCoord.y - pdr.y)
+        }
         if let loc = response.correctedLocation {
             if let conf = response.correctedConfidence {
                 currentLocation = "\(loc)（比對信心 \(Int((conf * 100).rounded()))%）"
@@ -407,6 +491,17 @@ struct NavigationCameraView: View {
             // where the phone thinks it is instead of following the stale leg.
             Task { await routeModel.load(sessionId: sessionId, fromPhone: true) }
         }
+        if let items = response.goalItemNames, !items.isEmpty {
+            goalItems = items
+        }
+        if let visited = response.visitedItemNames {
+            visitedItems = Set(visited)
+        }
+        currentTarget = response.currentTargetName
+        // Use the backend's goal node for the AR arrow direction
+        if let goalNid = response.goalNodeId {
+            targetNodeId = goalNid
+        }
         guidance = response.guidance
         switch response.action {
         case "ARRIVED":
@@ -417,6 +512,7 @@ struct NavigationCameraView: View {
                 pendingArrival = true
             }
             pendingQuestion = nil
+            targetNodeId = nil
         case "ASK":
             pendingQuestion = response.question
         case "MOVE":
@@ -438,8 +534,10 @@ struct NavigationCameraView: View {
                 errorMessage = "拍照失敗"
                 return
             }
-            lastCapturedImage = UIImage(data: data)
-            Task { await upload(imageData: data) }
+            let image = UIImage(data: data)
+            lastCapturedImage = image
+            let hint = image.flatMap { dinoFusedNodeHint(image: $0) }
+            Task { await upload(imageData: data, dinoHint: hint) }
         }
     }
 
@@ -456,16 +554,25 @@ struct NavigationCameraView: View {
                 }
                 return
             }
-            await MainActor.run { lastCapturedImage = UIImage(data: data) }
-            await upload(imageData: data)
+            let image = UIImage(data: data)
+            await MainActor.run { lastCapturedImage = image }
+            let hint = image.flatMap { dinoFusedNodeHint(image: $0) }
+            await upload(imageData: data, dinoHint: hint)
         }
     }
 
-    private func upload(imageData: Data) async {
+    private func upload(imageData: Data, dinoHint: Int? = nil) async {
+        let pdr = sensorSession.pdrPosition
+        let heading = sensorSession.currentHeading
         do {
-            let heading = sensorSession.currentPoint?.headingDegrees
             let response = try await NavigationAPI.shared.uploadPhoto(
-                sessionId: sessionId, imageData: imageData, heading: heading)
+                sessionId: sessionId,
+                imageData: imageData,
+                dinoNodeHint: dinoHint,
+                pdrX: pdr.x,
+                pdrY: pdr.y,
+                heading: heading
+            )
             await MainActor.run {
                 applyTurn(response)
                 isUploading = false

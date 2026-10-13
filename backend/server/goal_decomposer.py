@@ -31,9 +31,10 @@ def _call_openai(prompt: str) -> str:
     body = {
         "model": OPENAI_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "max_completion_tokens": 256,
+        "max_completion_tokens": 2048 if "luna" in OPENAI_MODEL else 256,
     }
+    if "luna" not in OPENAI_MODEL:
+        body["temperature"] = 0.1
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     r = requests.post(url, json=body, headers=headers, timeout=GOAL_DECOMPOSE_TIMEOUT_S)
     r.raise_for_status()

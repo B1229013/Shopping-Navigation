@@ -9,7 +9,7 @@ func normalizeCategory(_ cat: String, _ name: String) -> String {
 }
 
 func guessCategory(from name: String) -> String {
-    let foodKeywords = ["肉", "菜", "魚", "蛋", "豆腐", "米", "麵", "雞", "豬", "牛", "蔬", "水果", "果", "菇", "蝦", "海鮮", "麵包", "饅頭", "包子"]
+    let foodKeywords = ["肉", "菜", "魚", "蛋", "ㄍㄞ", "米", "麵", "雞", "豬", "牛", "蔬", "水果", "果", "菇", "蝦", "海鮮", "麵包", "饅頭", "包子"]
     let bevKeywords = ["茶", "水", "飲料", "咖啡", "奶", "牛奶", "果汁", "啤酒", "酒", "汽水", "可樂"]
     let grocKeywords = ["醬", "油", "鹽", "糖", "醋", "調味", "洗碗", "洗髮", "衛生紙", "清潔", "牙刷", "牙膏", "肥皂", "洗手", "毛巾"]
 

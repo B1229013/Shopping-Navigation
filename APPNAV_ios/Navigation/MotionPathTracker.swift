@@ -465,6 +465,37 @@ final class MotionPathTracker {
         gaitProfile = PersistenceService.shared.load(GaitProfile.self, from: "gait_profile.json") ?? .identity
     }
 
+    // MARK: - Per-store calibration
+
+    private static func storePrefix(_ store: String) -> String {
+        store.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+    }
+
+    /// Load calibration saved for a specific store. Falls back to generic calibration
+    /// if no store-specific data exists.
+    func loadStoreCalibration(_ store: String) {
+        let pfx = Self.storePrefix(store)
+        calibration = PersistenceService.shared.load(MagnetometerCalibration.self, from: "\(pfx)_mag_cal.json")
+            ?? PersistenceService.shared.load(MagnetometerCalibration.self, from: "magnetometer_calibration.json")
+            ?? .identity
+        gyroBias = PersistenceService.shared.load(GyroBias.self, from: "\(pfx)_gyro_bias.json")
+            ?? PersistenceService.shared.load(GyroBias.self, from: "gyro_bias.json")
+            ?? .identity
+        gaitProfile = PersistenceService.shared.load(GaitProfile.self, from: "\(pfx)_gait_profile.json")
+            ?? PersistenceService.shared.load(GaitProfile.self, from: "gait_profile.json")
+            ?? .identity
+    }
+
+    /// Persist the current calibration under a store-specific key so it's recalled
+    /// automatically next time the user navigates in the same store.
+    func saveStoreCalibration(_ store: String) {
+        let pfx = Self.storePrefix(store)
+        PersistenceService.shared.save(calibration, to: "\(pfx)_mag_cal.json")
+        PersistenceService.shared.save(gyroBias, to: "\(pfx)_gyro_bias.json")
+        PersistenceService.shared.save(gaitProfile, to: "\(pfx)_gait_profile.json")
+    }
+
     func start() {
         guard !isTracking, MotionPathTracker.isAvailable else { return }
         isTracking = true

@@ -6,22 +6,41 @@ from collections import defaultdict
 import os, requests
 from PIL import Image, ImageOps
 
+# ── Load .env from project root ──
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SCRIPT_DIR.parent.parent
+_dotenv = _PROJECT_ROOT / ".env"
+if _dotenv.exists():
+    for line in _dotenv.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            v = v.split("#")[0].strip()
+            os.environ.setdefault(k.strip(), v)
+
 # ── Config ──
 OPENAI_API_KEYS = [
-    os.environ.get("OPENAI_API_KEY", ""),       # primary
-    os.environ.get("OPENAI_API_KEY_BACKUP", ""), # backup
+    os.environ.get("OPENAI_API_KEY", ""),
+    os.environ.get("OPENAI_BACKUP_KEY", ""),
 ]
 OPENAI_API_KEYS = [k for k in OPENAI_API_KEYS if k]
 _current_key_idx = 0
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://air.cgu.edu.tw/cgullmapi/v1")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
 
 _host = os.environ.get("NEO4J_HOST", "")
-NEO4J_ENDPOINT = f"https://{_host}/db/{_host.split('.')[0]}/query/v2"
-_neo4j_user = _host.split('.')[0] if _host else ""
+if not _host:
+    _uri = os.environ.get("NEO4J_URI", "")
+    if "://" in _uri:
+        _host = _uri.split("://", 1)[1].rstrip("/")
+        if ":" in _host:
+            _host = _host.split(":")[0]
+_neo4j_user = os.environ.get("NEO4J_USER", "") or (_host.split('.')[0] if _host else "")
 _neo4j_pass = os.environ.get("NEO4J_PASSWORD", "")
+_neo4j_db = os.environ.get("NEO4J_DATABASE", _neo4j_user)
+NEO4J_ENDPOINT = f"https://{_host}/db/{_neo4j_db}/query/v2"
 NEO4J_AUTH = "Basic " + base64.b64encode(f"{_neo4j_user}:{_neo4j_pass}".encode()).decode()
-PLACE = os.environ.get("PLACE", "A7家樂福（9/16)")
+PLACE = os.environ.get("NEO4J_PLACE", os.environ.get("PLACE", "A7家樂福（9/16)"))
 
 DATA_ROOT = Path("/Users/shingchou/Downloads/學校家樂福/0916測試")
 OUTPUT_JSON = DATA_ROOT / "檢索圖片" / "full_test_v4_merged_results.json"
@@ -165,8 +184,15 @@ def weighted_grid_match(query_grid, ref_grid):
                     best_s, best_m, best_i = s, ri["label"], ri_i
             if best_m and best_s > 0.25:
                 used.add((id(all_r[best_i]), best_m))
-                total_weighted += qw * best_s
-                matches_in_cell.append({"q": ql, "r": best_m, "sim": round(best_s, 3), "cat": qi["cat"]})
+                q_area = qi.get("bbox_area", 0.0)
+                r_area = all_r[best_i].get("bbox_area", 0.0)
+                if q_area > 0.001 and r_area > 0.001:
+                    size_sim = 1.0 - min(abs(q_area - r_area) / max(q_area, r_area), 1.0)
+                    combined = best_s * 0.7 + size_sim * 0.3
+                else:
+                    combined = best_s
+                total_weighted += qw * combined
+                matches_in_cell.append({"q": ql, "r": best_m, "sim": round(combined, 3), "cat": qi["cat"]})
                 if qi["cat"] == "landmark":
                     landmark_matches.append((cell, ql, best_m, best_s))
             total_possible += qw
@@ -184,7 +210,7 @@ def load_reference_map():
         RETURN w.nid AS nid, w.pdr_x AS x, w.pdr_y AS y, w.session AS session,
                hp.slot AS slot, p.photo_file AS photo_file,
                o.label AS label, o.label_norm AS label_norm, o.score AS score,
-               o.grid_cell AS grid_cell
+               o.grid_cell AS grid_cell, o.bbox AS bbox
         ORDER BY w.nid, hp.slot
     """, {"place": PLACE})
     waypoints = {}
@@ -201,7 +227,16 @@ def load_reference_map():
         cell = r["grid_cell"] or "mid-center"
         label = r["label_norm"] or r["label"] or ""
         weight, cat = classify_feature(label)
-        wp["slots"][slot][cell].append({"label": label, "weight": weight, "cat": cat})
+        bbox_area = 0.0
+        raw_bbox = r.get("bbox")
+        if raw_bbox:
+            try:
+                box = json.loads(raw_bbox) if isinstance(raw_bbox, str) else raw_bbox
+                if len(box) == 4:
+                    bbox_area = max(0.0, (box[2] - box[0]) * (box[3] - box[1]))
+            except Exception:
+                pass
+        wp["slots"][slot][cell].append({"label": label, "weight": weight, "cat": cat, "bbox_area": bbox_area})
         if slot not in wp["photos"]:
             wp["photos"][slot] = r["photo_file"]
     print(f"  {len(waypoints)} waypoints loaded", flush=True)
@@ -300,7 +335,11 @@ def localize(query_items, ref_map):
         cell = box_to_grid(it.get("box"))
         zh, en = it.get("zh", ""), it.get("en", "")
         w, c = classify_feature(zh, en)
-        qg[cell].append({"label": f"{zh} {en}".strip(), "weight": w, "cat": c})
+        box = it.get("box")
+        bbox_area = 0.0
+        if box and len(box) == 4:
+            bbox_area = max(0.0, (box[2] - box[0]) * (box[3] - box[1]))
+        qg[cell].append({"label": f"{zh} {en}".strip(), "weight": w, "cat": c, "bbox_area": bbox_area})
 
     results = []
     for nid, wp in ref_map.items():

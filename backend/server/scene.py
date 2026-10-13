@@ -97,16 +97,30 @@ def _bbox_center(bbox: list[list[float]]) -> tuple[float, float]:
     return sum(xs) / len(xs), sum(ys) / len(ys)
 
 
+def _is_useful_ocr(text: str) -> bool:
+    """False for OCR text that is useless as a landmark (prices, single chars, etc.)."""
+    t = text.strip()
+    if len(t) <= 1:
+        return False
+    if t.replace(".", "").replace(",", "").isdigit():
+        return False
+    if len(t) <= 2 and t.isascii() and t.isalpha():
+        return False
+    return True
+
+
 def format_ocr(ocr_results, img_w: int, img_h: int) -> str:
     """Render OCR text with its horizontal side, e.g. ``"Dairy" (98%) - left``."""
     if not ocr_results:
         return "(no text detected)"
     parts = []
     for r in ocr_results:
+        if not _is_useful_ocr(r.text):
+            continue
         cx, _ = _bbox_center(r.bbox)
         side = _horizontal_side(cx, img_w)
         parts.append(f'"{r.text}" ({r.confidence:.0%}) - {side}')
-    return "; ".join(parts)
+    return "; ".join(parts) if parts else "(no meaningful text detected)"
 
 
 def _goal_terms(goal_objects) -> set[str]:

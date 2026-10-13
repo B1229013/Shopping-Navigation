@@ -21,10 +21,14 @@ from PIL import Image
 from server import scene
 from server.config import (
     OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL,
-    VLM_TIMEOUT_S,
+    VLM_TIMEOUT_S, VLM_ROUNDS,
 )
 from server.models import VLMAction, VLMResponse
-from server.prompts import PER_TURN_PROMPT, PRIOR_ANSWER_BLOCK, PERCEIVE_PROMPT, ROUTE_CONTEXT_BLOCK, CONTEXT_OBJECTS_BLOCK
+from server.prompts import (
+    PER_TURN_PROMPT, PRIOR_ANSWER_BLOCK, PERCEIVE_PROMPT,
+    PERCEIVE_REFINE_PROMPT, PERCEIVE_DISTINCTIVE_PROMPT,
+    ROUTE_CONTEXT_BLOCK, CONTEXT_OBJECTS_BLOCK,
+)
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +62,7 @@ class VLMDetectedText:
 @dataclass
 class VLMPerception:
     scene_description: str = ""
+    store_zone: str = ""
     detections: List[VLMDetectedObject] = field(default_factory=list)
     ocr_texts: List[VLMDetectedText] = field(default_factory=list)
 
@@ -194,9 +199,10 @@ def _generate(prompt: str, image_b64: Optional[str] = None,
     body = {
         "model": OPENAI_MODEL,
         "messages": [{"role": "user", "content": content}],
-        "temperature": 0.2,
-        "max_completion_tokens": max_tokens,
+        "max_completion_tokens": 4096 if "luna" in OPENAI_MODEL else 2048,
     }
+    if "luna" not in OPENAI_MODEL:
+        body["temperature"] = 0.2
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     r = requests.post(url, json=body, headers=headers, timeout=VLM_TIMEOUT_S)
     r.raise_for_status()
@@ -326,38 +332,41 @@ def _parse_perception(text: str, img_w: int, img_h: int) -> Optional[VLMPercepti
         return None
     try:
         detections: List[VLMDetectedObject] = []
-        for d in obj.get("detections", []):
-            box = d.get("box")
+        ocr_texts: List[VLMDetectedText] = []
+
+        for item in obj.get("items", []):
+            box = item.get("box")
             if not box or len(box) != 4:
                 continue
             x1, y1, x2, y2 = (float(c) for c in box)
             pixel_box = [x1 * img_w, y1 * img_h, x2 * img_w, y2 * img_h]
             h, v, depth = scene._position(pixel_box, img_w, img_h)
+
+            label = str(item.get("zh", ""))
+            if not label:
+                label = str(item.get("en", ""))
             detections.append(VLMDetectedObject(
-                label=str(d.get("label", "")),
+                label=label,
                 bbox=pixel_box,
-                score=float(d.get("score", 0.5)),
+                score=float(item.get("conf", 0.5)),
                 position=f"{h} {v}, {depth}",
             ))
 
-        ocr_texts: List[VLMDetectedText] = []
-        for t in obj.get("ocr_texts", []):
-            box = t.get("box")
-            if not box or len(box) != 4:
-                continue
-            x1, y1, x2, y2 = (float(c) for c in box)
-            px1, py1, px2, py2 = x1 * img_w, y1 * img_h, x2 * img_w, y2 * img_h
-            corners = [[px1, py1], [px2, py1], [px2, py2], [px1, py2]]
-            side = scene._horizontal_side((px1 + px2) / 2, img_w)
-            ocr_texts.append(VLMDetectedText(
-                text=str(t.get("text", "")),
-                score=float(t.get("score", 0.5)),
-                bbox=corners,
-                position=side,
-            ))
+            item_text = str(item.get("text", "")).strip()
+            if item_text:
+                px1, py1, px2, py2 = pixel_box
+                corners = [[px1, py1], [px2, py1], [px2, py2], [px1, py2]]
+                side = scene._horizontal_side((px1 + px2) / 2, img_w)
+                ocr_texts.append(VLMDetectedText(
+                    text=item_text,
+                    score=float(item.get("conf", 0.5)),
+                    bbox=corners,
+                    position=side,
+                ))
 
         return VLMPerception(
-            scene_description=str(obj.get("scene_description", "")),
+            scene_description=str(obj.get("scene", "")),
+            store_zone="",
             detections=detections,
             ocr_texts=ocr_texts,
         )
@@ -409,6 +418,421 @@ def perceive(
             break
         log.warning("VLM perception unparseable response (attempt %d/2): %.200s", attempt, text)
     return perception
+
+
+def _merge_perceptions(pass1: VLMPerception, pass2: VLMPerception) -> VLMPerception:
+    """Merge two perception passes — keep ALL detections and OCR from both."""
+    all_detections = list(pass1.detections) + list(pass2.detections)
+    all_ocr = list(pass1.ocr_texts) + list(pass2.ocr_texts)
+
+    return VLMPerception(
+        scene_description=pass2.scene_description or pass1.scene_description,
+        store_zone=pass2.store_zone or pass1.store_zone,
+        detections=all_detections,
+        ocr_texts=all_ocr,
+    )
+
+
+def perceive_two_pass(
+    image_path: str,
+    goal: str,
+    goal_objects: List[str],
+    img_w: int,
+    img_h: int,
+) -> Tuple[VLMPerception, dict]:
+    """Two-pass VLM perception: first pass detects, second pass refines with context.
+    Returns (merged_perception, debug_dict)."""
+    _empty_debug = {"pass1": {}, "pass2": {}, "merged": {}}
+    if not OPENAI_API_KEY:
+        log.error("OPENAI_API_KEY not set — cannot call VLM")
+        return _EMPTY_PERCEPTION, _empty_debug
+
+    try:
+        img = Image.open(image_path).convert("RGB")
+        max_dim = 1024
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        img_b64 = base64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        log.warning("VLM could not read image %s: %s", image_path, e)
+        return _EMPTY_PERCEPTION, _empty_debug
+
+    # ── Pass 1: initial perception ──
+    prompt1 = PERCEIVE_PROMPT
+    pass1 = _EMPTY_PERCEPTION
+    for attempt in (1, 2):
+        try:
+            text = _generate(prompt1, image_b64=img_b64)
+        except Exception as e:
+            log.warning("VLM pass1 failed (attempt %d/2): %s", attempt, e)
+            continue
+        parsed = _parse_perception(text, img_w, img_h)
+        if parsed is not None:
+            pass1 = parsed
+            break
+        log.warning("VLM pass1 unparseable (attempt %d/2): %.200s", attempt, text)
+
+    if not pass1.detections and not pass1.ocr_texts:
+        log.warning("Pass 1 returned nothing — skipping pass 2")
+        return pass1, _empty_debug
+
+    # ── Pass 2: refine with pass 1 context ──
+    if pass1.detections:
+        prev_strs = ", ".join(d.label for d in pass1.detections)
+    else:
+        prev_strs = "(無)"
+    prompt2 = PERCEIVE_REFINE_PROMPT.format(prev_items=prev_strs)
+
+    pass2 = _EMPTY_PERCEPTION
+    for attempt in (1, 2):
+        try:
+            text = _generate(prompt2, image_b64=img_b64)
+        except Exception as e:
+            log.warning("VLM pass2 failed (attempt %d/2): %s", attempt, e)
+            continue
+        parsed = _parse_perception(text, img_w, img_h)
+        if parsed is not None:
+            pass2 = parsed
+            break
+        log.warning("VLM pass2 unparseable (attempt %d/2): %.200s", attempt, text)
+
+    merged = _merge_perceptions(pass1, pass2)
+    log.info("Two-pass perceive: pass1=%d det + %d ocr → pass2=%d det + %d ocr → merged=%d det + %d ocr",
+             len(pass1.detections), len(pass1.ocr_texts),
+             len(pass2.detections), len(pass2.ocr_texts),
+             len(merged.detections), len(merged.ocr_texts))
+
+    def _perc_to_dict(p: VLMPerception) -> dict:
+        return {
+            "scene": p.scene_description,
+            "zone": p.store_zone,
+            "detections": [{"label": d.label, "box": [round(b, 3) for b in d.bbox], "score": round(d.score, 2), "position": d.position} for d in p.detections],
+            "ocr": [{"text": t.text, "score": round(t.score, 2), "position": t.position,
+                     "bbox": [[round(c, 1) for c in pt] for pt in t.bbox] if t.bbox else None} for t in p.ocr_texts],
+        }
+
+    debug = {
+        "pass1": _perc_to_dict(pass1),
+        "pass2": _perc_to_dict(pass2),
+        "merged": _perc_to_dict(merged),
+    }
+    return merged, debug
+
+
+def _is_dup_detection(new_det: VLMDetectedObject, existing: List[VLMDetectedObject],
+                      iou_thresh: float = 0.5) -> bool:
+    """Check if new_det duplicates any existing detection (label overlap or bbox IoU)."""
+    nl = new_det.label.lower()
+    nb = new_det.bbox
+    for ed in existing:
+        el = ed.label.lower()
+        if nl and el and (nl in el or el in nl):
+            return True
+        if nb and ed.bbox and len(nb) == 4 and len(ed.bbox) == 4:
+            x1 = max(nb[0], ed.bbox[0]); y1 = max(nb[1], ed.bbox[1])
+            x2 = min(nb[2], ed.bbox[2]); y2 = min(nb[3], ed.bbox[3])
+            inter = max(0, x2 - x1) * max(0, y2 - y1)
+            a1 = (nb[2] - nb[0]) * (nb[3] - nb[1])
+            a2 = (ed.bbox[2] - ed.bbox[0]) * (ed.bbox[3] - ed.bbox[1])
+            union = a1 + a2 - inter
+            if union > 0 and inter / union > iou_thresh:
+                return True
+    return False
+
+
+def perceive_three_pass(
+    image_path: str,
+    goal: str,
+    goal_objects: List[str],
+    img_w: int,
+    img_h: int,
+) -> Tuple[VLMPerception, dict]:
+    """Three-pass VLM perception: two-pass + distinctive features pass.
+    Returns (merged_perception, debug_dict)."""
+    merged_2p, debug_2p = perceive_two_pass(image_path, goal, goal_objects, img_w, img_h)
+
+    if not merged_2p.detections and not merged_2p.ocr_texts:
+        log.warning("Pass 1+2 returned nothing — skipping pass 3")
+        return merged_2p, debug_2p
+
+    try:
+        img = Image.open(image_path).convert("RGB")
+        max_dim = 1024
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        img_b64 = base64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        log.warning("Pass 3: could not read image %s: %s", image_path, e)
+        return merged_2p, debug_2p
+
+    prev_det_strs = [f"{d.label} (score={d.score:.1f})" for d in merged_2p.detections]
+    prev_ocr_strs = [f'"{t.text}" (score={t.score:.1f})' for t in merged_2p.ocr_texts]
+    prompt3 = PERCEIVE_DISTINCTIVE_PROMPT.format(
+        goal=goal,
+        goal_objects=", ".join(goal_objects) or "(none)",
+        prev_detections=", ".join(prev_det_strs) or "(none)",
+        prev_ocr=", ".join(prev_ocr_strs) or "(none)",
+    )
+
+    pass3 = _EMPTY_PERCEPTION
+    for attempt in (1, 2):
+        try:
+            text = _generate(prompt3, image_b64=img_b64)
+        except Exception as e:
+            log.warning("VLM pass3 failed (attempt %d/2): %s", attempt, e)
+            continue
+        parsed = _parse_perception(text, img_w, img_h)
+        if parsed is not None:
+            pass3 = parsed
+            break
+        log.warning("VLM pass3 unparseable (attempt %d/2): %.200s", attempt, text)
+
+    new_dets = [d for d in pass3.detections
+                if not _is_dup_detection(d, merged_2p.detections)]
+    new_ocr = []
+    existing_texts = {t.text.lower().strip() for t in merged_2p.ocr_texts}
+    for t in pass3.ocr_texts:
+        if t.text.lower().strip() not in existing_texts:
+            new_ocr.append(t)
+
+    all_dets = list(merged_2p.detections) + new_dets
+    all_ocr = list(merged_2p.ocr_texts) + new_ocr
+
+    merged = VLMPerception(
+        scene_description=merged_2p.scene_description,
+        store_zone=merged_2p.store_zone,
+        detections=all_dets,
+        ocr_texts=all_ocr,
+    )
+
+    log.info("Three-pass perceive: 2-pass=%d det + %d ocr → pass3=%d raw, %d new det, %d new ocr → total=%d det + %d ocr",
+             len(merged_2p.detections), len(merged_2p.ocr_texts),
+             len(pass3.detections), len(new_dets), len(new_ocr),
+             len(all_dets), len(all_ocr))
+
+    def _perc_to_dict(p: VLMPerception) -> dict:
+        return {
+            "scene": p.scene_description,
+            "zone": p.store_zone,
+            "detections": [{"label": d.label, "box": [round(b, 3) for b in d.bbox],
+                            "score": round(d.score, 2), "position": d.position}
+                           for d in p.detections],
+            "ocr": [{"text": t.text, "score": round(t.score, 2), "position": t.position,
+                     "bbox": [[round(c, 1) for c in pt] for pt in t.bbox] if t.bbox else None}
+                    for t in p.ocr_texts],
+        }
+
+    debug = {**debug_2p}
+    debug["pass3"] = _perc_to_dict(pass3)
+    debug["pass3_new_det"] = len(new_dets)
+    debug["pass3_new_ocr"] = len(new_ocr)
+    debug["merged"] = _perc_to_dict(merged)
+    return merged, debug
+
+
+def _grid_cell_for_bbox(bbox: List[float], img_w: int, img_h: int, grid_n: int = 3) -> int:
+    """Map an absolute-pixel bbox [x1,y1,x2,y2] to an n×n grid cell (0 to n²-1)."""
+    cx = (bbox[0] + bbox[2]) / 2 / max(img_w, 1)
+    cy = (bbox[1] + bbox[3]) / 2 / max(img_h, 1)
+    col = min(int(cx * grid_n), grid_n - 1)
+    row = min(int(cy * grid_n), grid_n - 1)
+    return row * grid_n + col
+
+
+def _label_match(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    if a in b or b in a:
+        return min(len(a), len(b)) / max(len(a), len(b)) > 0.5
+    a_chars = set(a) - {' '}
+    b_chars = set(b) - {' '}
+    if a_chars and b_chars:
+        return len(a_chars & b_chars) / len(a_chars | b_chars) > 0.6
+    return False
+
+
+def _stabilize_detections(
+    rounds: List[List[VLMDetectedObject]],
+    img_w: int, img_h: int,
+    min_appearances: int = 2,
+) -> List[VLMDetectedObject]:
+    """Keep only detections that appear in min_appearances+ rounds."""
+    if len(rounds) == 1:
+        return rounds[0]
+
+    tagged = []
+    for ri, dets in enumerate(rounds):
+        for d in dets:
+            cell = _grid_cell_for_bbox(d.bbox, img_w, img_h)
+            tagged.append((ri, d, cell))
+
+    clusters: List[List[tuple]] = []
+    used = [False] * len(tagged)
+
+    for i, (ri, di, ci) in enumerate(tagged):
+        if used[i]:
+            continue
+        cluster = [(ri, di, ci)]
+        used[i] = True
+        rounds_in = {ri}
+        for j in range(i + 1, len(tagged)):
+            if used[j]:
+                continue
+            rj, dj, cj = tagged[j]
+            if rj in rounds_in:
+                continue
+            if ci == cj and _label_match(di.label.lower(), dj.label.lower()):
+                cluster.append((rj, dj, cj))
+                used[j] = True
+                rounds_in.add(rj)
+        clusters.append(cluster)
+
+    stable = []
+    for cluster in clusters:
+        if len(cluster) < min_appearances:
+            continue
+        items = [d for _, d, _ in cluster]
+        best = max(items, key=lambda x: x.score)
+        avg_bbox = [
+            sum(d.bbox[k] for d in items) / len(items)
+            for k in range(4)
+        ]
+        stable.append(VLMDetectedObject(
+            label=best.label,
+            bbox=[round(b, 1) for b in avg_bbox],
+            score=round(max(d.score for d in items), 2),
+            position=best.position,
+        ))
+    return stable
+
+
+def _stabilize_ocr(
+    rounds: List[List[VLMDetectedText]],
+    min_appearances: int = 2,
+) -> List[VLMDetectedText]:
+    """Keep only OCR texts that appear in min_appearances+ rounds."""
+    if len(rounds) == 1:
+        return rounds[0]
+
+    tagged = []
+    for ri, texts in enumerate(rounds):
+        for t in texts:
+            tagged.append((ri, t))
+
+    clusters: List[List[tuple]] = []
+    used = [False] * len(tagged)
+
+    for i, (ri, ti) in enumerate(tagged):
+        if used[i]:
+            continue
+        cluster = [(ri, ti)]
+        used[i] = True
+        rounds_in = {ri}
+        for j in range(i + 1, len(tagged)):
+            if used[j]:
+                continue
+            rj, tj = tagged[j]
+            if rj in rounds_in:
+                continue
+            if _label_match(ti.text.lower(), tj.text.lower()):
+                cluster.append((rj, tj))
+                used[j] = True
+                rounds_in.add(rj)
+        clusters.append(cluster)
+
+    stable = []
+    for cluster in clusters:
+        if len(cluster) < min_appearances:
+            continue
+        items = [t for _, t in cluster]
+        best = max(items, key=lambda x: x.score)
+        stable.append(VLMDetectedText(
+            text=best.text,
+            score=round(max(t.score for t in items), 2),
+            bbox=best.bbox,
+            position=best.position,
+        ))
+    return stable
+
+
+def perceive_multi_round(
+    image_path: str,
+    goal: str,
+    goal_objects: List[str],
+    img_w: int,
+    img_h: int,
+    num_rounds: int = 3,
+) -> Tuple[VLMPerception, dict]:
+    """Run perceive_two_pass N times, keep only stable detections (2+/N).
+
+    Returns (stable_perception, debug_dict) with combined debug info.
+    """
+    if num_rounds <= 1:
+        return perceive_two_pass(image_path, goal, goal_objects, img_w, img_h)
+
+    all_det_rounds: List[List[VLMDetectedObject]] = []
+    all_ocr_rounds: List[List[VLMDetectedText]] = []
+    round_debugs = []
+    best_scene = ""
+    best_zone = ""
+
+    for r in range(num_rounds):
+        log.info("Multi-round perception: round %d/%d", r + 1, num_rounds)
+        perc, dbg = perceive_two_pass(image_path, goal, goal_objects, img_w, img_h)
+        all_det_rounds.append(list(perc.detections))
+        all_ocr_rounds.append(list(perc.ocr_texts))
+        round_debugs.append(dbg)
+        if perc.scene_description:
+            best_scene = perc.scene_description
+        if perc.store_zone:
+            best_zone = perc.store_zone
+
+    min_app = 2
+    stable_dets = _stabilize_detections(all_det_rounds, img_w, img_h, min_app)
+    stable_ocr = _stabilize_ocr(all_ocr_rounds, min_app)
+
+    total_raw = sum(len(r) for r in all_det_rounds)
+    log.info("Multi-round stabilize: %d rounds × 2-pass, %d raw det → %d stable det, "
+             "%d raw ocr → %d stable ocr",
+             num_rounds, total_raw, len(stable_dets),
+             sum(len(r) for r in all_ocr_rounds), len(stable_ocr))
+
+    stable_perc = VLMPerception(
+        scene_description=best_scene,
+        store_zone=best_zone,
+        detections=stable_dets,
+        ocr_texts=stable_ocr,
+    )
+
+    def _perc_to_dict(p: VLMPerception) -> dict:
+        return {
+            "scene": p.scene_description,
+            "zone": p.store_zone,
+            "detections": [{"label": d.label, "box": [round(b, 3) for b in d.bbox],
+                            "score": round(d.score, 2), "position": d.position}
+                           for d in p.detections],
+            "ocr": [{"text": t.text, "score": round(t.score, 2), "position": t.position,
+                     "bbox": [[round(c, 1) for c in pt] for pt in t.bbox] if t.bbox else None}
+                    for t in p.ocr_texts],
+        }
+
+    debug = {
+        "pass1": round_debugs[0].get("pass1", {}),
+        "pass2": round_debugs[0].get("pass2", {}),
+        "merged": _perc_to_dict(stable_perc),
+        "multi_round": {
+            "num_rounds": num_rounds,
+            "raw_det_per_round": [len(r) for r in all_det_rounds],
+            "raw_ocr_per_round": [len(r) for r in all_ocr_rounds],
+            "stable_det": len(stable_dets),
+            "stable_ocr": len(stable_ocr),
+        },
+    }
+    return stable_perc, debug
 
 
 def perceive_and_decide(

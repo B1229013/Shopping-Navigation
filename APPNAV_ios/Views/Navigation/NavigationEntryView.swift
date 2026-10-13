@@ -9,7 +9,7 @@ struct NavigationEntryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isCreatingSession = false
     @State private var backendError: String?
-    @State private var session: (sessionId: String, goal: String, guidance: String)?
+    @State private var session: (sessionId: String, goal: String, guidance: String, goalNodeId: Int?)?
 
     // Place selection
     @State private var availablePlaces: [PlaceInfo] = []
@@ -43,7 +43,9 @@ struct NavigationEntryView: View {
                 NavigationCameraView(
                     sessionId: session.sessionId,
                     goal: session.goal,
+                    place: selectedPlace?.name,
                     initialGuidance: session.guidance,
+                    initialTargetNodeId: session.goalNodeId,
                     onExit: { dismiss() }
                 )
             } else {
@@ -249,7 +251,7 @@ struct NavigationEntryView: View {
             do {
                 let response = try await NavigationAPI.shared.startSession(goal: goal, place: placeName)
                 await MainActor.run {
-                    session = (response.sessionId, goal, response.guidance)
+                    session = (response.sessionId, goal, response.guidance, response.goalNodeId)
                     isCreatingSession = false
                 }
             } catch {

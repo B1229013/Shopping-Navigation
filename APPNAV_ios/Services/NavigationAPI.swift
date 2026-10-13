@@ -13,6 +13,7 @@ struct StartSessionResponse: Codable {
     let action: String
     let goalObjects: [String]
     let place: String?
+    let goalNodeId: Int?
 }
 
 struct PlaceInfo: Codable, Identifiable, Hashable {
@@ -41,6 +42,12 @@ struct TurnResponse: Codable {
     let nextInstruction: String?
     // Navigation phase
     let phase: String?   // "shopping", "checkout", "exit", "done"
+    // Per-item shopping progress
+    let goalItemNames: [String]?
+    let visitedItemNames: [String]?
+    let currentTargetName: String?
+    // Active goal node for AR arrow
+    let goalNodeId: Int?
 }
 
 /// Route on the hand-corrected editor map (GET /session/{id}/path): the polyline the
@@ -273,26 +280,52 @@ final class NavigationAPI {
         return try await send(request)
     }
 
-    /// `heading` is the phone's own compass/gyro heading (degrees, 0° = map +y). The
-    /// server prefers it over the heading guessed from reference photos.
-    func uploadPhoto(sessionId: String, imageData: Data, heading: Double? = nil) async throws -> TurnResponse {
+    func uploadPhoto(sessionId: String, imageData: Data,
+                      dinoNodeHint: Int? = nil,
+                      pdrX: Double? = nil, pdrY: Double? = nil,
+                      heading: Double? = nil) async throws -> TurnResponse {
         var request = try request(path: "session/\(sessionId)/photo", method: "POST")
         let boundary = "Boundary-\(UUID().uuidString)"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 300
 
         var body = Data()
-        if let heading {
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"heading\"\r\n\r\n".data(using: .utf8)!)
-            body.append(String(format: "%.1f", heading).data(using: .utf8)!)
-            body.append("\r\n".data(using: .utf8)!)
-        }
+
+        // Photo file
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"photo\"; filename=\"photo.jpg\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
         body.append(imageData)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        body.append("\r\n".data(using: .utf8)!)
+
+        // On-device DINOv2 + PDR fusion node hint
+        if let hint = dinoNodeHint {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"dino_node_hint\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(hint)\r\n".data(using: .utf8)!)
+        }
+
+        // PDR-estimated position and heading
+        if let x = pdrX, let y = pdrY {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"pdr_x\"\r\n\r\n".data(using: .utf8)!)
+            body.append(String(format: "%.2f", x).data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"pdr_y\"\r\n\r\n".data(using: .utf8)!)
+            body.append(String(format: "%.2f", y).data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+
+        if let h = heading {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"heading\"\r\n\r\n".data(using: .utf8)!)
+            body.append(String(format: "%.1f", h).data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         request.httpBody = body
 
         return try await send(request)

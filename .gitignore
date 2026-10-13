@@ -17,3 +17,10 @@ xcuserdata/
 # CocoaPods / Carthage（若之後採用）
 Pods/
 Carthage/Build/
+
+# Large ML models (use Git LFS or download separately)
+APPNAV_ios/Models/DINOv2.mlpackage/
+
+# Python cache
+__pycache__/
+*.pyc

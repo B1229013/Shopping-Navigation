@@ -5,11 +5,15 @@ re-runs VLM perception on every reference photo, and writes new Object
 nodes with grid_cells/piece_count/depth_class + ADJACENT relationships
 between objects in the same DirPhoto — all in one pass.
 
+Multi-round mode (--rounds 3): runs VLM perception N times per photo,
+keeps only objects that appear in 2+ rounds (stability filtering),
+averages their bbox/confidence. This significantly improves ref map quality.
+
 Waypoint / DirPhoto / HAS_PHOTO / WALKWAY are NOT touched.
 
 Usage:
     export NEO4J_HOST=... NEO4J_PASSWORD=... OPENAI_API_KEY=...
-    python build_object_graph.py [--dry-run] [--vlm-calls 2] [--start-from 0]
+    python build_object_graph.py [--dry-run] [--rounds 3] [--start-from 0]
 """
 import argparse
 import base64
@@ -162,45 +166,49 @@ def neo4j_query(cypher, params=None):
 # ── VLM perception ──────────────────────────────────────────────────────
 
 PERCEIVE_PROMPT = """\
-你正在分析一張超市內部的照片，用來建立室內定位用的物件地圖。目標是盡可能完整地記錄照片中**所有可辨識的物件**，數量越多越好。
+你正在分析一張超市內部的照片，用來建立室內定位用的物件地圖。目標是找出能**唯一識別這個位置**的物件，而不是列出每張照片都有的通用物件。
 
-仔細觀察照片的每一個角落，回報你**確實看到**的**所有**物品。回覆格式為一個 JSON 物件，不要加其他文字：
+仔細觀察照片，回報你**確實看到**的物品。回覆格式為一個 JSON 物件，不要加其他文字：
 
-{{"scene": "<用繁體中文描述這是什麼區域>", "items": [{{"zh": "<繁體中文名稱>", "en": "<English name>", "conf": <0.0-1.0 信心值>, "box": [x1,y1,x2,y2]}}]}}
+{{"scene": "<用繁體中文描述這是什麼區域>", "items": [{{"zh": "<繁體中文名稱>", "en": "<English name>", "conf": <0.0-1.0 信心值>, "box": [x1,y1,x2,y2], "text": "<物件上可見的文字，沒有則留空>"}}]}}
 
 嚴格規則：
 - box 座標是圖片的比例值（0.0 到 1.0），格式 [左, 上, 右, 下]。框要緊密包住物件。
 - 禁止大框：單個框的寬度和高度都不應超過圖片的50%。
 - 只回報你**確實看到**的具體物件，不要猜測或編造。
+- text 欄位：回報物件上**確實可見**的文字（招牌、價格標籤、走道編號、品牌名等），沒有文字就寫空字串 ""。
 
-必須回報的物件種類（全部都要找）：
-1. 設備：冷藏櫃、冷凍櫃、開放式冰櫃、貨架、促銷堆頭、購物車、磅秤、收銀機、推車
-2. 標示牌/吊牌：走道編號吊牌（如「走道5」）、區域分類標示（如「堅果海苔」「飲料」）、品牌招牌
-3. 商品類別：每個貨架上可見的商品類別要分開報（零食貨架、飲料貨架、日用品貨架等）
-4. 獨立商品/品牌：可辨識的具體品牌或商品（如「可口可樂」「舒潔衛生紙」）
-5. 環境地標：柱子、走道交叉口、轉角、出口標示、消防設備
+【回報優先順序】（從最重要到最不重要）：
+1. ★★★ 可讀文字標示：走道編號（走道5）、區域分類標示（堅果海苔、飲料）、品牌招牌上的文字、天花板吊牌。text 欄位務必填寫！
+2. ★★★ 具體品牌/商品：可辨識的品牌或商品名（可口可樂、舒潔衛生紙、Heineken啤酒、3M商品），越具體越好
+3. ★★ 具體貨架內容：辨識貨架上的商品類別（零食貨架、飲料貨架、寵物食品貨架），不要只寫「貨架」
+4. ★★ 獨特設備：磅秤、收銀機、自助結帳機、烘焙設備、熟食櫃台等不是每個走道都有的設備
+5. ★ 空間地標：出口標示、樓梯、走道交叉口、有特殊標記的柱子
+6. ☆ 通用物件：冷藏櫃、一般貨架、購物車、價格標籤、促銷海報 — 這些幾乎每張照片都有，**最多報 3 個**作為空間參考
 
-回報數量：**15-25 個**偵測。寧可多報也不要少報。遠處的、角落的、部分遮擋的物件也必須報出。同一個大型設備（如一整排冷藏櫃）如果有明顯不同的分區，要分開報。
+回報數量：**15-25 個**偵測，但其中**至少 10 個**必須是★★以上的獨特物件。遠處的標示牌和品牌也要報出。
 """
 
 REFINE_PROMPT = """\
-你正在第二次、更仔細地分析同一張超市照片。目標是把第一次漏掉的物件全部補上。
+你正在第二次、更仔細地分析同一張超市照片。目標是找出第一次漏掉的**獨特、可識別**的物件。
 
 第一次分析已經找到了這些物件：
 {prev_items}
 
 請再看一次照片，**逐區掃描**（左上→右上→左中→右中→左下→右下），重點補充：
-1. **漏掉的設備**：有沒有冷藏櫃、推車、磅秤、貨架沒被報出？
-2. **漏掉的標示牌**：天花板上的吊牌、走道編號、分類標示、促銷海報
-3. **漏掉的商品分區**：同一個貨架上如果有不同商品類別（上層 vs 下層、左側 vs 右側），要分開報
-4. **遠處/背景的物件**：照片深處可見的設備、標示、商品
-5. **部分遮擋的物件**：只露出一部分但仍可辨識的物件
+1. **漏掉的文字/標示**：天花板吊牌上的文字、走道編號、區域分類標示、品牌招牌 — 這些是定位最重要的線索！
+2. **漏掉的品牌/商品名**：貨架上可辨識的具體品牌或商品（包裝上的品牌名、logo）
+3. **漏掉的商品分區**：同一個貨架上如果有不同商品類別（上層 vs 下層、左側 vs 右側），要分開報，寫出具體類別
+4. **遠處的標示牌**：照片深處可見的吊牌、招牌、方向指示
+5. **漏掉的獨特設備**：不是通用設備（冷藏櫃、貨架），而是特殊的（磅秤、自助結帳、特殊展示架）
+
+不需要補充：通用物件（購物車、價格標籤、普通貨架）第一次已經夠了。
 
 回覆格式同上，只回報**新發現的**物件（不要重複第一次已報過的）：
 
-{{"scene": "<更新後的區域描述>", "items": [{{"zh": "<繁體中文名稱>", "en": "<English name>", "conf": <0.0-1.0 信心值>, "box": [x1,y1,x2,y2]}}]}}
+{{"scene": "<更新後的區域描述>", "items": [{{"zh": "<繁體中文名稱>", "en": "<English name>", "conf": <0.0-1.0 信心值>, "box": [x1,y1,x2,y2], "text": "<物件上可見的文字，沒有則留空>"}}]}}
 
-規則同上：box 是 0-1 比例值，禁止大框，只報確實看到的。目標補上 **10-20 個**新偵測。
+規則同上：box 是 0-1 比例值，禁止大框，只報確實看到的。目標補上 **8-15 個**獨特物件。
 """
 
 
@@ -277,13 +285,135 @@ def normalize_label(zh, en=""):
     return (zh + " " + en).strip().lower()
 
 
+def _items_from_perception(perc):
+    """Extract and normalize items from a VLM perception result."""
+    items = []
+    for it in perc.get("items", []):
+        box = it.get("box")
+        if not box or len(box) != 4:
+            continue
+        bw = box[2] - box[0]
+        bh = box[3] - box[1]
+        if bw > 0.55 or bh > 0.55 or bw < 0.01 or bh < 0.01:
+            continue
+        zh = it.get("zh", "")
+        en = it.get("en", "")
+        label_norm = normalize_label(zh, en)
+        if not label_norm or len(label_norm) < 2:
+            continue
+        grid_cell, grid_cells, piece_count, depth_class = compute_grid_cells(box)
+        ocr_text = (it.get("text") or "").strip()
+        items.append({
+            "zh": zh, "en": en,
+            "label": f"{zh} {en}".strip(),
+            "label_norm": label_norm,
+            "conf": it.get("conf", 0.5),
+            "box": [round(b, 4) for b in box],
+            "grid_cell": grid_cell,
+            "grid_cells": grid_cells,
+            "piece_count": piece_count,
+            "depth_class": depth_class,
+            "ocr_text": ocr_text,
+        })
+    return items
+
+
+def _merge_rounds(all_rounds, min_appearances=2):
+    """Keep only items that appear in min_appearances+ rounds.
+
+    Two items from different rounds "match" if they have the same grid_cell
+    and a similar label_norm (exact match or one contains the other).
+    Matched items get averaged bbox and max confidence.
+    """
+    if len(all_rounds) == 1:
+        return all_rounds[0]
+
+    def _label_match(a, b):
+        if a == b:
+            return True
+        if a in b or b in a:
+            ratio = min(len(a), len(b)) / max(len(a), len(b))
+            return ratio > 0.5
+        a_chars = set(a) - {' '}
+        b_chars = set(b) - {' '}
+        if a_chars and b_chars:
+            jaccard = len(a_chars & b_chars) / len(a_chars | b_chars)
+            return jaccard > 0.6
+        return False
+
+    # Build a pool of all items across rounds, tagged with round index
+    tagged = []
+    for ri, items in enumerate(all_rounds):
+        for item in items:
+            tagged.append((ri, item))
+
+    # Greedy clustering: assign each item to a cluster
+    clusters = []  # each cluster: list of (round_idx, item)
+    used = [False] * len(tagged)
+
+    for i, (ri, item_i) in enumerate(tagged):
+        if used[i]:
+            continue
+        cluster = [(ri, item_i)]
+        used[i] = True
+        rounds_in_cluster = {ri}
+
+        for j in range(i + 1, len(tagged)):
+            if used[j]:
+                continue
+            rj, item_j = tagged[j]
+            if rj in rounds_in_cluster:
+                continue
+            if (item_i["grid_cell"] == item_j["grid_cell"] and
+                    _label_match(item_i["label_norm"], item_j["label_norm"])):
+                cluster.append((rj, item_j))
+                used[j] = True
+                rounds_in_cluster.add(rj)
+        clusters.append(cluster)
+
+    # Keep clusters with enough appearances
+    stable_items = []
+    for cluster in clusters:
+        if len(cluster) < min_appearances:
+            continue
+        items_in_cluster = [it for _, it in cluster]
+        best = max(items_in_cluster, key=lambda x: x["conf"])
+        avg_box = [
+            sum(it["box"][k] for it in items_in_cluster) / len(items_in_cluster)
+            for k in range(4)
+        ]
+        avg_box = [round(b, 4) for b in avg_box]
+        grid_cell, grid_cells, piece_count, depth_class = compute_grid_cells(avg_box)
+        ocr_candidates = [it.get("ocr_text", "") for it in items_in_cluster if it.get("ocr_text")]
+        ocr_text = max(ocr_candidates, key=len) if ocr_candidates else ""
+        stable_items.append({
+            "zh": best["zh"], "en": best["en"],
+            "label": best["label"],
+            "label_norm": best["label_norm"],
+            "conf": round(max(it["conf"] for it in items_in_cluster), 3),
+            "box": avg_box,
+            "grid_cell": grid_cell,
+            "grid_cells": grid_cells,
+            "piece_count": piece_count,
+            "depth_class": depth_class,
+            "ocr_text": ocr_text,
+            "appearances": len(cluster),
+        })
+
+    return stable_items
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Rebuild Neo4j Object nodes with grid_cells + ADJACENT")
     parser.add_argument("--dry-run", action="store_true", help="Print plan without writing to Neo4j")
     parser.add_argument("--start-from", type=int, default=0, help="Skip first N photos (for resume)")
+    parser.add_argument("--rounds", type=int, default=1, help="VLM rounds per photo (3 = stability filtering, keep 2+/3)")
+    parser.add_argument("--supplement", action="store_true", help="Only process photos with no existing Objects (skip delete)")
     args = parser.parse_args()
+    num_rounds = max(1, args.rounds)
+    min_appearances = max(2, num_rounds - 1) if num_rounds > 1 else 1
 
     if not OPENAI_API_KEY:
         print("ERROR: OPENAI_API_KEY not set", file=sys.stderr)
@@ -315,8 +445,21 @@ def main():
         else:
             print(f"  WARN: photo not found: {r['photo_file']}", flush=True)
 
-    vlm_calls_per_photo = 2  # two-pass (perceive + refine) = 2 calls
-    print(f"  {len(photos)} photos found (×{vlm_calls_per_photo} VLM calls each, two-pass)", flush=True)
+    if args.supplement:
+        print("Checking which photos already have Objects...", flush=True)
+        existing = neo4j_query("""
+            MATCH (w:Waypoint {place: $place})-[:HAS_PHOTO]->(p:DirPhoto)-[:DETECTED]->(o:Object)
+            RETURN elementId(p) AS photo_id, count(o) AS cnt
+        """, {"place": PLACE})
+        has_objects = {r["photo_id"] for r in existing if r["cnt"] > 0}
+        before = len(photos)
+        photos = [p for p in photos if p["photo_id"] not in has_objects]
+        print(f"  {before} total photos, {before - len(photos)} already have Objects, {len(photos)} to process", flush=True)
+
+    vlm_calls_per_photo = 2 * num_rounds
+    print(f"  {len(photos)} photos found (×{vlm_calls_per_photo} VLM calls each, {num_rounds} round{'s' if num_rounds>1 else ''} × two-pass)", flush=True)
+    if num_rounds > 1:
+        print(f"  Stability filter: keep objects appearing in {min_appearances}+/{num_rounds} rounds", flush=True)
     print(f"  Estimated time: ~{len(photos) * vlm_calls_per_photo * 5 / 60:.0f} minutes", flush=True)
 
     if args.dry_run:
@@ -325,7 +468,9 @@ def main():
         return
 
     # ── Step 2: Delete existing Objects + relationships ──
-    if args.start_from == 0:
+    if args.supplement:
+        print("\n[SUPPLEMENT] Keeping existing Objects, only adding missing ones.", flush=True)
+    elif args.start_from == 0:
         print("\nDeleting existing Object nodes + DETECTED + ADJACENT...", flush=True)
         result = neo4j_query("""
             MATCH (w:Waypoint {place: $place})-[:HAS_PHOTO]->(p:DirPhoto)-[:DETECTED]->(o:Object)
@@ -350,47 +495,32 @@ def main():
         if i < args.start_from:
             continue
 
-        # ── 3a: VLM two-pass perception (perceive + refine) ──
-        all_items = []
+        # ── 3a: VLM multi-round perception ──
+        round_results = []
+        for rnd in range(num_rounds):
+            total_calls += 2
+            perc = vlm_perceive_two_pass(p["fpath"])
+            items = _items_from_perception(perc)
+            round_results.append(items)
+            if num_rounds > 1:
+                print(f"    round {rnd+1}/{num_rounds}: {len(items)} items", flush=True)
+
+        if num_rounds > 1:
+            all_items = _merge_rounds(round_results, min_appearances=min_appearances)
+            total_before = sum(len(r) for r in round_results)
+            print(f"    merged: {total_before} raw → {len(all_items)} stable (≥{min_appearances}/{num_rounds})", flush=True)
+        else:
+            all_items = round_results[0] if round_results else []
+
+        # Dedup within final items
         seen_norms = set()
-
-        total_calls += 2
-        perc = vlm_perceive_two_pass(p["fpath"])
-
-        for it in perc.get("items", []):
-            box = it.get("box")
-            if not box or len(box) != 4:
-                continue
-            bw = box[2] - box[0]
-            bh = box[3] - box[1]
-            if bw > 0.55 or bh > 0.55 or bw < 0.01 or bh < 0.01:
-                continue
-
-            zh = it.get("zh", "")
-            en = it.get("en", "")
-            label_norm = normalize_label(zh, en)
-            if not label_norm or len(label_norm) < 2:
-                continue
-
-            grid_cell, grid_cells, piece_count, depth_class = compute_grid_cells(box)
-
-            dedup_key = (label_norm, grid_cell)
-            if dedup_key in seen_norms:
-                continue
-            seen_norms.add(dedup_key)
-
-            all_items.append({
-                "zh": zh,
-                "en": en,
-                "label": f"{zh} {en}".strip(),
-                "label_norm": label_norm,
-                "conf": it.get("conf", 0.5),
-                "box": [round(b, 4) for b in box],
-                "grid_cell": grid_cell,
-                "grid_cells": grid_cells,
-                "piece_count": piece_count,
-                "depth_class": depth_class,
-            })
+        deduped = []
+        for item in all_items:
+            dedup_key = (item["label_norm"], item["grid_cell"])
+            if dedup_key not in seen_norms:
+                seen_norms.add(dedup_key)
+                deduped.append(item)
+        all_items = deduped
 
         # ── 3b: Batch write Object nodes (one UNWIND per photo) ──
         obj_id_map = {}
@@ -407,6 +537,7 @@ def main():
                     "piece_count": item["piece_count"],
                     "depth_class": item["depth_class"],
                     "bbox": json.dumps(item["box"]),
+                    "ocr_text": item.get("ocr_text", ""),
                 })
             try:
                 result = neo4j_query("""
@@ -421,6 +552,7 @@ def main():
                         piece_count: item.piece_count,
                         depth_class: item.depth_class,
                         bbox: item.bbox,
+                        ocr_text: item.ocr_text,
                         source: 'rebuild'
                     })
                     CREATE (p)-[:DETECTED]->(o)

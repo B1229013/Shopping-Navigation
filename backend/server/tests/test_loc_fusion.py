@@ -41,6 +41,9 @@ def test_parse_weights():
         parse_weights("5,1")
     with pytest.raises(ValueError):
         parse_weights("-1,1,1")
+    for bad in ("nan,1,1", "inf,1,1", "1,-inf,1", "0,0,0"):
+        with pytest.raises(ValueError):
+            parse_weights(bad)
 
 
 # ── fusion ────────────────────────────────────────────────────────────────

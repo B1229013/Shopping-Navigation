@@ -38,7 +38,8 @@ class FusionWeights:
 def parse_weights(raw: str) -> FusionWeights:
     """"5,1,1" → FusionWeights(dino=5, sensor=1, grid=1)."""
     parts = [float(p) for p in raw.split(",")]
-    if len(parts) != 3 or any(p < 0 for p in parts) or sum(parts) == 0:
+    if (len(parts) != 3 or not all(math.isfinite(p) and p >= 0 for p in parts)
+            or sum(parts) == 0):
         raise ValueError(f"fusion weights must be 3 non-negative numbers 'dino,sensor,grid': {raw!r}")
     return FusionWeights(*parts)
 

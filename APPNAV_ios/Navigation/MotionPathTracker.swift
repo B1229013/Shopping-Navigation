@@ -423,6 +423,9 @@ final class MotionPathTracker {
     /// still, so a live UI can show whether heading is actually tracking a turn in real time
     /// instead of only refreshing once the next step is taken.
     var onHeadingUpdate: ((Double) -> Void)?
+    /// Fires every device-motion tick with the gravity vector (device frame, in g) —
+    /// used to check the phone is held upright before taking a navigation photo.
+    var onGravityUpdate: (((x: Double, y: Double, z: Double)) -> Void)?
     /// Fires at `rawSampleInterval` with every raw sensor input combined into one row — see
     /// `RawSensorSample`'s doc comment for why this exists.
     var onRawSample: ((RawSensorSample) -> Void)?
@@ -590,6 +593,7 @@ final class MotionPathTracker {
         latestMagZ = motion.magneticField.field.z
 
         carryingModeDetector.ingest(gravity: (motion.gravity.x, motion.gravity.y, motion.gravity.z))
+        onGravityUpdate?((motion.gravity.x, motion.gravity.y, motion.gravity.z))
         onCarryingModeUpdate?(carryingModeDetector.mode, carryingModeDetector.degTx, carryingModeDetector.degP)
 
         let measured = calibratedHeading(appleHeading: motion.heading, field: motion.magneticField.field)

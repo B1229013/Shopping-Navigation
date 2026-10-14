@@ -33,10 +33,18 @@ struct TurnResponse: Codable {
     let question: String?
     let nodeId: Int
     let annotatedPhotoUrl: String?
+    // Photo unusable (blurred / dark / blocked by people or carts): show this and ask for
+    // a retake. When set, the photo did not move the user's position.
+    let retakeHint: String?
+    // Several places look alike: take one more photo after turning on the spot
+    let secondPhotoHint: String?
     // Neo4j visual localization (position correction from reference map)
     let correctedNodeId: Int?
     let correctedConfidence: Double?
     let correctedLocation: String?
+    // Map position between nodes (score-weighted mean of the best candidates), metres
+    let estimatedX: Double?
+    let estimatedY: Double?
     // Map-derived turn-by-turn line (path with distance / "you're at the target" /
     // "photo could not be localized"); shown verbatim so the map's verdict is visible.
     let nextInstruction: String?
@@ -282,8 +290,13 @@ final class NavigationAPI {
 
     func uploadPhoto(sessionId: String, imageData: Data,
                       dinoNodeHint: Int? = nil,
+                      dinoTopK: [(nodeId: Int, similarity: Float)] = [],
                       pdrX: Double? = nil, pdrY: Double? = nil,
-                      heading: Double? = nil) async throws -> TurnResponse {
+                      mapPosition: (x: Double, y: Double)? = nil,
+                      distanceSinceFix: Double? = nil,
+                      fixNode: Int? = nil,
+                      heading: Double? = nil,
+                      fromGallery: Bool = false) async throws -> TurnResponse {
         var request = try request(path: "session/\(sessionId)/photo", method: "POST")
         let boundary = "Boundary-\(UUID().uuidString)"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -303,6 +316,49 @@ final class NavigationAPI {
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
             body.append("Content-Disposition: form-data; name=\"dino_node_hint\"\r\n\r\n".data(using: .utf8)!)
             body.append("\(hint)\r\n".data(using: .utf8)!)
+        }
+
+        // On-device DINOv2 top-K similarities — the server fuses these with its
+        // own grid matcher and the map position below (backend/server/loc_fusion.py)
+        if !dinoTopK.isEmpty {
+            let entries = dinoTopK.map { String(format: "{\"nid\":%d,\"sim\":%.4f}", $0.nodeId, Double($0.similarity)) }
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"dino_topk\"\r\n\r\n".data(using: .utf8)!)
+            body.append("[\(entries.joined(separator: ","))]\r\n".data(using: .utf8)!)
+        }
+
+        // PDR position in the reference-map frame — only once a photo fix has calibrated it
+        if let pos = mapPosition {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"map_x\"\r\n\r\n".data(using: .utf8)!)
+            body.append(String(format: "%.2f", pos.x).data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"map_y\"\r\n\r\n".data(using: .utf8)!)
+            body.append(String(format: "%.2f", pos.y).data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+
+            // How far the user walked since that fix — the server trusts the position
+            // less the further this is (sensor drift grows with distance).
+            if let d = distanceSinceFix {
+                body.append("--\(boundary)\r\n".data(using: .utf8)!)
+                body.append("Content-Disposition: form-data; name=\"dist_since_fix\"\r\n\r\n".data(using: .utf8)!)
+                body.append(String(format: "%.1f", d).data(using: .utf8)!)
+                body.append("\r\n".data(using: .utf8)!)
+            }
+            // The node of that fix: the server only considers nodes walkable from it
+            if let n = fixNode {
+                body.append("--\(boundary)\r\n".data(using: .utf8)!)
+                body.append("Content-Disposition: form-data; name=\"fix_node\"\r\n\r\n".data(using: .utf8)!)
+                body.append("\(n)\r\n".data(using: .utf8)!)
+            }
+        }
+
+        if fromGallery {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"source\"\r\n\r\n".data(using: .utf8)!)
+            body.append("gallery\r\n".data(using: .utf8)!)
         }
 
         // PDR-estimated position and heading

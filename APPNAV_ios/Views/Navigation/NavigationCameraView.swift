@@ -37,8 +37,13 @@ struct NavigationCameraView: View {
     // AR arrow: target node — set from route plan at session start, updated per photo
     @State private var targetNodeId: Int?
     @State private var dinoReady = false
-    // PDR ↔ reference frame calibration: recorded when DINOv2 localizes
-    @State private var pdrOffset: (dx: Double, dy: Double)?
+    // Retake request (blurred / dark / tilted / occluded photo) — shown as a banner
+    @State private var retakeHint: String?
+    // "Several places look alike — turn and take one more" (server second_photo_hint)
+    @State private var secondPhotoHint: String?
+    // First-use photo guide; reopen with the "?" button
+    @AppStorage("navPhotoGuideSeen") private var photoGuideSeen = false
+    @State private var showPhotoGuide = false
 
     init(sessionId: String, goal: String, place: String? = nil,
          initialGuidance: String, initialTargetNodeId: Int? = nil,
@@ -64,7 +69,7 @@ struct NavigationCameraView: View {
             if !hasArrived, !pendingArrival {
                 DirectionArrowView(
                     relativeBearingDegrees: arrowBearing,
-                    isLocalized: pdrOffset != nil
+                    isLocalized: sensorSession.mapPosition != nil
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .padding(.trailing, 12)
@@ -89,6 +94,50 @@ struct NavigationCameraView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Spacer()
+                if let retakeHint {
+                    Text("📷 \(retakeHint)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.orange.opacity(0.9))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else if let secondPhotoHint {
+                    Text("📷 \(secondPhotoHint)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.blue.opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else if !hasArrived, !pendingArrival, pendingQuestion == nil, sensorSession.mapPosition == nil {
+                    Button(action: startAtEntrance) {
+                        Text("📍 我在入口，從這裡開始")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.6))
+                            .clipShape(Capsule())
+                    }
+                } else if !hasArrived, !pendingArrival, pendingQuestion == nil,
+                          sensorSession.distanceSinceFix >= Self.photoReminderM {
+                    Text("📍 已走 \(Int(sensorSession.distanceSinceFix)) m，拍一張照片校正位置")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.55))
+                        .clipShape(Capsule())
+                } else if !hasArrived, !pendingArrival, pendingQuestion == nil, !isPhoneUpright {
+                    Text("📱 手機請拿直、對準走道前方")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.55))
+                        .clipShape(Capsule())
+                }
                 if let loopBanner {
                     Text(loopBanner)
                         .font(.caption.weight(.semibold))
@@ -106,7 +155,17 @@ struct NavigationCameraView: View {
             .padding(.top, 8)
             .padding(.bottom, 12)
         }
+        .onReceive(sensorSession.$currentPoint) { point in
+            followSensors(point)
+        }
+        .sheet(isPresented: $showPhotoGuide) {
+            PhotoGuideView { showPhotoGuide = false; photoGuideSeen = true }
+        }
         .onAppear {
+            if !photoGuideSeen {
+                showPhotoGuide = true
+                photoGuideSeen = true   // shown once, however it is dismissed
+            }
             requestCameraAccessIfNeeded()
             camera.configure()
             camera.start()
@@ -191,7 +250,18 @@ struct NavigationCameraView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            flashButton
+            VStack(spacing: 8) {
+                flashButton
+                Button(action: { showPhotoGuide = true }) {
+                    Image(systemName: "questionmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 34, height: 34)
+                        .background(Color.white.opacity(0.2))
+                        .clipShape(Circle())
+                }
+                .accessibilityLabel("拍照說明")
+            }
         }
         .padding(14)
         .background(
@@ -407,34 +477,67 @@ struct NavigationCameraView: View {
     private var arrowBearing: Double {
         guard let nodeId = targetNodeId,
               let targetCoord = NodeCoordinateStore.shared.coordinate(for: nodeId),
-              pdrOffset != nil else {
+              let pos = sensorSession.mapPosition else {
             return 0 // Not calibrated — fixed pointing up
         }
-        let pos = adjustedPosition
         let bearing = NodeCoordinateStore.shared.bearing(from: pos, to: targetCoord)
-        var relative = bearing - sensorSession.currentHeading
+        var relative = bearing - sensorSession.mapHeading
         while relative > 180 { relative -= 360 }
         while relative < -180 { relative += 360 }
         return relative
     }
 
-    /// Run DINOv2 on-device localization and fuse with PDR position.
-    /// Returns the best-match node ID as a hint for the backend.
-    private func dinoFusedNodeHint(image: UIImage) -> Int? {
-        guard dinoReady else { return nil }
-        let matches = DINOLocalizationService.shared.localize(image: image, topK: 5)
-        guard !matches.isEmpty else { return nil }
-        let candidates = matches.map { (nodeId: $0.nodeId, similarity: $0.similarity) }
-        return NodeCoordinateStore.shared.fuseDINOWithPDR(
-            candidates: candidates, pdrPosition: adjustedPosition
-        )
+    /// On-device DINOv2 result for one photo: the top-K nodes the server fuses
+    /// with its own grid matcher, plus the phone's DINO+PDR pick as a hint.
+    private struct DINOResult {
+        var hint: Int?
+        var topK: [(nodeId: Int, similarity: Float)] = []
     }
 
-    /// Current position in the reference coordinate frame.
-    private var adjustedPosition: (x: Double, y: Double) {
-        let pdr = sensorSession.pdrPosition
-        guard let offset = pdrOffset else { return pdr }
-        return (x: pdr.x + offset.dx, y: pdr.y + offset.dy)
+    /// Run DINOv2 on-device localization and fuse with PDR position.
+    private func dinoLocalize(image: UIImage) -> DINOResult {
+        guard dinoReady else { return DINOResult() }
+        let matches = DINOLocalizationService.shared.localize(image: image, topK: 10)
+        guard !matches.isEmpty else { return DINOResult() }
+        let candidates = matches.map { (nodeId: $0.nodeId, similarity: $0.similarity) }
+        let hint = NodeCoordinateStore.shared.fuseDINOWithPDR(
+            candidates: Array(candidates.prefix(5)),
+            pdrPosition: sensorSession.mapPosition ?? sensorSession.pdrPosition
+        )
+        return DINOResult(hint: hint, topK: candidates)
+    }
+
+    /// Remind the user to take a photo after this much walking: the walk simulation kept
+    /// the error near 1 m with a photo every 6–12 m (backend eval/report_figures walk_frequency).
+    static let photoReminderM = 12.0
+
+    private func startAtEntrance() {
+        let entrance = NodeCoordinateStore.shared.nearestNode(to: (0, 0))
+        sensorSession.startAtEntrance(nodeId: entrance?.nodeId)
+    }
+
+    private var isPhoneUpright: Bool {
+        PhotoQualityChecker.isUpright(gravity: sensorSession.gravity)
+    }
+
+    /// Every sensor step: move the route-map dot, and re-plan when the user has walked
+    /// off the planned route (PathFollower.needsReplan).
+    private func followSensors(_ point: PathPoint?) {
+        guard let point else { return }
+        if let m = sensorSession.mapPosition {
+            routeModel.ingest(mapPosition: m, headingDegrees: sensorSession.mapHeading, raw: point)
+        } else {
+            routeModel.ingest(point)
+        }
+        if routeModel.shouldReplan() {
+            Task { await routeModel.load(sessionId: sessionId, fromPhone: true) }
+        }
+    }
+
+    /// Blur / darkness check before uploading (same thresholds as the server).
+    private func localQualityHint(_ image: UIImage?) -> String? {
+        guard let cg = image?.cgImage, let m = PhotoQualityChecker.measure(cg) else { return nil }
+        return PhotoQualityChecker.hint(for: m)
     }
 
     // MARK: - Actions
@@ -455,16 +558,38 @@ struct NavigationCameraView: View {
     @State private var currentLocation: String?
     @State private var mapInstruction: String?
 
-    private func applyTurn(_ response: TurnResponse) {
-        // Calibrate PDR offset when backend confirms localization
-        if let locNodeId = response.correctedNodeId,
-           let refCoord = NodeCoordinateStore.shared.coordinate(for: locNodeId) {
-            let pdr = sensorSession.pdrPosition
-            pdrOffset = (dx: refCoord.x - pdr.x, dy: refCoord.y - pdr.y)
+    private func applyTurn(_ response: TurnResponse, rawAtCapture: (x: Double, y: Double)? = nil) {
+        retakeHint = response.retakeHint
+        secondPhotoHint = response.secondPhotoHint
+        // A localized photo corrects the shared map position (and, between two good
+        // fixes, the heading offset and step length) — see MapPositionEstimator.
+        var fixNote = ""
+        var fixAccepted = false
+        if response.retakeHint == nil, let locNodeId = response.correctedNodeId,
+           let raw = rawAtCapture {
+            let node: (x: Double, y: Double)?
+            if let ex = response.estimatedX, let ey = response.estimatedY {
+                node = (ex, ey)
+            } else {
+                node = NodeCoordinateStore.shared.coordinate(for: locNodeId)
+            }
+            if let node {
+                switch sensorSession.applyPhotoFix(node: node, nodeId: locNodeId,
+                                                   confidence: response.correctedConfidence ?? 0, raw: raw) {
+                case .accepted:
+                    fixAccepted = true
+                    // move the route-map dot now, not on the next step
+                    if let m = sensorSession.mapPosition {
+                        routeModel.ingest(mapPosition: m, headingDegrees: sensorSession.mapHeading, raw: nil)
+                    }
+                case .rejectedLowConfidence: fixNote = "，信心不足未校正位置"
+                case .rejectedJump: fixNote = "，跳太遠未校正位置"
+                }
+            }
         }
         if let loc = response.correctedLocation {
             if let conf = response.correctedConfidence {
-                currentLocation = "\(loc)（比對信心 \(Int((conf * 100).rounded()))%）"
+                currentLocation = "\(loc)（比對信心 \(Int((conf * 100).rounded()))%\(fixNote)）"
             } else {
                 currentLocation = loc
             }
@@ -478,13 +603,12 @@ struct NavigationCameraView: View {
             navPhase = phase
             phaseChanged = true
         }
-        // A confident photo fix re-anchors the dead-reckoned position at that
-        // waypoint (cancelling drift). A weak fix (keyword localization can jump
-        // between nodes on the same photo) only re-plans from where the phone
-        // thinks it is, so the dot isn't teleported to a wrong node.
         if response.correctedNodeId != nil {
-            let confident = (response.correctedConfidence ?? 0) >= 0.6
-            Task { await routeModel.load(sessionId: sessionId, fromPhone: !confident) }
+            // Only a fix the phone actually applied re-anchors the route at the server's
+            // node; otherwise (gallery photo, rejected jump, low confidence) re-plan from
+            // where the phone thinks it is.
+            let replanFromPhone = !fixAccepted
+            Task { await routeModel.load(sessionId: sessionId, fromPhone: replanFromPhone) }
         } else if phaseChanged {
             // The phase moved on (shopping → checkout → exit) but this photo wasn't
             // localized: the path endpoint now plans a different leg, so re-plan from
@@ -525,8 +649,19 @@ struct NavigationCameraView: View {
 
     private func captureAndUpload() {
         guard !isUploading, !hasArrived, !pendingArrival, pendingQuestion == nil else { return }
+        guard isPhoneUpright else {
+            retakeHint = PhotoQualityChecker.tiltHint
+            return
+        }
         isUploading = true
         errorMessage = nil
+        retakeHint = nil
+        // Sensor state at the shutter, not when the server answers seconds later.
+        let raw = sensorSession.pdrPosition
+        let mapPosition = sensorSession.mapPosition
+        let distance = sensorSession.distanceSinceFix
+        let fixNode = sensorSession.lastFixNodeId
+        let heading = sensorSession.mapHeading   // compass + offset learned from photo fixes
 
         camera.capturePhoto { data in
             guard let data else {
@@ -536,8 +671,16 @@ struct NavigationCameraView: View {
             }
             let image = UIImage(data: data)
             lastCapturedImage = image
-            let hint = image.flatMap { dinoFusedNodeHint(image: $0) }
-            Task { await upload(imageData: data, dinoHint: hint) }
+            if let hint = localQualityHint(image) {
+                retakeHint = hint
+                isUploading = false
+                return
+            }
+            let dino = image.map { dinoLocalize(image: $0) } ?? DINOResult()
+            Task {
+                await upload(imageData: data, dino: dino, raw: raw, mapPosition: mapPosition,
+                             distanceSinceFix: distance, fixNode: fixNode, heading: heading, fromGallery: false)
+            }
         }
     }
 
@@ -556,25 +699,44 @@ struct NavigationCameraView: View {
             }
             let image = UIImage(data: data)
             await MainActor.run { lastCapturedImage = image }
-            let hint = image.flatMap { dinoFusedNodeHint(image: $0) }
-            await upload(imageData: data, dinoHint: hint)
+            if let hint = localQualityHint(image) {
+                await MainActor.run {
+                    retakeHint = hint
+                    isUploading = false
+                    galleryItem = nil
+                }
+                return
+            }
+            let dino = image.map { dinoLocalize(image: $0) } ?? DINOResult()
+            // A gallery photo was taken some other time: the live position / heading
+            // don't describe it, so none are sent and it can't correct the position.
+            await upload(imageData: data, dino: dino, raw: nil, mapPosition: nil,
+                         distanceSinceFix: nil, fixNode: nil, heading: nil, fromGallery: true)
         }
     }
 
-    private func upload(imageData: Data, dinoHint: Int? = nil) async {
-        let pdr = sensorSession.pdrPosition
-        let heading = sensorSession.currentHeading
+    /// `raw` / `mapPosition` / `heading` are the sensor state when the photo was taken
+    /// (nil for gallery photos). `mapPosition` is nil until the first photo fix — the raw
+    /// PDR frame starts wherever tracking began and means nothing on the map.
+    private func upload(imageData: Data, dino: DINOResult, raw: (x: Double, y: Double)?,
+                        mapPosition: (x: Double, y: Double)?, distanceSinceFix: Double?,
+                        fixNode: Int?, heading: Double?, fromGallery: Bool) async {
         do {
             let response = try await NavigationAPI.shared.uploadPhoto(
                 sessionId: sessionId,
                 imageData: imageData,
-                dinoNodeHint: dinoHint,
-                pdrX: pdr.x,
-                pdrY: pdr.y,
-                heading: heading
+                dinoNodeHint: dino.hint,
+                dinoTopK: dino.topK,
+                pdrX: raw?.x,
+                pdrY: raw?.y,
+                mapPosition: mapPosition,
+                distanceSinceFix: mapPosition != nil ? distanceSinceFix : nil,
+                fixNode: mapPosition != nil ? fixNode : nil,
+                heading: heading,
+                fromGallery: fromGallery
             )
             await MainActor.run {
-                applyTurn(response)
+                applyTurn(response, rawAtCapture: raw)
                 isUploading = false
                 galleryItem = nil
             }
@@ -639,6 +801,46 @@ struct NavigationCameraView: View {
                 await MainActor.run {
                     errorMessage = "確認失敗: \(error.localizedDescription)"
                     isConfirming = false
+                }
+            }
+        }
+    }
+}
+
+/// How to take a navigation photo — shown on first use and from the "?" button.
+/// The reference map was photographed upright, facing along the aisle, so photos taken
+/// the same way match it best (item 8 of the localization review).
+private struct PhotoGuideView: View {
+    let onDone: () -> Void
+
+    private let tips: [(icon: String, title: String, detail: String)] = [
+        ("iphone", "手機拿直", "直立拿在胸前高度，不要朝地板或天花板拍。畫面歪斜時下方會提示。"),
+        ("arrow.up.forward", "對準走道前方", "沿著走道往前拍，拍到走道的延伸，而不是貼著貨架拍單一商品。"),
+        ("signpost.right", "拍到招牌或吊牌", "走道編號、天花板吊牌、區域招牌是最好的定位線索。"),
+        ("person.2.slash", "避開人和推車", "前方有人或推車擋住時，等一下或換個角度；被擋住的照片不會用來校正位置。"),
+        ("hand.raised", "停一下再按", "走路中拍容易模糊；停一秒、拿穩再按拍照。太暗時開閃光燈。"),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            List(tips, id: \.title) { tip in
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: tip.icon)
+                        .font(.title3)
+                        .foregroundStyle(.blue)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(tip.title).font(.headline)
+                        Text(tip.detail).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .navigationTitle("怎麼拍定位照片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("知道了", action: onDone)
                 }
             }
         }

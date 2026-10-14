@@ -108,6 +108,9 @@ GENERIC_INDOOR_OBJECTS = [
     "bulletin board", "notice board",
     # 額外補充
     "refrigerator", "water dispenser", "shelf", "trash can", "poster",
+    # occluders — detected so photo_quality can warn when they block the view;
+    # dropped from localization items (server._build_localization_items)
+    "person", "shopping cart",
 ]
 
 # TASK 3 — crop-verify a goal detection with the VLM before trusting it.
@@ -126,6 +129,41 @@ OCR_MAX_RESULTS = int(os.environ.get("OCR_MAX_RESULTS", "15"))
 
 # Grid size for spatial matching (3 = 3×3, 4 = 4×4, 5 = 5×5)
 GRID_N = int(os.environ.get("GRID_N", "4"))
+
+# Localization fusion weights "dino,sensor,grid" (see server/loc_fusion.py).
+# Only applies when the phone sends DINOv2 top-K and/or a calibrated map position;
+# "0,0,1" restores grid-only localization.
+LOC_FUSION_WEIGHTS = os.environ.get("LOC_FUSION_WEIGHTS", "4,1,1")
+
+# Adaptive fusion (eval/fusion_sweep.py policy): when the phone sends the distance
+# walked since its last photo fix, the sensor weight follows the expected PDR error
+#   σ = LOC_SENSOR_SIGMA0 + LOC_DRIFT_RATE · distance,  w_sensor = min(CAP, C / σ)
+# and the dino / grid weights come from LOC_FUSION_WEIGHTS. LOC_DRIFT_RATE should be
+# re-measured with SensorTestView on known routes.
+LOC_FUSION_ADAPTIVE = os.environ.get("LOC_FUSION_ADAPTIVE", "1") != "0"
+LOC_SENSOR_SIGMA0 = float(os.environ.get("LOC_SENSOR_SIGMA0", "1.0"))
+LOC_DRIFT_RATE = float(os.environ.get("LOC_DRIFT_RATE", "0.05"))
+LOC_SENSOR_C = float(os.environ.get("LOC_SENSOR_C", "40"))
+LOC_SENSOR_CAP = float(os.environ.get("LOC_SENSOR_CAP", "40"))
+# Scale the grid weight by min(1, detected_objects / N); 0 = off (the sweep found no gain).
+LOC_GRID_NFULL = float(os.environ.get("LOC_GRID_NFULL", "0"))
+# Scale the DINOv2 weight by min(1, (top1 − top2 cosine) / G); 0 = off.
+LOC_DINO_GAP_FULL = float(os.environ.get("LOC_DINO_GAP_FULL", "0.05"))
+
+# v2 fusion (loc_fusion.fuse_v2): posterior over every node from image evidence, the
+# phone's map position (Gaussian, σ from distance walked) and walkability from the last
+# fix. Replaces the weighted average above whenever the phone sends DINOv2 / position.
+LOC_FUSION_V2 = os.environ.get("LOC_FUSION_V2", "1") != "0"
+# Ask for a second photo (turn ~90° on the spot) when the best node's probability is
+# below this; the next photo within SECOND_PHOTO_WINDOW_S and < SECOND_PHOTO_MAX_MOVE_M
+# of walking adds its image evidence to this one's.
+SECOND_PHOTO_BELOW = float(os.environ.get("SECOND_PHOTO_BELOW", "0.4"))
+SECOND_PHOTO_WINDOW_S = float(os.environ.get("SECOND_PHOTO_WINDOW_S", "120"))
+SECOND_PHOTO_MAX_MOVE_M = float(os.environ.get("SECOND_PHOTO_MAX_MOVE_M", "3"))
+
+# Grid-matching weight overrides, e.g. "landmark=6,ocr=3,rarity_mode=idf"
+# (keys: see visual_localization.apply_weight_overrides). Empty = code defaults.
+LOC_GRID_WEIGHTS = os.environ.get("LOC_GRID_WEIGHTS", "")
 
 # VLM multi-round perception (3 = run 3 rounds, keep stable detections appearing 2+/3)
 VLM_ROUNDS = int(os.environ.get("VLM_ROUNDS", "1"))

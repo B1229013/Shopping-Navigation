@@ -42,6 +42,9 @@ class Session:
     false_positive_nodes: List[int] = field(default_factory=list)
     repeated_misidentification_count: int = 0
     last_corrected_nid: Optional[int] = None   # Neo4j reference node from visual localization
+    # Second-photo request: image evidence of an unsure photo, combined with the next
+    # one taken from (almost) the same place — {"evidence": {nid: v}, "t": epoch s, "raw": (x, y)}
+    pending_view: Optional[dict] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
 
     # ── Heading / orientation ──────────────────────────────────────

@@ -99,6 +99,8 @@ from server.vlm import (
     ask_about_image as _vlm_ask_about_image,
 )
 from server.neo4j_client import get_neo4j
+from server import aisle_signs, photo_quality
+from server.loc_fusion import adaptive_weights, dino_gap, parse_dino_topk, parse_weights, sensor_sigma
 from server.visual_localization import (
     localize as _localize_photo, vlm_rerank as _vlm_rerank,
     rerank_candidates as _rerank_candidates,
@@ -612,7 +614,8 @@ def _path_from_current(ref_map, current_nid, leg_path: list[int], target_nid: in
 
 def _build_route_context(s, loc_result, detections=None,
                          img_w: int = 0, img_h: int = 0,
-                         ocr_results=None) -> tuple[str | None, str | None]:
+                         ocr_results=None,
+                         is_first_localization: bool = False) -> tuple[str | None, str | None]:
     """Build a route context string for the VLM prompt + a one-line next instruction.
 
     Returns (route_context_block, next_instruction).
@@ -1019,6 +1022,8 @@ def _build_localization_items(detections, ocr_results, img_w, img_h):
     """
     items = []
     for d in detections:
+        if photo_quality.is_occluder(d.label):
+            continue   # people / carts move around — never part of the reference map
         box = getattr(d, 'box', None) or getattr(d, 'bbox', None)
         if box and len(box) == 4 and not isinstance(box[0], (list, tuple)):
             norm_box = [box[0] / img_w, box[1] / img_h,
@@ -1050,9 +1055,61 @@ def _build_ocr_items(ocr_results, img_w, img_h):
     return items
 
 
+def _phone_localization_inputs(dino_topk, dino_node_hint, map_x, map_y,
+                               dist_since_fix=None, fix_node=None) -> dict:
+    """The phone's own localization signals from the /photo form, for loc_fusion."""
+    pos = (map_x, map_y) if map_x is not None and map_y is not None else None
+    return {
+        "dino_sims": parse_dino_topk(dino_topk, dino_node_hint),
+        "sensor_pos": pos,
+        "dist_since_fix": dist_since_fix if pos is not None else None,
+        "fix_node": fix_node if pos is not None else None,
+    }
+
+
+def _reachable_nodes(ref_map, fix_node, dist_since_fix):
+    """Nodes walkable from the phone's last accepted fix within 1.5 × the distance
+    walked since + 8 m (walkway graph, so a node behind a shelf is far)."""
+    import heapq
+    if fix_node is None or dist_since_fix is None or fix_node not in ref_map.photos:
+        return None
+    limit = 1.5 * dist_since_fix + 8.0
+    best = {fix_node: 0.0}
+    heap = [(0.0, fix_node)]
+    while heap:
+        d, n = heapq.heappop(heap)
+        if d > best.get(n, float("inf")) or d > limit:
+            continue
+        a = ref_map.photos[n]
+        for m in a.neighbor_nids:
+            if m not in ref_map.photos:
+                continue
+            b = ref_map.photos[m]
+            nd = d + math.hypot(a.pdr_x - b.pdr_x, a.pdr_y - b.pdr_y)
+            if nd <= limit and nd < best.get(m, float("inf")):
+                best[m] = nd
+                heapq.heappush(heap, (nd, m))
+    return set(best)
+
+
+def _fusion_weights_for(dist_since_fix, n_objects, dino_sims=None):
+    """LOC_FUSION_WEIGHTS, adapted per photo (LOC_FUSION_ADAPTIVE): the sensor weight
+    follows the expected PDR error for the distance walked since the last photo fix,
+    and the DINOv2 weight follows DINOv2's own top-1 vs top-2 margin."""
+    base = parse_weights(_config.LOC_FUSION_WEIGHTS)
+    if not _config.LOC_FUSION_ADAPTIVE:
+        return base
+    sigma = sensor_sigma(dist_since_fix, _config.LOC_SENSOR_SIGMA0, _config.LOC_DRIFT_RATE)
+    return adaptive_weights(base, sigma, n_objects, c=_config.LOC_SENSOR_C,
+                            cap=_config.LOC_SENSOR_CAP, n_full=_config.LOC_GRID_NFULL,
+                            gap=dino_gap(dino_sims or {}), gap_full=_config.LOC_DINO_GAP_FULL)
+
+
 def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                             detected_items=None, image_path=None,
-                            store_zone=None, ocr_items=None):
+                            store_zone=None, ocr_items=None,
+                            dino_sims=None, sensor_pos=None, dist_since_fix=None,
+                            fix_node=None, extra_evidence=None, sign_numbers=None):
     """Run Neo4j localization early (before VLM decide) so route context is available.
 
     Returns the LocalizationResult, or None if localization is skipped/failed.
@@ -1070,6 +1127,23 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
         log.warning("🔴 [session %s] _run_early_localization: Neo4j not connected — skipped", session_id)
         return None
     try:
+        v2_kwargs = {}
+        if _config.LOC_FUSION_V2:
+            ref_for_v2 = neo4j.load_reference_map(s.place)
+            numbers = dict(aisle_signs.numbers_in_items(detected_items or []))
+            for n, a in (sign_numbers or {}).items():
+                numbers[n] = max(numbers.get(n, 0.0), a)
+            aisle_ev = aisle_signs.sign_evidence(numbers, ref_for_v2, s.place) if numbers else None
+            if numbers:
+                log.info("[session %s] aisle signs seen: %s", session_id,
+                         {n: round(a, 4) for n, a in sorted(numbers.items())})
+            v2_kwargs = dict(
+                v2=True,
+                sensor_sigma=sensor_sigma(dist_since_fix, _config.LOC_SENSOR_SIGMA0, _config.LOC_DRIFT_RATE),
+                reachable=_reachable_nodes(ref_for_v2, fix_node, dist_since_fix),
+                extra_evidence=extra_evidence,
+                aisle_evidence=aisle_ev,
+            )
         loc_result = _localize_photo(
             detected_labels=detected_labels,
             ocr_texts=ocr_texts,
@@ -1080,6 +1154,12 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             store_zone=store_zone,
             ocr_items=ocr_items,
             grid_n=_config.GRID_N,
+            dino_sims=dino_sims,
+            sensor_pos=sensor_pos,
+            fusion_weights=_fusion_weights_for(
+                dist_since_fix, len(detected_items) if detected_items else len(detected_labels),
+                dino_sims),
+            **v2_kwargs,
         )
 
         ref_map = neo4j.load_reference_map(s.place)
@@ -1481,9 +1561,15 @@ async def upload_photo(
     session_id: str,
     photo: UploadFile = File(...),
     dino_node_hint: Optional[int] = Form(None),
+    dino_topk: Optional[str] = Form(None),
     pdr_x: Optional[float] = Form(None),
     pdr_y: Optional[float] = Form(None),
+    map_x: Optional[float] = Form(None),
+    map_y: Optional[float] = Form(None),
+    dist_since_fix: Optional[float] = Form(None),
+    fix_node: Optional[int] = Form(None),
     heading: Optional[float] = Form(None),
+    source: Optional[str] = Form(None),
 ) -> TurnResponse:
     s = _store.get(session_id)
     if s is None:
@@ -1500,6 +1586,29 @@ async def upload_photo(
                  session_id, dino_node_hint,
                  pdr_x or 0, pdr_y or 0,
                  f"{heading:.1f}" if heading is not None else "N/A")
+    if source == "gallery":
+        # A gallery photo was taken some other time: the live heading / position
+        # describe where the phone is now, not where the photo was taken.
+        heading = map_x = map_y = dist_since_fix = fix_node = None
+    _phone_loc = _phone_localization_inputs(dino_topk, dino_node_hint, map_x, map_y,
+                                            dist_since_fix, fix_node)
+    _prev_corrected_nid = s.last_corrected_nid
+    # A second photo asked for by the previous turn: same spot (little walking), soon after
+    _second_view = None
+    if s.pending_view is not None:
+        pv = s.pending_view
+        moved = (math.hypot(pdr_x - pv["raw"][0], pdr_y - pv["raw"][1])
+                 if pdr_x is not None and pdr_y is not None and pv.get("raw") else 0.0)
+        if time.time() - pv["t"] <= _config.SECOND_PHOTO_WINDOW_S and moved <= _config.SECOND_PHOTO_MAX_MOVE_M:
+            _second_view = pv["evidence"]
+            log.info("[session %s] combining with the previous photo (moved %.1f m)", session_id, moved)
+        s.pending_view = None
+    _phone_loc["extra_evidence"] = _second_view
+    if _phone_loc["dino_sims"] or _phone_loc["sensor_pos"]:
+        log.info("[session %s] phone localization: dino_topk=%s map_pos=%s dist_since_fix=%s",
+                 session_id,
+                 sorted(_phone_loc["dino_sims"].items(), key=lambda kv: -kv[1])[:5],
+                 _phone_loc["sensor_pos"], _phone_loc["dist_since_fix"])
 
     t_start = time.time()
     out_dir = ensure_output_dir(session_id)
@@ -1520,6 +1629,21 @@ async def upload_photo(
     im.save(photo_path, format="JPEG", quality=85)
     log.info("Photo %s %dx%d", "resized" if resized else "saved", img_w, img_h)
     im.close()
+
+    # Blurred / dark photos can't be localized — ask for a retake before spending
+    # any detector or VLM time on them.
+    _quality = photo_quality.assess_image(str(photo_path))
+    log.info("[session %s] photo quality: sharpness=%.0f brightness=%.0f",
+             session_id, _quality.sharpness, _quality.brightness)
+    if _quality.hint:
+        log.info("[session %s] photo rejected: %s", session_id, _quality.hint)
+        _g_items, _v_items, _c_target = _shopping_progress(s)
+        return TurnResponse(
+            action=VLMAction.MOVE, guidance=_quality.hint, retake_hint=_quality.hint,
+            node_id=-1, phase=s.phase, goal_item_names=_g_items,
+            visited_item_names=_v_items, current_target_name=_c_target,
+            goal_node_id=_current_goal_node_id(s),
+        )
 
     t_resize = time.time()
 
@@ -1577,10 +1701,13 @@ async def upload_photo(
         _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
                                              detected_items=_loc_items,
                                              image_path=str(photo_path),
-                                             ocr_items=_ocr_items)
+                                             ocr_items=_ocr_items,
+                                             sign_numbers=aisle_signs.numbers_from_ocr(ocr_results, img_w, img_h),
+                                             **_phone_loc)
         _apply_phone_heading(s, _early_loc, heading)
         _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
-                                                       img_w=img_w, img_h=img_h, ocr_results=ocr_results)
+                                                       img_w=img_w, img_h=img_h, ocr_results=ocr_results,
+                                                       is_first_localization=_prev_corrected_nid is None)
 
         if _route_ctx:
             log.info("🟢 [session %s] VLM will receive route context (%d chars), next_instr=%s",
@@ -1739,10 +1866,13 @@ async def upload_photo(
                                              detected_items=_loc_items,
                                              image_path=str(photo_path),
                                              store_zone=_store_zone,
-                                             ocr_items=_ocr_items)
+                                             ocr_items=_ocr_items,
+                                             sign_numbers=aisle_signs.numbers_from_ocr(ocr_results, img_w, img_h),
+                                             **_phone_loc)
         _apply_phone_heading(s, _early_loc, heading)
         _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
-                                                       img_w=img_w, img_h=img_h, ocr_results=ocr_results)
+                                                       img_w=img_w, img_h=img_h, ocr_results=ocr_results,
+                                                       is_first_localization=_prev_corrected_nid is None)
 
         # ── Store debug info ──
         _loc_debug = {}
@@ -1973,11 +2103,33 @@ async def upload_photo(
     # the decide step. Mode A ran it with GroundingDINO labels earlier.
     loc_result = _early_loc
 
+    # Occluded view (people / carts in front of the camera) or almost nothing
+    # recognisable: don't let this photo move the user's position.
+    _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h)
+    _retake_hint = _occlusion.hint
+    if _retake_hint:
+        log.info("[session %s] retake: %s (occluded %.0f%%, %d useful objects) — "
+                 "localization not applied", session_id, _retake_hint,
+                 100 * _occlusion.fraction, _occlusion.useful_objects)
+        s.last_corrected_nid = _prev_corrected_nid
+        loc_result = None
+
+    # Several places look alike: ask for one more photo from the same spot and combine.
+    _second_photo_hint = None
+    if (loc_result is not None and loc_result.image_evidence is not None and _second_view is None
+            and loc_result.confidence < _config.SECOND_PHOTO_BELOW):
+        s.pending_view = {"evidence": loc_result.image_evidence, "t": time.time(),
+                          "raw": (pdr_x, pdr_y) if pdr_x is not None and pdr_y is not None else None}
+        _second_photo_hint = "這附近有幾個地方很像，請原地向左轉 90° 再拍一張，兩張一起判斷"
+        log.info("[session %s] unsure (p=%.2f) — asking for a second photo", session_id, loc_result.confidence)
+
     # VLM already receives route_context (map + path plan) in its prompt,
     # so its guidance is photo-aware AND route-aware.  No override needed.
     _final_guidance = vlm_resp.guidance
     _route_step = _next_instr if _next_instr != LOCALIZE_FAILED_HINT else None
-    if vlm_resp.action == VLMAction.MOVE and _route_step:
+    if _retake_hint and vlm_resp.action == VLMAction.MOVE:
+        _final_guidance = _retake_hint
+    elif vlm_resp.action == VLMAction.MOVE and _route_step:
         _final_guidance = _route_step
         log.info("[session %s] route-first: overriding VLM guidance with next_instruction", session_id)
     elif vlm_resp.action == VLMAction.MOVE and not _route_step:
@@ -2000,9 +2152,13 @@ async def upload_photo(
         question=vlm_resp.question,
         node_id=nid,
         annotated_photo_url=f"/session/{session_id}/photo/{nid}.jpg",
+        retake_hint=_retake_hint,
+        second_photo_hint=_second_photo_hint,
         corrected_node_id=loc_result.matched_nid if loc_result else None,
         corrected_confidence=round(loc_result.confidence, 3) if loc_result else None,
         corrected_location=_ref_location_name(loc_result) if loc_result else None,
+        estimated_x=round(loc_result.estimated_xy[0], 2) if loc_result and loc_result.estimated_xy else None,
+        estimated_y=round(loc_result.estimated_xy[1], 2) if loc_result and loc_result.estimated_xy else None,
         heading_deg=round(loc_result.matched_heading, 1) if loc_result and loc_result.matched_heading is not None else None,
         heading_slot=loc_result.matched_slot if loc_result else None,
         heading_confidence=round(loc_result.heading_confidence, 3) if loc_result else None,
@@ -2714,9 +2870,18 @@ def get_reference_map(place: str = Query(default="")):
 
 
 @app.post("/test/config")
-def set_test_config(grid_n: int = Query(default=None), vlm_rounds: int = Query(default=None), vlm_pass3: bool = Query(default=None)):
-    """Runtime config override for testing different grid sizes and VLM rounds."""
+def set_test_config(grid_n: int = Query(default=None), vlm_rounds: int = Query(default=None), vlm_pass3: bool = Query(default=None),
+                    fusion_weights: str = Query(default=None)):
+    """Runtime config override for testing different grid sizes, VLM rounds and
+    localization fusion weights ("dino,sensor,grid", e.g. "5,1,1")."""
     changed = {}
+    if fusion_weights is not None:
+        try:
+            parse_weights(fusion_weights)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail={"error": "bad_fusion_weights", "detail": str(e)})
+        _config.LOC_FUSION_WEIGHTS = fusion_weights
+        changed["fusion_weights"] = fusion_weights
     if grid_n is not None and grid_n in (3, 4, 5):
         _config.GRID_N = grid_n
         changed["grid_n"] = grid_n
@@ -2726,7 +2891,8 @@ def set_test_config(grid_n: int = Query(default=None), vlm_rounds: int = Query(d
     if vlm_pass3 is not None:
         _config.VLM_PASS3 = vlm_pass3
         changed["vlm_pass3"] = vlm_pass3
-    return {"status": "ok", "changed": changed, "current": {"grid_n": _config.GRID_N, "vlm_rounds": _config.VLM_ROUNDS, "vlm_pass3": _config.VLM_PASS3}}
+    return {"status": "ok", "changed": changed, "current": {"grid_n": _config.GRID_N, "vlm_rounds": _config.VLM_ROUNDS, "vlm_pass3": _config.VLM_PASS3,
+                                                    "fusion_weights": _config.LOC_FUSION_WEIGHTS}}
 
 
 # ══════════════════════════════════════════════════════════════════════════

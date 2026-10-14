@@ -33,6 +33,7 @@ import numpy as np
 import requests
 from PIL import Image, ImageOps
 
+from server.loc_fusion import FusionWeights, estimate_position, fuse_candidates, fuse_v2, image_evidence
 from server.neo4j_client import Neo4jClient, RefMap, RefPhotoNode
 
 log = logging.getLogger(__name__)
@@ -135,6 +136,11 @@ class LocalizationResult:
 
     top_candidates: list = None  # [(nid, score, reason), ...] for optional re-ranking
 
+    # Map position between nodes (score-weighted mean of the top candidates), metres
+    estimated_xy: Optional[tuple] = None
+    # v2 fusion: this photo's own image evidence per node (kept for a second photo)
+    image_evidence: Optional[dict] = None
+
 
 # ── Grid-based weighted matching (primary) ────────────────────────────────
 
@@ -202,6 +208,40 @@ WEIGHT_GENERIC = 0.3
 RARITY_ALPHA = 1.0
 SPATIAL_BONUS_COEFF = 0.10
 IDF_AGGRESSIVE_THRESHOLD = 0.35
+# "cap"  — legacy: sim·(1+rarity·α) capped at 1.0, so an exact match (sim=1) gets no
+#          rarity credit at all and rarity only nudges partial matches.
+# "idf"  — every query object's weight is scaled by (1+rarity·α) in both numerator
+#          and denominator: rare objects count more whether matched or missed, and
+#          the score stays in [0, 1].
+RARITY_MODE = "cap"
+
+_OVERRIDABLE = {
+    "landmark": "WEIGHT_LANDMARK", "sign": "WEIGHT_SIGN", "equipment": "WEIGHT_EQUIPMENT",
+    "normal": "WEIGHT_NORMAL", "generic": "WEIGHT_GENERIC", "ocr": "WEIGHT_OCR",
+    "rarity_alpha": "RARITY_ALPHA", "spatial": "SPATIAL_BONUS_COEFF", "rarity_mode": "RARITY_MODE",
+}
+
+
+def apply_weight_overrides(spec) -> Dict[str, object]:
+    """Override grid-matching weights, e.g. "landmark=6,ocr=3,rarity_mode=idf" or a dict.
+
+    Returns the values now in effect. Unknown keys raise ValueError.
+    """
+    if isinstance(spec, str):
+        spec = dict(kv.split("=", 1) for kv in spec.split(",") if kv.strip())
+    g = globals()
+    for key, val in (spec or {}).items():
+        key = key.strip()
+        if key not in _OVERRIDABLE:
+            raise ValueError(f"unknown grid weight {key!r}; choose from {sorted(_OVERRIDABLE)}")
+        if key == "rarity_mode":
+            val = str(val).strip()
+            if val not in ("cap", "idf"):
+                raise ValueError("rarity_mode must be 'cap' or 'idf'")
+        else:
+            val = float(val)
+        g[_OVERRIDABLE[key]] = val
+    return {k: g[v] for k, v in _OVERRIDABLE.items()}
 
 
 def _size_importance(bbox_area: float) -> float:
@@ -513,9 +553,14 @@ def weighted_grid_match(
     obj_matches: list[tuple] = []
 
     used: set[int] = set()
+    idf_mode = RARITY_MODE == "idf" and bool(rarity_map)
     for qi in query_items:
         ql, qw = qi["label"], qi["weight"]
         si = _size_importance(qi.get("bbox_area", 0.0))
+        if idf_mode:
+            # rarity of the query object itself, so the weight is the same for every
+            # candidate node; labels never seen in the map count as fully rare
+            qw *= 1.0 + rarity_map.get(ql, 1.0) * RARITY_ALPHA
         total_possible += qw * si
 
         best_s, best_m, best_i = 0.0, None, -1
@@ -529,7 +574,7 @@ def weighted_grid_match(
         if best_m and best_s > 0.25:
             used.add(best_i)
             combined = best_s
-            if rarity_map:
+            if rarity_map and not idf_mode:
                 rarity = rarity_map.get(best_m, 0.0)
                 combined = min(combined * (1.0 + rarity * RARITY_ALPHA), 1.0)
             ew = qw * si
@@ -903,6 +948,14 @@ def localize(
     store_zone: Optional[str] = None,
     ocr_items: Optional[List[dict]] = None,
     grid_n: int = 3,
+    dino_sims: Optional[Dict[int, float]] = None,
+    sensor_pos: Optional[tuple] = None,
+    fusion_weights: Optional[FusionWeights] = None,
+    v2: bool = False,
+    sensor_sigma: Optional[float] = None,
+    reachable: Optional[set] = None,
+    extra_evidence: Optional[Dict[int, float]] = None,
+    aisle_evidence: Optional[Dict[int, float]] = None,
 ) -> LocalizationResult:
     """Match a user's live photo detections against the Neo4j reference map.
 
@@ -933,6 +986,40 @@ def localize(
     else:
         candidates = match_by_objects(detected_labels, ocr_texts, ref_map, top_k=10)
         match_method = "object_set"
+
+    node_xy = {nid: (n.pdr_x, n.pdr_y) for nid, n in ref_map.photos.items()}
+    if v2 and (dino_sims or sensor_pos is not None or extra_evidence):
+        dsims = {n: s for n, s in (dino_sims or {}).items() if n in ref_map.photos}
+        ev = image_evidence(candidates, dsims, aisle_evidence)
+        combined = dict(ev)
+        for nid, v in (extra_evidence or {}).items():
+            combined[nid] = combined.get(nid, 0.0) + v
+        post = fuse_v2(combined, node_xy, sensor_pos=sensor_pos,
+                       sigma=sensor_sigma if sensor_pos is not None else None, reachable=reachable)
+        log.info("v2 localization top3: %s%s", [(c[0], round(c[1], 3)) for c in post[:3]],
+                 " (with previous photo)" if extra_evidence else "")
+        best_nid, best_p, best_reason = post[0]
+        matched_ref = ref_map.photos.get(best_nid)
+        matched_heading, matched_slot, heading_conf = estimate_node_heading(
+            matched_ref, detected_labels, ocr_texts, best_p)
+        return LocalizationResult(
+            matched_nid=best_nid, confidence=best_p, method=match_method + "+v2",
+            reasoning=best_reason, ref_node=matched_ref,
+            runner_up_nid=post[1][0] if len(post) > 1 else None,
+            runner_up_score=post[1][1] if len(post) > 1 else 0.0,
+            matched_heading=matched_heading, matched_slot=matched_slot, heading_confidence=heading_conf,
+            top_candidates=post[:5], estimated_xy=estimate_position(post, node_xy), image_evidence=ev,
+        )
+
+    if fusion_weights is not None and (dino_sims or sensor_pos is not None):
+        fused = fuse_candidates(candidates, {n: s for n, s in (dino_sims or {}).items()
+                                             if n in ref_map.photos},
+                                sensor_pos, node_xy, fusion_weights)
+        if fused is not candidates:
+            candidates = fused
+            match_method += "+fused"
+            log.info("Fused localization top3: %s",
+                     [(c[0], round(c[1], 3), c[2].split("]")[0] + "]") for c in candidates[:3]])
 
     if not candidates:
         return LocalizationResult(
@@ -1008,6 +1095,8 @@ def localize(
         matched_slot=matched_slot,
         heading_confidence=heading_conf,
         top_candidates=candidates[:5],
+        estimated_xy=estimate_position(
+            candidates, {n: (p.pdr_x, p.pdr_y) for n, p in ref_map.photos.items()}),
     )
 
 
@@ -1264,3 +1353,9 @@ def vlm_rerank(
             continue
 
     return candidates
+
+
+# Apply LOC_GRID_WEIGHTS last, after every weight constant above is defined.
+from server.config import LOC_GRID_WEIGHTS as _LOC_GRID_WEIGHTS  # noqa: E402
+if _LOC_GRID_WEIGHTS:
+    log.info("grid weights override: %s", apply_weight_overrides(_LOC_GRID_WEIGHTS))

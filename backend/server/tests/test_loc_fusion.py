@@ -153,6 +153,7 @@ def test_run_early_localization_passes_phone_inputs_to_localize():
     s = Session(id="t", goal="milk", goal_objects=["milk"], place="test")
     result = vl.LocalizationResult(matched_nid=None, confidence=0.0, method="none", reasoning="")
     with patch("server.server.get_neo4j", return_value=_FakeNeo4j(_ref_map())), \
+         patch.object(srv._config, "LOC_FUSION_V2", False), \
          patch("server.server._localize_photo", return_value=result) as loc:
         srv._run_early_localization(s, "sid", ["shelf"], [],
                                     dino_sims={3: 0.9}, sensor_pos=(1.0, 2.0), dist_since_fix=20.0)
@@ -165,6 +166,21 @@ def test_run_early_localization_passes_phone_inputs_to_localize():
     assert w.sensor == pytest.approx(20.0)
     # a single DINOv2 entry has no runner-up → dino weight unscaled
     assert w.dino == 4.0
+
+
+def test_v2_does_not_need_the_v1_weights():
+    # v2 never reads LOC_FUSION_WEIGHTS, so a bad value there must not stop localization
+    from server import server as srv
+    from server.session import Session
+    s = Session(id="t", goal="milk", goal_objects=["milk"], place="test")
+    result = vl.LocalizationResult(matched_nid=None, confidence=0.0, method="none", reasoning="")
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(_ref_map())), \
+         patch.object(srv._config, "LOC_FUSION_V2", True), \
+         patch.object(srv._config, "LOC_FUSION_WEIGHTS", "not,a,number"), \
+         patch("server.server._localize_photo", return_value=result) as loc:
+        out = srv._run_early_localization(s, "sid", ["shelf"], [], dino_sims={3: 0.9})
+    assert out is result and loc.call_args.kwargs["fusion_weights"] is None
+    assert loc.call_args.kwargs["v2"] is True
 
 
 def test_test_config_sets_fusion_weights():
@@ -287,3 +303,58 @@ def test_reachable_nodes_follow_the_walkway():
     assert srv._reachable_nodes(m, 1, 0.0) == {1, 2}          # 8 m budget
     assert srv._reachable_nodes(m, 1, 30.0) == {1, 2, 3}      # 53 m budget
     assert srv._reachable_nodes(m, None, 30.0) is None
+
+
+def test_reachable_nodes_walk_one_way_links_both_ways():
+    # the reference map stores most walkway links in one direction only
+    from server import server as srv
+    m = RefMap(place="t")
+    for nid, (x, y), nbrs in [(1, (0, 0), []), (2, (5, 0), [1]), (3, (10, 0), [2])]:
+        n = _node(nid, x, y)
+        n.neighbor_nids = nbrs
+        m.photos[nid] = n
+    assert srv._reachable_nodes(m, 1, 10.0) == {1, 2, 3}
+    assert srv._reachable_nodes(m, 3, 10.0) == {1, 2, 3}
+
+
+def test_phone_inputs_drop_non_finite_numbers():
+    from server import server as srv
+    nan, inf = float("nan"), float("inf")
+    assert srv._phone_localization_inputs(None, None, nan, 2.0, 5.0, 7)["sensor_pos"] is None
+    assert srv._phone_localization_inputs(None, None, 1.0, inf, 5.0, 7)["sensor_pos"] is None
+    for bad in (nan, inf, -3.0):
+        out = srv._phone_localization_inputs(None, None, 1.0, 2.0, bad, 7)
+        assert out["sensor_pos"] == (1.0, 2.0) and out["dist_since_fix"] is None
+
+
+def test_parse_dino_topk_skips_non_finite():
+    assert parse_dino_topk('[{"nid": 1, "sim": NaN}, {"nid": 2, "sim": 0.8}]', None) == {2: 0.8}
+    assert parse_dino_topk('[{"nid": Infinity, "sim": 0.8}]', None) == {}
+
+
+def test_localize_v2_spread_posterior_names_no_node():
+    m = RefMap(place="test")
+    for nid in range(1, 21):
+        m.photos[nid] = _node(nid, float(nid), 0.0)
+    with patch.object(vl, "match_by_objects", return_value=[]):
+        out = vl.localize(["shelf"], [], _FakeNeo4j(m), place="test", v2=True,
+                          dino_sims={n: 0.5 for n in range(1, 21)})
+    assert out.matched_nid is None and out.ref_node is None
+    assert out.confidence == pytest.approx(1 / 20)
+    assert out.image_evidence is not None and len(out.top_candidates) == 5   # kept for a second photo
+
+
+def test_aisle_signs_only_for_configured_places():
+    from server import server as srv
+    from server.session import Session
+    result = vl.LocalizationResult(matched_nid=None, confidence=0.0, method="none", reasoning="")
+    for place, used in [("test", True), ("other store", False)]:
+        s = Session(id="t", goal="milk", goal_objects=["milk"], place=place)
+        with patch("server.server.get_neo4j", return_value=_FakeNeo4j(_ref_map())), \
+             patch.object(srv._config, "AISLE_SIGN_PLACES", {"test"}), \
+             patch("server.server.aisle_signs.sign_evidence", return_value={1: 1.0}) as ev, \
+             patch("server.server._localize_photo", return_value=result) as loc:
+            srv._run_early_localization(s, "sid", ["shelf"], [], dino_sims={1: 0.9},
+                                        sign_numbers={12: 0.02})
+        assert ev.called is used
+        assert loc.call_args.kwargs["aisle_evidence"] == ({1: 1.0} if used else None)

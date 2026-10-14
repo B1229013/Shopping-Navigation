@@ -39,8 +39,9 @@ final class RouteFollowerModel: ObservableObject {
                 response = try await NavigationAPI.shared.getPath(
                     sessionId: sessionId, x: s.position.x, y: s.position.y, heading: s.headingDegrees)
             } else {
+                // map heading once photo fixes have calibrated the compass
                 response = try await NavigationAPI.shared.getPath(sessionId: sessionId,
-                                                                 heading: pdr?.headingDegrees)
+                                                                 heading: lastMapHeading ?? pdr?.headingDegrees)
             }
             route = response
             let polyline = response.polyline.map { CGPoint(x: $0[0], y: $0[1]) }

@@ -51,10 +51,11 @@ def parse_dino_topk(raw: Optional[str], hint: Optional[int]) -> Dict[int, float]
     """
     if raw:
         try:
-            return {int(e["nid"]): float(e["sim"]) for e in json.loads(raw)}
-        except (ValueError, TypeError, KeyError):
+            sims = {int(e["nid"]): float(e["sim"]) for e in json.loads(raw)}
+        except (ValueError, TypeError, KeyError, OverflowError):
             log.warning("ignoring malformed dino_topk: %.120s", raw)
             return {}
+        return {n: s for n, s in sims.items() if math.isfinite(s)}
     return {hint: 1.0} if hint is not None else {}
 
 
@@ -179,7 +180,7 @@ def fuse_candidates(
 IMAGE_K_MIN = 0.25         # image weight right after a fix (σ ≤ 2 m)
 IMAGE_K_MAX = 4.0          # image weight once the sensor has drifted (σ ≥ 5 m)
 IMAGE_K_NO_SENSOR = 2.0    # no map position yet: image only (calibrated confidence)
-AISLE_WEIGHT = 1.0          # only used with a hand-checked maps/aisles.json
+AISLE_WEIGHT = 1.0         # aisle-sign evidence (aisle_signs.sign_evidence; config AISLE_SIGN_PLACES)
 REACH_PENALTY = 3.0
 
 

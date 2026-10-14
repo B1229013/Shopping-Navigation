@@ -29,9 +29,17 @@ PARTIAL_OCCLUDED_FRACTION = 0.10
 
 # English as whole words ("person" must not match "personal care"); Chinese as substrings,
 # except 人/手 which only count on their own (人參, 手套 are products).
-_OCCLUDER_EN = re.compile(r"\b(person|people|man|woman|child|customer|shopper|hand|hands|"
-                          r"shopping cart|trolley)\b")
-_OCCLUDER_ZH = ("遮擋", "顧客", "店員", "推車", "購物車", "行人")
+# A label is an occluder when its head noun is one — English and Chinese noun phrases
+# end in the head ("shopping cart", "手推車"), so "hand soap", "customer service" and
+# "顧客服務台" are products / signs, not people. English labels are cut at the first
+# preposition or participle first ("person with cart", "hands holding phone").
+_OCCLUDER_EN_HEADS = {"person", "persons", "people", "man", "men", "woman", "women", "child",
+                      "children", "kid", "kids", "customer", "customers", "shopper", "shoppers",
+                      "pedestrian", "pedestrians", "hand", "hands", "cart", "carts",
+                      "trolley", "trolleys"}
+_EN_TAIL = re.compile(r"\s+(?:with|in|on|at|of|near|holding|pushing|walking|standing|blocking)\b.*$")
+_OCCLUDER_ZH_ENDINGS = ("顧客", "客人", "店員", "人員", "行人", "人群", "男人", "女人", "小孩",
+                        "推車", "購物車")
 _OCCLUDER_EXACT = {"人", "手"}
 
 HINT_BLUR = "照片太模糊，請拿穩手機、停一下再拍"
@@ -66,9 +74,11 @@ def is_occluder(label: str) -> bool:
     l = (label or "").strip().lower()
     if not l:
         return False
-    if l in _OCCLUDER_EXACT or any(w in l for w in _OCCLUDER_ZH):
+    # the perception prompt reports blockers as "遮擋物:人" / "遮擋物:推車"
+    if l in _OCCLUDER_EXACT or l.startswith("遮擋") or l.endswith(_OCCLUDER_ZH_ENDINGS):
         return True
-    return bool(_OCCLUDER_EN.search(l))
+    words = re.findall(r"[a-z]+", _EN_TAIL.sub("", l))
+    return bool(words) and words[-1] in _OCCLUDER_EN_HEADS
 
 
 @dataclass

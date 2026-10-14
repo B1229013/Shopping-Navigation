@@ -93,3 +93,9 @@ def test_sign_evidence_row_plus_walkway():
     assert ev[1] == ev[45] == 1.0             # same row, other walkways
     assert ev[30] == 1.5                      # walkway, one row over
     assert A.sign_evidence({12: 0.002}, m, table=t, walkway={40, 30})[40] == 1.0   # one sign: no walkway bonus
+
+
+def test_sign_evidence_ignores_rows_missing_from_the_map():
+    m = _map()
+    ev = A.sign_evidence({12: 0.02}, m, table={12: [99], 11: [99]}, walkway=set())
+    assert ev == {}

@@ -41,6 +41,11 @@ def test_dark_photo_asks_for_flash(tmp_path):
     ("person", True), ("shopping cart", True), ("遮擋物:人", True), ("購物車", True), ("人", True),
     ("personal care products", False), ("人參雞精", False), ("手套", False), ("shelf", False),
     ("handle", False),
+    # head noun decides: a product or a sign that merely names people is not a blocker
+    ("hand soap", False), ("customer service", False), ("customer service desk", False),
+    ("顧客服務台", False), ("顧客服務", False), ("洗手乳", False), ("cart corral sign", False),
+    ("person with shopping cart", True), ("hands holding phone", True), ("Shopper", True),
+    ("手推車", True), ("推著購物車的顧客", True), ("遮擋物:推車", True), ("工作人員", True),
 ])
 def test_is_occluder(label, expected):
     assert pq.is_occluder(label) is expected
@@ -113,9 +118,11 @@ def test_occluded_upload_sets_retake_hint_and_skips_localization():
     ]
     resp = VLMResponse(action=VLMAction.MOVE, guidance="go", question=None, vlm_summary="")
     with patch("server.server.get_perception", return_value=perception), \
-         patch("server.server.vlm_decide", return_value=resp):
+         patch("server.server.vlm_decide", return_value=resp), \
+         patch("server.server._run_early_localization") as early:
         body = client.post(f"/session/{sid}/photo",
                            files={"photo": ("p.jpg", _jpg(), "image/jpeg")}).json()
+    early.assert_not_called()          # no position, heading or route change from a blocked view
     assert body["retake_hint"] == pq.HINT_OCCLUDED
     assert body["guidance"] == pq.HINT_OCCLUDED
     assert body["corrected_node_id"] is None
@@ -138,3 +145,12 @@ def test_gallery_upload_ignores_live_heading_and_position():
                           "dist_since_fix": "5"})
     assert inputs.call_args.args[2:] == (None, None, None, None)   # map_x, map_y, dist, fix_node
     assert heading.call_args.args[2] is None
+
+
+def test_occluder_prompts_do_not_filter_a_shopping_cart_goal():
+    from server.server import app
+    client = TestClient(app)
+    with patch("server.server.decompose_goal", return_value=["shopping cart"]):
+        body = client.post("/session", json={"goal": "shopping cart", "place": ""}).json()
+    from server.server import _store
+    assert _store.get(body["session_id"]).goal_objects == ["shopping cart"]

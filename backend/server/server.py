@@ -31,7 +31,7 @@ from server.config import (
     EDITOR_MAP_DIR,
     PERCEPTION_ENABLED, OCR_ENABLED, OCR_LANGUAGES,
     OCR_MIN_CONFIDENCE, OCR_MAX_RESULTS, ARRIVED_MIN_DETECTION_SCORE,
-    GOAL_CROP_VERIFY, GENERIC_INDOOR_OBJECTS, ensure_output_dir, OUTPUT_ROOT,
+    GOAL_CROP_VERIFY, GENERIC_INDOOR_OBJECTS, OCCLUDER_PROMPTS, ensure_output_dir, OUTPUT_ROOT,
     VLM_ROUNDS, VLM_PASS3, GRID_N,
 )
 import server.config as _config
@@ -1055,10 +1055,18 @@ def _build_ocr_items(ocr_results, img_w, img_h):
     return items
 
 
+def _finite(v) -> bool:
+    return v is not None and math.isfinite(v)
+
+
 def _phone_localization_inputs(dino_topk, dino_node_hint, map_x, map_y,
                                dist_since_fix=None, fix_node=None) -> dict:
-    """The phone's own localization signals from the /photo form, for loc_fusion."""
-    pos = (map_x, map_y) if map_x is not None and map_y is not None else None
+    """The phone's own localization signals from the /photo form, for loc_fusion.
+    A position or distance that is not a finite number is dropped (NaN would poison
+    every node's score)."""
+    pos = (map_x, map_y) if _finite(map_x) and _finite(map_y) else None
+    if not (_finite(dist_since_fix) and dist_since_fix >= 0):
+        dist_since_fix = None
     return {
         "dino_sims": parse_dino_topk(dino_topk, dino_node_hint),
         "sensor_pos": pos,
@@ -1074,6 +1082,14 @@ def _reachable_nodes(ref_map, fix_node, dist_since_fix):
     if fix_node is None or dist_since_fix is None or fix_node not in ref_map.photos:
         return None
     limit = 1.5 * dist_since_fix + 8.0
+    # Walkway edges are stored one-way and sparsely (89 of 91 have no reverse link),
+    # so walk them both ways — as neighbourhood_nids and _build_nav_graph do.
+    adj: dict = {nid: set() for nid in ref_map.photos}
+    for a_nid, a_node in ref_map.photos.items():
+        for b_nid in a_node.neighbor_nids:
+            if b_nid in ref_map.photos:
+                adj[a_nid].add(b_nid)
+                adj[b_nid].add(a_nid)
     best = {fix_node: 0.0}
     heap = [(0.0, fix_node)]
     while heap:
@@ -1081,9 +1097,7 @@ def _reachable_nodes(ref_map, fix_node, dist_since_fix):
         if d > best.get(n, float("inf")) or d > limit:
             continue
         a = ref_map.photos[n]
-        for m in a.neighbor_nids:
-            if m not in ref_map.photos:
-                continue
+        for m in adj[n]:
             b = ref_map.photos[m]
             nd = d + math.hypot(a.pdr_x - b.pdr_x, a.pdr_y - b.pdr_y)
             if nd <= limit and nd < best.get(m, float("inf")):
@@ -1133,7 +1147,8 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             numbers = dict(aisle_signs.numbers_in_items(detected_items or []))
             for n, a in (sign_numbers or {}).items():
                 numbers[n] = max(numbers.get(n, 0.0), a)
-            aisle_ev = aisle_signs.sign_evidence(numbers, ref_for_v2, s.place) if numbers else None
+            aisle_ev = (aisle_signs.sign_evidence(numbers, ref_for_v2, s.place)
+                        if numbers and s.place in _config.AISLE_SIGN_PLACES else None)
             if numbers:
                 log.info("[session %s] aisle signs seen: %s", session_id,
                          {n: round(a, 4) for n, a in sorted(numbers.items())})
@@ -1156,7 +1171,7 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             grid_n=_config.GRID_N,
             dino_sims=dino_sims,
             sensor_pos=sensor_pos,
-            fusion_weights=_fusion_weights_for(
+            fusion_weights=None if v2_kwargs else _fusion_weights_for(
                 dist_since_fix, len(detected_items) if detected_items else len(detected_labels),
                 dino_sims),
             **v2_kwargs,
@@ -1278,8 +1293,8 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             log.info("[session %s] localization: no confident match (%.2f)",
                      session_id, loc_result.confidence)
         return loc_result
-    except Exception as e:
-        log.warning("[session %s] localization error: %s", session_id, e)
+    except Exception:
+        log.exception("[session %s] localization error", session_id)
         return None
 
 
@@ -1589,20 +1604,26 @@ async def upload_photo(
     if source == "gallery":
         # A gallery photo was taken some other time: the live heading / position
         # describe where the phone is now, not where the photo was taken.
-        heading = map_x = map_y = dist_since_fix = fix_node = None
+        heading = map_x = map_y = dist_since_fix = fix_node = pdr_x = pdr_y = None
+    if not _finite(heading):
+        heading = None
     _phone_loc = _phone_localization_inputs(dino_topk, dino_node_hint, map_x, map_y,
                                             dist_since_fix, fix_node)
     _prev_corrected_nid = s.last_corrected_nid
-    # A second photo asked for by the previous turn: same spot (little walking), soon after
+    # A second photo asked for by the previous turn: combined only when we KNOW the user
+    # stayed put (both photos carry the phone's step-count position); unknown movement
+    # counts as "moved". The request is kept until a photo actually gets localized, so a
+    # blurred / blocked retake doesn't lose it.
     _second_view = None
     if s.pending_view is not None:
         pv = s.pending_view
-        moved = (math.hypot(pdr_x - pv["raw"][0], pdr_y - pv["raw"][1])
-                 if pdr_x is not None and pdr_y is not None and pv.get("raw") else 0.0)
-        if time.time() - pv["t"] <= _config.SECOND_PHOTO_WINDOW_S and moved <= _config.SECOND_PHOTO_MAX_MOVE_M:
+        known = _finite(pdr_x) and _finite(pdr_y) and pv.get("raw") is not None
+        moved = math.hypot(pdr_x - pv["raw"][0], pdr_y - pv["raw"][1]) if known else float("inf")
+        if time.time() - pv["t"] > _config.SECOND_PHOTO_WINDOW_S or moved > _config.SECOND_PHOTO_MAX_MOVE_M:
+            s.pending_view = None
+        else:
             _second_view = pv["evidence"]
             log.info("[session %s] combining with the previous photo (moved %.1f m)", session_id, moved)
-        s.pending_view = None
     _phone_loc["extra_evidence"] = _second_view
     if _phone_loc["dino_sims"] or _phone_loc["sensor_pos"]:
         log.info("[session %s] phone localization: dino_topk=%s map_pos=%s dist_since_fix=%s",
@@ -1666,7 +1687,7 @@ async def upload_photo(
 
     if has_grounding:
         # ══ 模式 A：GroundingDINO + (EasyOCR) + 單階段 VLM ══
-        combined_prompts = list(dict.fromkeys(s.goal_objects + GENERIC_INDOOR_OBJECTS))
+        combined_prompts = list(dict.fromkeys(s.goal_objects + GENERIC_INDOOR_OBJECTS + OCCLUDER_PROMPTS))
         log.info("GroundingDINO prompt: %s", combined_prompts)
         detections = perception_engine.detect(str(photo_path), combined_prompts)
         detected_labels = [d.label for d in detections]
@@ -1698,12 +1719,15 @@ async def upload_photo(
         # ── Early localization for route-aware VLM prompt ──────────────
         _loc_items = _build_localization_items(detections, ocr_results or [], img_w, img_h)
         _ocr_items = _build_ocr_items(ocr_results or [], img_w, img_h)
-        _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
-                                             detected_items=_loc_items,
-                                             image_path=str(photo_path),
-                                             ocr_items=_ocr_items,
-                                             sign_numbers=aisle_signs.numbers_from_ocr(ocr_results, img_w, img_h),
-                                             **_phone_loc)
+        # A blocked view must not move the user, re-plan the route or set the heading.
+        _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h)
+        _early_loc = None if _occlusion.hint else _run_early_localization(
+            s, session_id, detected_labels, ocr_texts,
+            detected_items=_loc_items,
+            image_path=str(photo_path),
+            ocr_items=_ocr_items,
+            sign_numbers=aisle_signs.numbers_from_ocr(ocr_results, img_w, img_h),
+            **_phone_loc)
         _apply_phone_heading(s, _early_loc, heading)
         _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
                                                        img_w=img_w, img_h=img_h, ocr_results=ocr_results,
@@ -1862,13 +1886,16 @@ async def upload_photo(
         _store_zone = vlm_perception.store_zone or ""
         log.info("[session %s] VLM store_zone: %s | scene: %s",
                  session_id, _store_zone or "(none)", vlm_perception.scene_description[:80])
-        _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
-                                             detected_items=_loc_items,
-                                             image_path=str(photo_path),
-                                             store_zone=_store_zone,
-                                             ocr_items=_ocr_items,
-                                             sign_numbers=aisle_signs.numbers_from_ocr(ocr_results, img_w, img_h),
-                                             **_phone_loc)
+        # A blocked view must not move the user, re-plan the route or set the heading.
+        _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h)
+        _early_loc = None if _occlusion.hint else _run_early_localization(
+            s, session_id, detected_labels, ocr_texts,
+            detected_items=_loc_items,
+            image_path=str(photo_path),
+            store_zone=_store_zone,
+            ocr_items=_ocr_items,
+            sign_numbers=aisle_signs.numbers_from_ocr(ocr_results, img_w, img_h),
+            **_phone_loc)
         _apply_phone_heading(s, _early_loc, heading)
         _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
                                                        img_w=img_w, img_h=img_h, ocr_results=ocr_results,
@@ -2104,22 +2131,25 @@ async def upload_photo(
     loc_result = _early_loc
 
     # Occluded view (people / carts in front of the camera) or almost nothing
-    # recognisable: don't let this photo move the user's position.
-    _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h)
+    # recognisable: localization was skipped above, so this photo moved nothing.
     _retake_hint = _occlusion.hint
     if _retake_hint:
         log.info("[session %s] retake: %s (occluded %.0f%%, %d useful objects) — "
                  "localization not applied", session_id, _retake_hint,
                  100 * _occlusion.fraction, _occlusion.useful_objects)
-        s.last_corrected_nid = _prev_corrected_nid
         loc_result = None
+    elif _second_view is not None:
+        s.pending_view = None            # the requested second photo has been used
 
     # Several places look alike: ask for one more photo from the same spot and combine.
+    # Only while walking (an ASK / ARRIVED turn blocks the next /photo) and only when
+    # the phone's position is known, so the next photo can be checked for "same spot".
     _second_photo_hint = None
     if (loc_result is not None and loc_result.image_evidence is not None and _second_view is None
+            and vlm_resp.action == VLMAction.MOVE and source != "gallery"
+            and _finite(pdr_x) and _finite(pdr_y)
             and loc_result.confidence < _config.SECOND_PHOTO_BELOW):
-        s.pending_view = {"evidence": loc_result.image_evidence, "t": time.time(),
-                          "raw": (pdr_x, pdr_y) if pdr_x is not None and pdr_y is not None else None}
+        s.pending_view = {"evidence": loc_result.image_evidence, "t": time.time(), "raw": (pdr_x, pdr_y)}
         _second_photo_hint = "這附近有幾個地方很像，請原地向左轉 90° 再拍一張，兩張一起判斷"
         log.info("[session %s] unsure (p=%.2f) — asking for a second photo", session_id, loc_result.confidence)
 

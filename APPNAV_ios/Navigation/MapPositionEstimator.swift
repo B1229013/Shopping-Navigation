@@ -12,14 +12,16 @@ import Foundation
 ///
 /// What a photo fix corrects:
 /// - **position** — snapped to the localized node (cancels accumulated drift);
-/// - **heading offset** — between two fixes ≥ `minCalibrationDistanceM` apart, the
-///   direction actually walked (node A → node B) vs the direction PDR thought it walked;
+/// - **heading offset** — over a straight stretch ≥ `minCalibrationDistanceM` between
+///   fixes A and B, the direction actually walked (node A → node B) vs the direction PDR
+///   thought it walked; fixes closer together than that extend the stretch instead;
 /// - **step scale** — map distance A→B vs PDR distance over the same stretch, clamped
 ///   to `stepScaleRange` so one bad fix cannot wreck the step model.
 /// Both are smoothed with `learningRate` and reset only with the session.
 ///
-/// Fixes below `minConfidence` (`minFirstFixConfidence` before any position), or implausible jumps (> `maxJumpM` from the dead-reckoned
-/// position while confidence < `jumpOverrideConfidence`), are rejected.
+/// Fixes below `minConfidence` (`minFirstFixConfidence` before any position), or
+/// implausible jumps (> `maxJumpM` from the dead-reckoned position when the photo was
+/// taken, while confidence < `jumpOverrideConfidence`), are rejected.
 ///
 /// Pure logic, no sensors / UI — unit tested in scripts/swift_logic_tests.
 final class MapPositionEstimator {
@@ -55,9 +57,10 @@ final class MapPositionEstimator {
     private(set) var acceptedFixes = 0
 
     private var lastRaw: (x: Double, y: Double)?
-    /// Raw PDR distance walked since the last fix (for the step-scale ratio).
-    private var rawDistanceSinceFix = 0.0
-    private var lastFix: (map: (x: Double, y: Double), raw: (x: Double, y: Double))?
+    /// Start of the stretch being measured for calibration, and the raw PDR path length
+    /// walked since then (straight-line vs path length = did the user walk straight).
+    private var calibrationBase: (map: (x: Double, y: Double), raw: (x: Double, y: Double))?
+    private var rawPathSinceBase = 0.0
 
     init(config: Config = Config()) {
         self.config = config
@@ -72,8 +75,8 @@ final class MapPositionEstimator {
         distanceSinceFixM = 0
         acceptedFixes = 0
         lastRaw = nil
-        rawDistanceSinceFix = 0
-        lastFix = nil
+        calibrationBase = nil
+        rawPathSinceBase = 0
     }
 
     /// A new raw PDR sample. Moves the map position by the corrected step.
@@ -83,7 +86,7 @@ final class MapPositionEstimator {
         let dx = raw.x - prev.x, dy = raw.y - prev.y
         let d = (dx * dx + dy * dy).squareRoot()
         guard d > 0 else { return }
-        rawDistanceSinceFix += d
+        rawPathSinceBase += d
         guard let pos = mapPosition else { return }
         let step = Self.rotate((dx, dy), byDegrees: headingOffsetDeg)
         mapPosition = (pos.x + step.x * stepScale, pos.y + step.y * stepScale)
@@ -97,27 +100,39 @@ final class MapPositionEstimator {
     }
 
     /// The server localized a photo to `node` (map frame) with `confidence`.
-    /// `raw` is the PDR reading when the photo was taken.
+    /// `raw` is the PDR reading when the photo was taken — the answer arrives seconds
+    /// later, and the steps walked since then are replayed by the next `ingest`.
     @discardableResult
     func applyFix(node: (x: Double, y: Double), confidence: Double,
                   raw: (x: Double, y: Double)) -> FixResult {
         let needed = mapPosition == nil ? config.minFirstFixConfidence : config.minConfidence
         guard confidence >= needed else { return .rejectedLowConfidence }
+        // PDR walked since the shutter (straight line; the wait is a few seconds).
+        let sinceCapture = lastRaw.map { (x: $0.x - raw.x, y: $0.y - raw.y) } ?? (x: 0, y: 0)
         if let pos = mapPosition {
-            let jump = Self.distance(pos, node)
+            // Compare the node with where dead reckoning had the user when the photo was
+            // taken, not where they have walked to while waiting for the answer.
+            let back = Self.rotate(sinceCapture, byDegrees: headingOffsetDeg)
+            let atCapture = (x: pos.x - back.x * stepScale, y: pos.y - back.y * stepScale)
+            let jump = Self.distance(atCapture, node)
             if jump > config.maxJumpM && confidence < config.jumpOverrideConfidence {
                 return .rejectedJump(distanceM: jump)
             }
         }
 
-        if let last = lastFix {
-            let mapVec = (x: node.x - last.map.x, y: node.y - last.map.y)
-            let rawVec = (x: raw.x - last.raw.x, y: raw.y - last.raw.y)
+        let pathToCapture = max(rawPathSinceBase - Self.length(sinceCapture), 0)
+        var keepBase = false
+        if let base = calibrationBase {
+            let mapVec = (x: node.x - base.map.x, y: node.y - base.map.y)
+            let rawVec = (x: raw.x - base.raw.x, y: raw.y - base.raw.y)
             let mapDist = Self.length(mapVec), rawDist = Self.length(rawVec)
             // Only a long, fairly straight stretch says anything about heading / step
             // length: the node snap error (~1–2 m) must be small next to the distance,
             // and the PDR path must not have wandered (raw path length ≈ straight distance).
-            let straight = rawDistanceSinceFix > 0 && rawDist / rawDistanceSinceFix > 0.8
+            let straight = pathToCapture > 0 && rawDist / pathToCapture > 0.8
+            // Photos taken close together: keep measuring from the same start.
+            keepBase = straight && (mapDist < config.minCalibrationDistanceM
+                                    || rawDist < config.minCalibrationDistanceM)
             if mapDist >= config.minCalibrationDistanceM && rawDist >= config.minCalibrationDistanceM
                 && straight {
                 let observed = Self.wrap(Self.bearing(mapVec) - Self.bearing(rawVec))
@@ -134,10 +149,14 @@ final class MapPositionEstimator {
         }
 
         mapPosition = node
-        lastFix = (node, raw)
+        if keepBase {
+            rawPathSinceBase = pathToCapture
+        } else {
+            calibrationBase = (node, raw)
+            rawPathSinceBase = 0
+        }
         lastRaw = raw
         distanceSinceFixM = 0
-        rawDistanceSinceFix = 0
         acceptedFixes += 1
         return .accepted
     }

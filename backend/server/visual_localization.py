@@ -999,16 +999,25 @@ def localize(
         log.info("v2 localization top3: %s%s", [(c[0], round(c[1], 3)) for c in post[:3]],
                  " (with previous photo)" if extra_evidence else "")
         best_nid, best_p, best_reason = post[0]
+        common = dict(
+            confidence=best_p, method=match_method + "+v2",
+            runner_up_nid=post[1][0] if len(post) > 1 else None,
+            runner_up_score=post[1][1] if len(post) > 1 else 0.0,
+            top_candidates=post[:5], estimated_xy=estimate_position(post, node_xy), image_evidence=ev,
+        )
+        if best_p < CONFIDENT_THRESHOLD:
+            # Spread over many nodes: report it (and keep the evidence for a second
+            # photo) but don't name a node, so nothing downstream moves the user.
+            return LocalizationResult(
+                matched_nid=None,
+                reasoning=f"Best probability {best_p:.2f} below threshold ({best_reason})", **common)
         matched_ref = ref_map.photos.get(best_nid)
         matched_heading, matched_slot, heading_conf = estimate_node_heading(
             matched_ref, detected_labels, ocr_texts, best_p)
         return LocalizationResult(
-            matched_nid=best_nid, confidence=best_p, method=match_method + "+v2",
-            reasoning=best_reason, ref_node=matched_ref,
-            runner_up_nid=post[1][0] if len(post) > 1 else None,
-            runner_up_score=post[1][1] if len(post) > 1 else 0.0,
+            matched_nid=best_nid, reasoning=best_reason, ref_node=matched_ref,
             matched_heading=matched_heading, matched_slot=matched_slot, heading_confidence=heading_conf,
-            top_candidates=post[:5], estimated_xy=estimate_position(post, node_xy), image_evidence=ev,
+            **common,
         )
 
     if fusion_weights is not None and (dino_sims or sensor_pos is not None):

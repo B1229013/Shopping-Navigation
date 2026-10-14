@@ -105,6 +105,42 @@ do {  // short or wandering stretches don't calibrate
     check(w.stepScale == 1 && w.headingOffsetDeg == 0, "L-shaped path does not calibrate")
 }
 
+do {  // the jump gate compares the node with the position when the photo was taken
+    let e = MapPositionEstimator()
+    e.ingest(raw: (0, 0))
+    e.applyFix(node: (0, 0), confidence: 0.9, raw: (0, 0))
+    for i in 1...20 { e.ingest(raw: (0, Double(i))) }        // kept walking while the server answered
+    check(e.applyFix(node: (0, 3), confidence: 0.7, raw: (0, 2)) == .accepted,
+          "photo at 2 m localized 1 m off is accepted though the user is now 17 m further")
+    e.ingest(raw: (0, 20))                                    // replay the steps since the shutter
+    check(approx(e.mapPosition!.x, 0) && approx(e.mapPosition!.y, 21), "position = node + 18 m walked since")
+    if case .rejectedJump = e.applyFix(node: (30, 21), confidence: 0.7, raw: (0, 20)) {
+        check(true, "")
+    } else { check(false, "a real 30 m jump is still rejected") }
+}
+
+do {  // fixes closer than 8 m extend the calibration stretch instead of restarting it
+    let e = MapPositionEstimator()
+    e.ingest(raw: (0, 0))
+    e.applyFix(node: (0, 0), confidence: 0.9, raw: (0, 0))
+    for i in 1...5 { e.ingest(raw: (0, Double(i))) }
+    e.applyFix(node: (0, 6), confidence: 0.9, raw: (0, 5))   // 6 m: too short, no calibration yet
+    check(e.stepScale == 1, "6 m stretch does not calibrate")
+    for i in 6...10 { e.ingest(raw: (0, Double(i))) }
+    e.applyFix(node: (0, 12), confidence: 0.9, raw: (0, 10))  // 12 m from the first fix, PDR 10
+    check(approx(e.stepScale, 1 + 0.3 * 0.2), "two short stretches calibrate together (got \(e.stepScale))")
+
+    let w = MapPositionEstimator()                           // ...but not across a turn
+    w.ingest(raw: (0, 0))
+    w.applyFix(node: (0, 0), confidence: 0.9, raw: (0, 0))
+    for i in 1...6 { w.ingest(raw: (0, Double(i))) }
+    for i in 1...6 { w.ingest(raw: (Double(i), 6)) }
+    w.applyFix(node: (6, 6), confidence: 0.9, raw: (6, 6))   // L-shaped: restart from here
+    for i in 7...16 { w.ingest(raw: (Double(i), 6)) }
+    w.applyFix(node: (18, 6), confidence: 0.9, raw: (16, 6)) // straight 12 m map / 10 m PDR east
+    check(approx(w.stepScale, 1.06) && approx(w.headingOffsetDeg, 0), "restarted after the turn (got \(w.stepScale))")
+}
+
 do {  // rebase ignores a raw-frame jump
     let e = MapPositionEstimator()
     e.ingest(raw: (0, 0))

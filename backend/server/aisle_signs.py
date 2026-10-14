@@ -20,7 +20,8 @@ On the 16 route-1 walk photos taken along the walkway, DINOv2 alone put the righ
 first 6% of the time (9.2 m mean error); DINOv2 + these two cues 62.5% (3.4 m).
 
 The row table is derived from the reference map; a hand-checked table can override it:
-backend/maps/aisles.json = {"<place>": {"<aisle>": [nid, ...]}}.
+backend/maps/aisles.json = {"<place>": {"<aisle>": [nid, ...]}}. Both cues assume this
+store's layout, so the server only uses them for the places in config AISLE_SIGN_PLACES.
 """
 from __future__ import annotations
 
@@ -208,8 +209,9 @@ def sign_evidence(numbers: Dict[int, float], ref_map, place: str = "",
     ev: Dict[int, float] = defaultdict(float)
     pairs = range(1, MAX_AISLE // 2 + 1)
     k = max(pairs, key=lambda k: numbers.get(2 * k - 1, 0.0) + numbers.get(2 * k, 0.0))
-    if numbers.get(2 * k - 1, 0.0) + numbers.get(2 * k, 0.0) > 0 and table and table.get(2 * k):
-        y0 = median(ref_map.photos[n].pdr_y for n in table[2 * k] if n in ref_map.photos)
+    row_ys = [ref_map.photos[n].pdr_y for n in (table or {}).get(2 * k, []) if n in ref_map.photos]
+    if numbers.get(2 * k - 1, 0.0) + numbers.get(2 * k, 0.0) > 0 and row_ys:
+        y0 = median(row_ys)
         for nid, node in ref_map.photos.items():
             dy = abs(node.pdr_y - y0)
             if dy <= ROW_TOLERANCE_M:

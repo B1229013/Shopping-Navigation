@@ -108,10 +108,11 @@ GENERIC_INDOOR_OBJECTS = [
     "bulletin board", "notice board",
     # 額外補充
     "refrigerator", "water dispenser", "shelf", "trash can", "poster",
-    # occluders — detected so photo_quality can warn when they block the view;
-    # dropped from localization items (server._build_localization_items)
-    "person", "shopping cart",
 ]
+# Occluders — also detected (Mode A) so photo_quality can warn when they block the view;
+# dropped from localization items (server._build_localization_items). Kept out of
+# GENERIC_INDOOR_OBJECTS, which also filters goal words ("find a shopping cart").
+OCCLUDER_PROMPTS = ["person", "shopping cart"]
 
 # TASK 3 — crop-verify a goal detection with the VLM before trusting it.
 # Disabled under test mode so the offline suite never makes a network call.
@@ -160,6 +161,11 @@ LOC_FUSION_V2 = os.environ.get("LOC_FUSION_V2", "1") != "0"
 SECOND_PHOTO_BELOW = float(os.environ.get("SECOND_PHOTO_BELOW", "0.4"))
 SECOND_PHOTO_WINDOW_S = float(os.environ.get("SECOND_PHOTO_WINDOW_S", "120"))
 SECOND_PHOTO_MAX_MOVE_M = float(os.environ.get("SECOND_PHOTO_MAX_MOVE_M", "3"))
+# Places whose aisle-number signs feed localization (server/aisle_signs.py), "|"-separated.
+# The row table and the "≥ 3 numbers = central walkway" rule were checked only on this
+# store's layout (eval/route1_eval.py); add another store after checking it there.
+AISLE_SIGN_PLACES = {p.strip() for p in os.environ.get("AISLE_SIGN_PLACES", NEO4J_PLACE).split("|")
+                     if p.strip()}
 
 # Grid-matching weight overrides, e.g. "landmark=6,ocr=3,rarity_mode=idf"
 # (keys: see visual_localization.apply_weight_overrides). Empty = code defaults.

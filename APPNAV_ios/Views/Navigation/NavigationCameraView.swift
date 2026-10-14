@@ -41,6 +41,9 @@ struct NavigationCameraView: View {
     @State private var retakeHint: String?
     // "Several places look alike — turn and take one more" (server second_photo_hint)
     @State private var secondPhotoHint: String?
+    /// PDR position of the photo that asked for a second one (the server only combines
+    /// the two within 3 m, so the request lapses once the user walks further).
+    @State private var secondPhotoAt: (x: Double, y: Double)?
     // First-use photo guide; reopen with the "?" button
     @AppStorage("navPhotoGuideSeen") private var photoGuideSeen = false
     @State private var showPhotoGuide = false
@@ -157,6 +160,9 @@ struct NavigationCameraView: View {
         }
         .onReceive(sensorSession.$currentPoint) { point in
             followSensors(point)
+        }
+        .onChange(of: isPhoneUpright) { upright in
+            if upright, retakeHint == PhotoQualityChecker.tiltHint { retakeHint = nil }
         }
         .sheet(isPresented: $showPhotoGuide) {
             PhotoGuideView { showPhotoGuide = false; photoGuideSeen = true }
@@ -510,6 +516,8 @@ struct NavigationCameraView: View {
     /// Remind the user to take a photo after this much walking: the walk simulation kept
     /// the error near 1 m with a photo every 6–12 m (backend eval/report_figures walk_frequency).
     static let photoReminderM = 12.0
+    /// Backend config SECOND_PHOTO_MAX_MOVE_M.
+    static let secondPhotoMaxMoveM = 3.0
 
     private func startAtEntrance() {
         let entrance = NodeCoordinateStore.shared.nearestNode(to: (0, 0))
@@ -524,6 +532,10 @@ struct NavigationCameraView: View {
     /// off the planned route (PathFollower.needsReplan).
     private func followSensors(_ point: PathPoint?) {
         guard let point else { return }
+        if let at = secondPhotoAt, hypot(point.x - at.x, point.y - at.y) > Self.secondPhotoMaxMoveM {
+            secondPhotoHint = nil
+            secondPhotoAt = nil
+        }
         if let m = sensorSession.mapPosition {
             routeModel.ingest(mapPosition: m, headingDegrees: sensorSession.mapHeading, raw: point)
         } else {
@@ -561,12 +573,14 @@ struct NavigationCameraView: View {
     private func applyTurn(_ response: TurnResponse, rawAtCapture: (x: Double, y: Double)? = nil) {
         retakeHint = response.retakeHint
         secondPhotoHint = response.secondPhotoHint
+        secondPhotoAt = response.secondPhotoHint != nil ? rawAtCapture : nil
         // A localized photo corrects the shared map position (and, between two good
         // fixes, the heading offset and step length) — see MapPositionEstimator.
-        var fixNote = ""
+        // When the server is unsure and asks for a second photo, wait for the combined answer.
+        var fixNote = response.secondPhotoHint != nil ? "，等第二張照片再校正" : ""
         var fixAccepted = false
-        if response.retakeHint == nil, let locNodeId = response.correctedNodeId,
-           let raw = rawAtCapture {
+        if response.retakeHint == nil, response.secondPhotoHint == nil,
+           let locNodeId = response.correctedNodeId, let raw = rawAtCapture {
             let node: (x: Double, y: Double)?
             if let ex = response.estimatedX, let ey = response.estimatedY {
                 node = (ex, ey)
@@ -783,6 +797,8 @@ struct NavigationCameraView: View {
                 await MainActor.run {
                     pendingArrival = false
                     guidance = response.guidance
+                    secondPhotoHint = nil
+                    secondPhotoAt = nil
                     // POST /confirm is the ONLY endpoint that advances the phase, and
                     // reaching "done" also sets s.arrived, which makes a later POST
                     // /photo 409 — so if we drop phase here the client can never see

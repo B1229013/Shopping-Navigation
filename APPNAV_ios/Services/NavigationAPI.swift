@@ -321,7 +321,7 @@ final class NavigationAPI {
         // On-device DINOv2 top-K similarities — the server fuses these with its
         // own grid matcher and the map position below (backend/server/loc_fusion.py)
         if !dinoTopK.isEmpty {
-            let entries = dinoTopK.map { String(format: "{\"nid\":%d,\"sim\":%.4f}", $0.nodeId, Double($0.similarity)) }
+            let entries = dinoTopK.map { String(format: "{\"nid\":%ld,\"sim\":%.4f}", $0.nodeId, Double($0.similarity)) }
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
             body.append("Content-Disposition: form-data; name=\"dino_topk\"\r\n\r\n".data(using: .utf8)!)
             body.append("[\(entries.joined(separator: ","))]\r\n".data(using: .utf8)!)

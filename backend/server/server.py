@@ -1720,7 +1720,7 @@ async def upload_photo(
         _loc_items = _build_localization_items(detections, ocr_results or [], img_w, img_h)
         _ocr_items = _build_ocr_items(ocr_results or [], img_w, img_h)
         # A blocked view must not move the user, re-plan the route or set the heading.
-        _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h)
+        _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h, goals=s.goal_objects)
         _early_loc = None if _occlusion.hint else _run_early_localization(
             s, session_id, detected_labels, ocr_texts,
             detected_items=_loc_items,
@@ -1887,7 +1887,7 @@ async def upload_photo(
         log.info("[session %s] VLM store_zone: %s | scene: %s",
                  session_id, _store_zone or "(none)", vlm_perception.scene_description[:80])
         # A blocked view must not move the user, re-plan the route or set the heading.
-        _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h)
+        _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h, goals=s.goal_objects)
         _early_loc = None if _occlusion.hint else _run_early_localization(
             s, session_id, detected_labels, ocr_texts,
             detected_items=_loc_items,
@@ -2138,6 +2138,8 @@ async def upload_photo(
                  "localization not applied", session_id, _retake_hint,
                  100 * _occlusion.fraction, _occlusion.useful_objects)
         loc_result = None
+        # say why there is no map step this time, not "this photo doesn't match the map"
+        _next_instr = _retake_hint
     elif _second_view is not None:
         s.pending_view = None            # the requested second photo has been used
 

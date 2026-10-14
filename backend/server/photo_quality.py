@@ -27,8 +27,7 @@ MAX_OCCLUDED_FRACTION = 0.30
 MIN_USEFUL_OBJECTS = 3
 PARTIAL_OCCLUDED_FRACTION = 0.10
 
-# English as whole words ("person" must not match "personal care"); Chinese as substrings,
-# except 人/手 which only count on their own (人參, 手套 are products).
+# 人/手 only count on their own (人參, 手套 are products).
 # A label is an occluder when its head noun is one — English and Chinese noun phrases
 # end in the head ("shopping cart", "手推車"), so "hand soap", "customer service" and
 # "顧客服務台" are products / signs, not people. English labels are cut at the first
@@ -75,7 +74,8 @@ def is_occluder(label: str) -> bool:
     if not l:
         return False
     # the perception prompt reports blockers as "遮擋物:人" / "遮擋物:推車"
-    if l in _OCCLUDER_EXACT or l.startswith("遮擋") or l.endswith(_OCCLUDER_ZH_ENDINGS):
+    zh = l[:-1] if l.endswith("們") and len(l) > 2 else l      # 顧客們 → 顧客
+    if l in _OCCLUDER_EXACT or l.startswith("遮擋") or zh.endswith(_OCCLUDER_ZH_ENDINGS):
         return True
     words = re.findall(r"[a-z]+", _EN_TAIL.sub("", l))
     return bool(words) and words[-1] in _OCCLUDER_EN_HEADS
@@ -88,13 +88,18 @@ class Occlusion:
     hint: Optional[str]
 
 
-def assess_occlusion(detections: Iterable, img_w: int, img_h: int) -> Occlusion:
-    """detections: objects with .label and a pixel .box/.bbox [x1, y1, x2, y2]."""
+def assess_occlusion(detections: Iterable, img_w: int, img_h: int,
+                     goals: Iterable[str] = ()) -> Occlusion:
+    """detections: objects with .label and a pixel .box/.bbox [x1, y1, x2, y2].
+    `goals`: what the user is looking for — a shopping cart they are walking up to
+    is the target, not something in the way."""
+    goal_labels = {g.strip().lower() for g in goals}
     mask = np.zeros((64, 64), bool)
     useful = 0
     for d in detections:
         box = getattr(d, "box", None) or getattr(d, "bbox", None)
-        if not is_occluder(getattr(d, "label", "")):
+        label = getattr(d, "label", "") or ""
+        if label.strip().lower() in goal_labels or not is_occluder(label):
             useful += 1
             continue
         if not box or len(box) != 4 or isinstance(box[0], (list, tuple)) or img_w <= 0 or img_h <= 0:

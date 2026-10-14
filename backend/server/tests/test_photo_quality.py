@@ -46,6 +46,7 @@ def test_dark_photo_asks_for_flash(tmp_path):
     ("顧客服務台", False), ("顧客服務", False), ("洗手乳", False), ("cart corral sign", False),
     ("person with shopping cart", True), ("hands holding phone", True), ("Shopper", True),
     ("手推車", True), ("推著購物車的顧客", True), ("遮擋物:推車", True), ("工作人員", True),
+    ("顧客們", True), ("cart", True),
 ])
 def test_is_occluder(label, expected):
     assert pq.is_occluder(label) is expected
@@ -119,11 +120,14 @@ def test_occluded_upload_sets_retake_hint_and_skips_localization():
     resp = VLMResponse(action=VLMAction.MOVE, guidance="go", question=None, vlm_summary="")
     with patch("server.server.get_perception", return_value=perception), \
          patch("server.server.vlm_decide", return_value=resp), \
-         patch("server.server._run_early_localization") as early:
+         patch("server.server._run_early_localization") as early, \
+         patch("server.server._build_route_context",          # a session with a store map
+               return_value=(None, "這張照片對不到地圖上的位置")):
         body = client.post(f"/session/{sid}/photo",
                            files={"photo": ("p.jpg", _jpg(), "image/jpeg")}).json()
     early.assert_not_called()          # no position, heading or route change from a blocked view
     assert body["retake_hint"] == pq.HINT_OCCLUDED
+    assert body["next_instruction"] == pq.HINT_OCCLUDED   # not the "doesn't match the map" hint
     assert body["guidance"] == pq.HINT_OCCLUDED
     assert body["corrected_node_id"] is None
 
@@ -154,3 +158,9 @@ def test_occluder_prompts_do_not_filter_a_shopping_cart_goal():
         body = client.post("/session", json={"goal": "shopping cart", "place": ""}).json()
     from server.server import _store
     assert _store.get(body["session_id"]).goal_objects == ["shopping cart"]
+
+
+def test_the_goal_itself_is_not_an_occluder():
+    cart = [_det("shopping cart", [0, 0, 100, 100]), _det("shelf", [0, 0, 5, 5])]
+    assert pq.assess_occlusion(cart, 100, 100).hint == pq.HINT_OCCLUDED
+    assert pq.assess_occlusion(cart, 100, 100, goals=["Shopping Cart"]).hint is None

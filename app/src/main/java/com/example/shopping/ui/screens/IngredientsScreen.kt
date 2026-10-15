@@ -226,7 +226,7 @@ fun IngredientsScreen(
     }
 
     val scope = rememberCoroutineScope()
-    val openAiApiKey = com.example.shopping.BuildConfig.OPENAI_API_KEY
+    val openAiApiKey = com.example.shopping.BuildConfig.CGU_API_KEY
     val tempFile = remember { File(context.cacheDir, "ocr_scan.jpg") }
     val imageUri = remember { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempFile) }
 

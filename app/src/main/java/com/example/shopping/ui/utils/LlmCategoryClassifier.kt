@@ -1,6 +1,7 @@
 package com.example.shopping.ui.utils
 
 import android.util.Log
+import com.example.shopping.ui.screens.CGU_CHAT_MODEL
 import com.example.shopping.ui.screens.GroqMessage
 import com.example.shopping.ui.screens.GroqRequest
 import com.example.shopping.ui.screens.GroqResponseFormat
@@ -14,7 +15,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-const val CLASSIFIER_MODEL = "gpt-5.6-luna"
+const val CLASSIFIER_MODEL = CGU_CHAT_MODEL
 
 // Keeps a single request (and its JSON reply) a manageable size when backfilling a long list.
 private const val BATCH_SIZE = 50

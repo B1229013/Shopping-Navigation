@@ -36,7 +36,7 @@ fun AIScreen(
     budgetTotal: Int = 0
 ) {
     val context = LocalContext.current
-    val openAiApiKey = BuildConfig.OPENAI_API_KEY
+    val openAiApiKey = BuildConfig.CGU_API_KEY
 
     val scope = rememberCoroutineScope()
     var inputText by remember { mutableStateOf("") }
@@ -82,7 +82,7 @@ fun AIScreen(
                         color = TextPrimary
                     )
                     Text(
-                        "Powered by OpenAI gpt-4o-mini",
+                        "Powered by CGU $CGU_CHAT_MODEL",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextDisabled
                     )
@@ -188,7 +188,7 @@ fun AIScreen(
 
                                     val response = groqApi.getCompletion(
                                         apiKey = "Bearer $openAiApiKey",
-                                        request = GroqRequest(messages = messages)
+                                        request = GroqRequest(model = CGU_CHAT_MODEL, messages = messages)
                                     )
                                     val aiMsg = response.choices[0].message.content
                                     chatHistory = chatHistory + (userMsg to aiMsg)

@@ -84,18 +84,21 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
-// --- OpenAI Chat Completions API models (gpt-4o-mini; OpenAI-compatible JSON schema) ---
+// --- OpenAI Chat Completions API models (OpenAI-compatible JSON schema) ---
 // NOTE: data-class names kept as Groq* to minimise the cross-file diff; the base
-// URL below targets the CGU LLM gateway (air.cgu.edu.tw/cgullmapi), which is
-// OpenAI-compatible. The key (OPENAI_API_KEY in .env) is the CGU key; model gpt-4o-mini.
-data class GroqRequest(val model: String = "gpt-4o-mini", val messages: List<GroqMessage>, val response_format: GroqResponseFormat? = null)
+// base URL targets the OpenAI-compatible CGU LLM gateway (CGU_BASE_URL in .env, default
+// air.cgu.edu.tw/cgullmapi/v1) with CGU_API_KEY. OPENAI_API_KEY is the navigation backend's own key.
+// Chat model on the CGU gateway (shopping-list classifier, AI screen, receipt OCR/parsing).
+// The gateway has no gpt-4o-mini / gpt-5.4-mini.
+const val CGU_CHAT_MODEL = "gpt-5.6-luna"
+data class GroqRequest(val model: String = CGU_CHAT_MODEL, val messages: List<GroqMessage>, val response_format: GroqResponseFormat? = null)
 data class GroqMessage(val role: String, val content: String)
 data class GroqResponseFormat(val type: String = "json_object")
 data class GroqResponse(val choices: List<GroqChoice>)
 data class GroqChoice(val message: GroqMessage)
 
 interface GroqApiService {
-    @POST("v1/chat/completions")
+    @POST("chat/completions")
     suspend fun getCompletion(@Header("Authorization") apiKey: String, @Body request: GroqRequest): GroqResponse
 }
 
@@ -103,7 +106,7 @@ val groqApi: GroqApiService by lazy {
     val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY }
     val client = OkHttpClient.Builder().addInterceptor(logging).build()
     Retrofit.Builder()
-        .baseUrl("https://air.cgu.edu.tw/cgullmapi/")
+        .baseUrl(BuildConfig.CGU_BASE_URL + "/")
         .addConverterFactory(GsonConverterFactory.create())
         .client(client)
         .build()
@@ -167,7 +170,7 @@ suspend fun callPaddleOcr(bitmap: Bitmap, apiUrl: String, accessToken: String): 
     }
 }
 
-// --- OpenAI gpt-4o-mini vision OCR helper (replaces PaddleOCR) ---
+// --- CGU gateway vision OCR helper (replaces PaddleOCR) ---
 // Same String return type as callPaddleOcr(), so the call sites swap 1:1.
 suspend fun callOpenAiOcr(bitmap: Bitmap, apiKey: String): String {
     return withContext(Dispatchers.IO) {
@@ -193,9 +196,10 @@ suspend fun callOpenAiOcr(bitmap: Bitmap, apiKey: String): String {
             })
         }
         val requestBody = JSONObject().apply {
-            put("model", "gpt-4o-mini")
-            put("temperature", 0)
-            put("max_tokens", 1024)
+            // gpt-5.6-luna is a reasoning model: no temperature other than the default, and the
+            // limit is max_completion_tokens (reasoning counts against it, so leave headroom).
+            put("model", CGU_CHAT_MODEL)
+            put("max_completion_tokens", 4096)
             put("messages", org.json.JSONArray().put(
                 JSONObject().apply {
                     put("role", "user")
@@ -213,7 +217,7 @@ suspend fun callOpenAiOcr(bitmap: Bitmap, apiKey: String): String {
             .toRequestBody("application/json; charset=utf-8".toMediaType())
 
         val request = okhttp3.Request.Builder()
-            .url("https://air.cgu.edu.tw/cgullmapi/v1/chat/completions")
+            .url("${BuildConfig.CGU_BASE_URL}/chat/completions")
             .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("Content-Type", "application/json")
             .post(body)
@@ -311,7 +315,7 @@ fun MainContainer(rootNavController: NavController) {
     LaunchedEffect(Unit) {
         val unclassified = shoppingItems.filter { it.homeCategory == null }
         if (unclassified.isEmpty()) return@LaunchedEffect
-        val result = classifyHomeCategories(unclassified.map { it.name }, BuildConfig.OPENAI_API_KEY)
+        val result = classifyHomeCategories(unclassified.map { it.name }, BuildConfig.CGU_API_KEY)
         val byId = unclassified.map { it.id }.zip(result.categories).toMap()
         shoppingItems = shoppingItems.map { item -> byId[item.id]?.let { item.withHomeCategory(it) } ?: item }
         result.error?.let { Toast.makeText(context, "AI 分類失敗，已改用關鍵字分類：$it", Toast.LENGTH_LONG).show() }
@@ -564,7 +568,7 @@ fun BudgetScreen(
     var viewMode by remember { mutableStateOf(BudgetViewMode.CATEGORY) }
     var expandedCategoryId by remember { mutableStateOf<String?>(null) }
 
-    val openAiApiKey = BuildConfig.OPENAI_API_KEY  // used for both gpt-4o-mini OCR and receipt parsing
+    val openAiApiKey = BuildConfig.CGU_API_KEY  // used for both OCR and receipt parsing
     val tempPhotoFile = remember { File(context.cacheDir, "receipt_photo.jpg") }
     val photoUri = remember { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", tempPhotoFile) }
 
@@ -584,7 +588,7 @@ fun BudgetScreen(
 
                     Log.d("PaddleOCR", "Recognized text: $rawText")
 
-                    // ── Enhanced gpt-4o-mini prompt for 全聯 / 家樂福 templates ──
+                    // ── Enhanced receipt-parsing prompt for 全聯 / 家樂福 templates ──
                     val systemPrompt = """
                         You are a specialized Data Extraction and Budget Logic Engine for the "Smart AI Shopping Assistant" Android app.
                         Your sole responsibility is to process receipt/recipe images and output structured data for the Budget module.

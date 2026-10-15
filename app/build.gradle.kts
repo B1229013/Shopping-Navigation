@@ -20,6 +20,10 @@ val mapsApiKey: String = secret("MAPS_API_KEY")
 val geminiApiKey: String = secret("GEMINI_API_KEY")
 val groqApiKey: String = secret("GROQ_API_KEY")
 val openaiApiKey: String = secret("OPENAI_API_KEY")
+// The app's own LLM calls (shopping-list classification, receipt OCR/parsing, AI screen) go through
+// the CGU gateway; OPENAI_API_KEY / OPENAI_BASE_URL in the same .env belong to the navigation backend.
+val cguApiKey: String = secret("CGU_API_KEY")
+val cguBaseUrl: String = secret("CGU_BASE_URL").ifBlank { "https://air.cgu.edu.tw/cgullmapi/v1" }.trimEnd('/')
 val paddleOcrAccessToken: String = secret("PADDLEOCR_ACCESS_TOKEN")
 val backendUrl: String = secret("BACKEND_URL")
 
@@ -40,6 +44,8 @@ android {
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
         buildConfigField("String", "GROQ_API_KEY", "\"$groqApiKey\"")
         buildConfigField("String", "OPENAI_API_KEY", "\"$openaiApiKey\"")
+        buildConfigField("String", "CGU_API_KEY", "\"$cguApiKey\"")
+        buildConfigField("String", "CGU_BASE_URL", "\"$cguBaseUrl\"")
         buildConfigField("String", "PADDLEOCR_ACCESS_TOKEN", "\"$paddleOcrAccessToken\"")
         buildConfigField("String", "BACKEND_URL", "\"$backendUrl\"")
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey

@@ -52,7 +52,7 @@ fun ShoppingListScreen(
 
     // Ask the LLM for one item's home category; on failure the keyword fallback answers and we say so.
     suspend fun classify(name: String): String {
-        val result = classifyHomeCategories(listOf(name), BuildConfig.OPENAI_API_KEY)
+        val result = classifyHomeCategories(listOf(name), BuildConfig.CGU_API_KEY)
         result.error?.let { Toast.makeText(context, "AI 分類失敗，已改用關鍵字分類：$it", Toast.LENGTH_LONG).show() }
         return result.categories.first()
     }

@@ -32,13 +32,14 @@ def test_format_detections_empty_is_none_marker():
 
 
 def test_detection_sides_returns_unique_horizontal_sides():
+    # 5x5 grid (25 cells): each horizontal fifth is 20 units wide on a 100px image.
     dets = [
-        _det("a", [5, 5, 15, 15], 0.9),    # left
+        _det("a", [5, 5, 15, 15], 0.9),    # far-left
         _det("b", [45, 45, 55, 55], 0.9),  # center
-        _det("c", [80, 5, 95, 15], 0.9),   # right
-        _det("d", [2, 80, 10, 95], 0.9),   # left again
+        _det("c", [80, 5, 95, 15], 0.9),   # far-right
+        _det("d", [2, 80, 10, 95], 0.9),   # far-left again
     ]
-    assert detection_sides(dets, 100) == ["left", "center", "right"]
+    assert detection_sides(dets, 100) == ["far-left", "center", "far-right"]
 
 
 def test_format_ocr_includes_text_and_side():
@@ -72,6 +73,18 @@ def test_match_ocr_to_goal_chinese_synonym():
 
 def test_match_ocr_to_goal_no_match():
     assert match_ocr_to_goal([_ocr_at("Exit")], ["milk"]) == []
+
+
+def test_match_ocr_to_goal_ignores_single_char_fragment():
+    # OCR often emits stray single characters ("奶", "m"); a 1-char fragment that
+    # merely happens to be *inside* a goal term is not evidence of the goal.
+    assert match_ocr_to_goal([_ocr_at("奶")], ["牛奶"]) == []
+    assert match_ocr_to_goal([_ocr_at("m")], ["milk"]) == []
+
+
+def test_match_ocr_to_goal_short_text_inside_term_still_matches_when_two_chars():
+    # "鮮奶" is a real word inside "鮮奶油"; two or more characters still count.
+    assert match_ocr_to_goal([_ocr_at("鮮奶")], ["鮮奶油"])
 
 
 def test_format_detections_accepts_dicts():

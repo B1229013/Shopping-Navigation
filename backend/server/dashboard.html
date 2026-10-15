@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APPNAV Live Monitor</title>
+<style>
+  :root {
+    --bg: #0e1016;
+    --surface: #161922;
+    --surface2: #1e2230;
+    --border: #2a2e3d;
+    --text: #dfe1e8;
+    --text2: #7c8097;
+    --accent: #4d8eff;
+    --accent-dim: #4d8eff22;
+    --good: #34d399;
+    --good-dim: #34d39922;
+    --warn: #fbbf24;
+    --warn-dim: #fbbf2422;
+    --bad: #f87171;
+    --bad-dim: #f8717122;
+    color-scheme: dark;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .top-bar {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .top-bar h1 {
+    font-size: 16px; font-weight: 700; letter-spacing: 0.02em;
+    color: var(--accent);
+  }
+  .top-bar .status {
+    font-size: 12px; color: var(--text2);
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+  }
+  .top-bar .dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--good); margin-right: 4px; vertical-align: middle;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+  }
+  .main { display: flex; height: calc(100vh - 49px); }
+  .sidebar {
+    width: 260px; min-width: 260px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto; background: var(--surface);
+  }
+  .sidebar-header {
+    padding: 12px 16px 8px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text2);
+  }
+  .session-item {
+    display: block; padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer; transition: background 0.15s;
+  }
+  .session-item:hover { background: var(--surface2); }
+  .session-item.active { background: var(--accent-dim); border-left: 3px solid var(--accent); }
+  .session-item .sid {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 13px; font-weight: 600; color: var(--text);
+  }
+  .session-item .meta {
+    font-size: 11px; color: var(--text2); margin-top: 2px;
+  }
+  .session-item .badges { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+  .badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 3px;
+    font-weight: 600; letter-spacing: 0.02em;
+  }
+  .badge.photos { background: var(--accent-dim); color: var(--accent); }
+  .badge.arrived { background: var(--good-dim); color: var(--good); }
+  .badge.active { background: var(--warn-dim); color: var(--warn); }
+
+  .content { flex: 1; overflow-y: auto; padding: 20px; }
+  .content.empty {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text2); font-size: 15px;
+  }
+  .session-header {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .session-header h2 {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 18px; font-weight: 700;
+  }
+  .session-header .goal {
+    font-size: 13px; color: var(--text2);
+    background: var(--surface2); padding: 2px 10px; border-radius: 4px;
+  }
+  .route-bar {
+    display: flex; gap: 6px; align-items: center;
+    margin-bottom: 20px; flex-wrap: wrap;
+  }
+  .route-node {
+    font-size: 11px; padding: 3px 8px; border-radius: 4px;
+    font-weight: 600; border: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+  .route-node.visited { background: var(--good-dim); color: var(--good); border-color: var(--good); }
+  .route-node.current { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+  .route-arrow { color: var(--text2); font-size: 12px; }
+
+  .photo-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .photo-card-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  .photo-card-header .step {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px; font-weight: 700; color: var(--accent);
+  }
+  .photo-card-header .action {
+    font-size: 11px; font-weight: 700; padding: 2px 8px;
+    border-radius: 3px; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .action.MOVE { background: var(--accent-dim); color: var(--accent); }
+  .action.ARRIVED { background: var(--good-dim); color: var(--good); }
+  .action.ASK { background: var(--warn-dim); color: var(--warn); }
+
+  .photo-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+  }
+  .photo-col {
+    background: var(--surface);
+    padding: 10px;
+  }
+  .photo-col .label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text2); margin-bottom: 6px;
+  }
+  .photo-col img {
+    width: 100%; border-radius: 4px; display: block;
+    background: var(--bg); aspect-ratio: 3/4; object-fit: cover;
+  }
+  .photo-col img.placeholder {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; color: var(--text2);
+  }
+  .no-ref {
+    width: 100%; aspect-ratio: 3/4; border-radius: 4px;
+    background: var(--bg); display: flex; align-items: center;
+    justify-content: center; color: var(--text2); font-size: 12px;
+  }
+
+  .confidence-bar {
+    margin: 10px 14px;
+  }
+  .confidence-bar .row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+  }
+  .confidence-bar .lbl {
+    font-size: 11px; color: var(--text2); width: 48px; text-align: right;
+    flex-shrink: 0;
+  }
+  .confidence-bar .track {
+    flex: 1; height: 6px; background: var(--bg); border-radius: 3px;
+    overflow: hidden;
+  }
+  .confidence-bar .fill {
+    height: 100%; border-radius: 3px; transition: width 0.3s;
+  }
+  .confidence-bar .val {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px; font-weight: 700; width: 44px; flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .fill.high { background: var(--good); }
+  .fill.mid { background: var(--warn); }
+  .fill.low { background: var(--bad); }
+
+  .detail-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 1px; background: var(--border);
+    margin: 0;
+    border-top: 1px solid var(--border);
+  }
+  .detail-cell {
+    padding: 8px 14px; background: var(--surface);
+  }
+  .detail-cell .dlabel {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--text2); margin-bottom: 2px;
+  }
+  .detail-cell .dval {
+    font-size: 12px; color: var(--text); word-break: break-all;
+  }
+  .detail-cell .dval.mono {
+    font-family: "SF Mono", "Fira Code", monospace;
+  }
+
+  .guidance-text {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 13px; color: var(--text); line-height: 1.6;
+  }
+
+  @media (max-width: 700px) {
+    .main { flex-direction: column; height: auto; }
+    .sidebar { width: 100%; min-width: 0; max-height: 200px; border-right: none; border-bottom: 1px solid var(--border); }
+    .photo-pair { grid-template-columns: 1fr; }
+    .detail-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <div class="top-bar">
+    <h1>APPNAV Live Monitor</h1>
+    <span class="status"><span class="dot"></span>Auto-refresh 3s</span>
+  </div>
+  <div class="main">
+    <div class="sidebar">
+      <div class="sidebar-header">Sessions</div>
+      <div id="session-list"></div>
+    </div>
+    <div class="content empty" id="content">
+      <span>Select a session or wait for new activity</span>
+    </div>
+  </div>
+
+<script>
+const API = '';
+let currentSession = null;
+let sessionsCache = [];
+
+function confColor(c) {
+  if (c >= 0.6) return 'high';
+  if (c >= 0.3) return 'mid';
+  return 'low';
+}
+
+function confText(c) {
+  return (c * 100).toFixed(0) + '%';
+}
+
+async function fetchJSON(url) {
+  const r = await fetch(API + url);
+  if (!r.ok) return null;
+  return r.json();
+}
+
+async function loadSessions() {
+  const data = await fetchJSON('/sessions');
+  if (!data) return;
+  sessionsCache = data.sessions;
+  renderSessionList();
+  if (!currentSession && sessionsCache.length) {
+    selectSession(sessionsCache[0].id);
+  }
+}
+
+function renderSessionList() {
+  const el = document.getElementById('session-list');
+  el.innerHTML = sessionsCache.map(s => {
+    const active = s.id === currentSession;
+    const time = new Date(s.created_at).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'});
+    return `<div class="session-item ${active?'active':''}" onclick="selectSession('${s.id}')">
+      <div class="sid">${s.id}</div>
+      <div class="meta">${time} &middot; ${s.goal_objects.slice(0,3).join(', ')}${s.goal_objects.length>3?'...':''}</div>
+      <div class="badges">
+        <span class="badge photos">${s.photo_count} photos</span>
+        ${s.arrived ? '<span class="badge arrived">ARRIVED</span>' : '<span class="badge active">ACTIVE</span>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function selectSession(sid) {
+  currentSession = sid;
+  renderSessionList();
+  await loadSessionDetail(sid);
+}
+
+async function loadSessionDetail(sid) {
+  const data = await fetchJSON('/session/' + sid);
+  if (!data) return;
+  const el = document.getElementById('content');
+  el.classList.remove('empty');
+
+  const photoEntries = data.history.filter(h => h.kind === 'photo');
+
+  let routeHTML = '';
+  if (data.target_nodes && data.target_nodes.length) {
+    const visited = new Set(data.visited_targets || []);
+    const currentIdx = data.current_leg_index || 0;
+    const nodes = data.target_nodes;
+    routeHTML = '<div class="route-bar">';
+    routeHTML += '<span style="font-size:11px;color:var(--text2);margin-right:4px;">Route:</span>';
+    routeHTML += nodes.map((n, i) => {
+      let cls = '';
+      if (visited.has(n)) cls = 'visited';
+      else if (i === currentIdx) cls = 'current';
+      return `${i > 0 ? '<span class="route-arrow">&rarr;</span>' : ''}<span class="route-node ${cls}">#${n}</span>`;
+    }).join('');
+    routeHTML += '</div>';
+  }
+
+  let cardsHTML = '';
+  for (let i = photoEntries.length - 1; i >= 0; i--) {
+    const entry = photoEntries[i];
+    const nid = entry.node_id;
+    const loc = entry.localization;
+    const conf = loc ? loc.confidence : 0;
+    const matchedNid = loc ? loc.matched_nid : null;
+    const action = entry.vlm_action || 'MOVE';
+
+    cardsHTML += `<div class="photo-card">
+      <div class="photo-card-header">
+        <span class="step">Photo #${nid}</span>
+        <span class="action ${action}">${action}</span>
+        ${matchedNid !== null ? `<span style="font-size:11px;color:var(--text2)">matched &rarr; <b style="color:var(--text)">#${matchedNid}</b></span>` : '<span style="font-size:11px;color:var(--bad)">no match</span>'}
+      </div>
+      <div class="photo-pair">
+        <div class="photo-col">
+          <div class="label">Live Photo</div>
+          <img src="/session/${sid}/original/${nid}.jpg" onerror="this.style.display='none'" loading="lazy">
+        </div>
+        <div class="photo-col">
+          <div class="label">Matched Reference ${matchedNid !== null ? '#' + matchedNid : ''}</div>
+          ${matchedNid !== null
+            ? `<img src="/reference-photo/${matchedNid}.jpg" onerror="this.outerHTML='<div class=no-ref>Photo not found</div>'" loading="lazy">`
+            : '<div class="no-ref">No confident match</div>'}
+        </div>
+      </div>
+      <div class="confidence-bar">
+        <div class="row">
+          <span class="lbl">Conf.</span>
+          <div class="track"><div class="fill ${confColor(conf)}" style="width:${conf*100}%"></div></div>
+          <span class="val" style="color:var(--${confColor(conf)})">${confText(conf)}</span>
+        </div>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-cell">
+          <div class="dlabel">Reasoning</div>
+          <div class="dval mono">${loc ? loc.reasoning : 'N/A'}</div>
+        </div>
+        <div class="detail-cell">
+          <div class="dlabel">Heading</div>
+          <div class="dval mono">${loc && loc.heading !== null ? loc.heading + '&deg; (' + (loc.slot||'?') + ')' : 'N/A'}</div>
+        </div>
+        <div class="detail-cell">
+          <div class="dlabel">VLM Detections</div>
+          <div class="dval">${(entry.detections||[]).join(', ') || 'N/A'}</div>
+        </div>
+        <div class="detail-cell">
+          <div class="dlabel">OCR Texts</div>
+          <div class="dval">${(entry.ocr_texts||[]).join(', ') || 'N/A'}</div>
+        </div>
+      </div>
+      <div class="guidance-text">${entry.vlm_guidance || ''}</div>
+    </div>`;
+  }
+
+  if (!photoEntries.length) {
+    cardsHTML = '<div style="color:var(--text2);text-align:center;padding:40px">No photos yet — waiting for first upload</div>';
+  }
+
+  el.innerHTML = `
+    <div class="session-header">
+      <h2>${sid}</h2>
+      <span class="goal">${data.goal_objects.join(', ')}</span>
+    </div>
+    ${routeHTML}
+    ${cardsHTML}
+  `;
+}
+
+async function poll() {
+  await loadSessions();
+  if (currentSession) {
+    await loadSessionDetail(currentSession);
+  }
+}
+
+poll();
+setInterval(poll, 3000);
+</script>
+</body>
+</html>

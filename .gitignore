@@ -48,3 +48,10 @@ backend/testPDR/
 backend/test_topomap&locate/
 backend/*.bak-*
 backend/benchmark_results/
+
+# Old backend + localization research (backend/legacy/): data stays local
+backend/legacy/testPDR/
+backend/legacy/benchmark_results/
+backend/legacy/*.bak-*
+# 61 MB; regenerate with backend/legacy/import_neo4j_to_topomap.py
+backend/legacy/carrefour_a7_imported.json

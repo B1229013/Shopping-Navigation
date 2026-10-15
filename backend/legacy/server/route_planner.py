@@ -447,44 +447,9 @@ def user_facing_heading(
     return (fh + off) % 360.0
 
 
-def compute_relative_direction(
-    topo: TopoGraphV2,
-    current_photo_id: int,
-    next_photo_id: int,
-    matched_direction: str,
-) -> Optional[str]:
-    """Compute the relative direction from the user to the next waypoint.
-
-    Returns a human-readable direction string like '左前方', '右後方', '正前方', '後方'.
-    Returns None if coordinates are unavailable OR the user's facing is unknown
-    (``matched_direction`` empty). When facing is unknown we must NOT assert a
-    turn — an over-confident "往後方走" that contradicts what the camera sees is
-    worse than no direction at all; the caller falls back to landmarks only.
-    """
-    if not matched_direction:
-        return None
-    cur_data = topo.graph.nodes.get(current_photo_id, {})
-    nxt_data = topo.graph.nodes.get(next_photo_id, {})
-    cx, cy = _get_pdr_xy(cur_data)
-    tx, ty = _get_pdr_xy(nxt_data)
-    if cx is None or cy is None or tx is None or ty is None:
-        return None
-
-    dx, dy = tx - cx, ty - cy
-    if abs(dx) < 0.01 and abs(dy) < 0.01:
-        return "正前方"
-
-    target_bearing = math.degrees(math.atan2(dx, dy)) % 360
-
-    front_heading = _infer_front_heading_deg(topo, current_photo_id)
-    if front_heading is None:
-        return None
-
-    dir_offset = _DIRECTION_ANGLE_OFFSET.get(matched_direction, 0.0)
-    user_heading = (front_heading + dir_offset) % 360
-
-    relative = (target_bearing - user_heading + 360) % 360
-
+def bearing_to_direction_label(relative: float) -> str:
+    """Bin an egocentric relative bearing (deg, 0=正前方, clockwise +) into an
+    8-way human-readable direction label."""
     if relative <= 30 or relative >= 330:
         return "正前方"
     elif relative < 60:
@@ -501,6 +466,67 @@ def compute_relative_direction(
         return "左方"
     else:
         return "左前方"
+
+
+def compute_relative_bearing(
+    topo: TopoGraphV2,
+    current_photo_id: int,
+    next_photo_id: int,
+    matched_direction: str,
+) -> Optional[float]:
+    """Relative bearing (degrees) from the user to the next waypoint.
+
+    ``0`` = straight ahead, increasing clockwise (``90`` = to the right,
+    ``180`` = behind). Returns None if coordinates are unavailable OR the user's
+    facing is unknown (``matched_direction`` empty) — the same contract as
+    :func:`compute_relative_direction`, so callers must not assert a direction
+    when this returns None.
+    """
+    if not matched_direction:
+        return None
+    cur_data = topo.graph.nodes.get(current_photo_id, {})
+    nxt_data = topo.graph.nodes.get(next_photo_id, {})
+    cx, cy = _get_pdr_xy(cur_data)
+    tx, ty = _get_pdr_xy(nxt_data)
+    if cx is None or cy is None or tx is None or ty is None:
+        return None
+
+    dx, dy = tx - cx, ty - cy
+    if abs(dx) < 0.01 and abs(dy) < 0.01:
+        return 0.0
+
+    target_bearing = math.degrees(math.atan2(dx, dy)) % 360
+
+    front_heading = _infer_front_heading_deg(topo, current_photo_id)
+    if front_heading is None:
+        return None
+
+    dir_offset = _DIRECTION_ANGLE_OFFSET.get(matched_direction, 0.0)
+    user_heading = (front_heading + dir_offset) % 360
+
+    return (target_bearing - user_heading + 360) % 360
+
+
+def compute_relative_direction(
+    topo: TopoGraphV2,
+    current_photo_id: int,
+    next_photo_id: int,
+    matched_direction: str,
+) -> Optional[str]:
+    """Compute the relative direction from the user to the next waypoint.
+
+    Returns a human-readable direction string like '左前方', '右後方', '正前方', '後方'.
+    Returns None if coordinates are unavailable OR the user's facing is unknown
+    (``matched_direction`` empty). When facing is unknown we must NOT assert a
+    turn — an over-confident "往後方走" that contradicts what the camera sees is
+    worse than no direction at all; the caller falls back to landmarks only.
+    """
+    relative = compute_relative_bearing(
+        topo, current_photo_id, next_photo_id, matched_direction
+    )
+    if relative is None:
+        return None
+    return bearing_to_direction_label(relative)
 
 
 # ── Multi-goal TSP ──

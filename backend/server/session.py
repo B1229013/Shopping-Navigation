@@ -4,23 +4,9 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from server.topomap import TopoMap
-from server.topomap_v2 import TopoGraphV2
-
-
-@dataclass
-class SubGoal:
-    """One item in a multi-goal shopping list."""
-    name: str
-    goal_objects: List[str] = field(default_factory=list)
-    goal_photo_ids: List[int] = field(default_factory=list)
-    arrived: bool = False
-    arrived_node: Optional[int] = None
-    # Auto-appended checkout/exit destinations. These are navigated to like any
-    # other goal but are excluded from the user-facing "N goals" count.
-    is_terminal: bool = False
 
 
 @dataclass
@@ -28,10 +14,19 @@ class Session:
     id: str
     goal: str
     goal_objects: List[str]
+    arrival_goal_objects: List[str] = field(default_factory=list)
+    place: Optional[str] = None  # which map/place this session navigates in
+    # Product words only (goal_objects minus section/landmark context). This is
+    # what the arrival gate, crop-verify and "goal visible" checks match against;
+    # goal_objects (the superset) is still what the detector is prompted with.
+    target_objects: List[str] = field(default_factory=list)
+    # The rest of goal_objects: section / landmark words shown to the VLM as
+    # "clues near the target", never as the target itself.
+    context_objects: List[str] = field(default_factory=list)
     topomap: TopoMap = field(default_factory=TopoMap)
     history: List[dict] = field(default_factory=list)
     pending_question: Optional[str] = None
-    pending_is_confirm: bool = False
+    pending_is_confirm: bool = False  # is pending_question our arrival-confirm question?
     last_planned_action: Optional[str] = None
     arrived: bool = False
     pending_arrival: bool = False
@@ -45,75 +40,73 @@ class Session:
     last_img_h: int = 0
     corrections: List[str] = field(default_factory=list)
     false_positive_nodes: List[int] = field(default_factory=list)
+    repeated_misidentification_count: int = 0
+    last_corrected_nid: Optional[int] = None   # Neo4j reference node from visual localization
+    # Second-photo request: image evidence of an unsure photo, combined with the next
+    # one taken from (almost) the same place — {"evidence": {nid: v}, "t": epoch s, "raw": (x, y)}
+    pending_view: Optional[dict] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
-    # ── 地圖導航模式（從 Neo4j 載入 TopoGraphV2）──
-    topo_v2: Optional[TopoGraphV2] = None
-    place_name: str = ""
-    nav_mode: str = "explore"
-    goal_photo_ids: List[int] = field(default_factory=list)
-    planned_path: List[int] = field(default_factory=list)
-    last_route_guidance: Optional[str] = None
-    last_route_waypoints: List[dict] = field(default_factory=list)
-    last_matched_direction: str = ""
-    # ── 多目標 TSP ──
-    sub_goals: List[SubGoal] = field(default_factory=list)
-    tsp_order: List[int] = field(default_factory=list)
-    current_goal_idx: int = 0
-    # True while the multi-goal visit order is still provisional and must be
-    # (re)solved from the user's real localized position on the first successful
-    # localization. See sensor_nav._setup_map_goals / _reorder_goals_from_start.
-    tsp_pending_reorder: bool = False
+
+    # ── Heading / orientation ──────────────────────────────────────
+    user_heading: Optional[float] = None          # estimated heading in degrees [0, 360)
+    heading_slot: Optional[str] = None            # "front" / "right" / "back" / "left"
+    heading_confidence: float = 0.0               # 0.0–1.0
+
+    # ── Multi-target route planning ─────────────────────────────────
+    # All target node IDs the user wants to visit (resolved from goal_objects)
+    target_nodes: List[int] = field(default_factory=list)
+    # Targets already visited (removed from routing but kept for history)
+    visited_targets: Set[int] = field(default_factory=set)
+    # The current optimised route plan (from path_planner)
+    route_plan: Optional[object] = None   # server.path_planner.RoutePlan
+    # Index into route_plan.legs — which leg the user is currently on
+    current_leg_index: int = 0
+    # Fixed terminal nodes
+    checkout_node: Optional[int] = None
+    exit_node: Optional[int] = None
+    # Navigation phase: shopping → checkout → exit → done
+    phase: str = "shopping"
+    # Mapping from target node ID → user's original item name (e.g. {14: "文旦"})
+    target_node_to_item: Dict[int, str] = field(default_factory=dict)
+
+    # ── Perception debug (last photo) ─────────────────────────────────
+    debug_perception: Optional[Dict] = None
 
     @property
-    def current_sub_goal(self) -> Optional[SubGoal]:
-        if not self.sub_goals or not self.tsp_order:
-            return None
-        if self.current_goal_idx >= len(self.tsp_order):
-            return None
-        return self.sub_goals[self.tsp_order[self.current_goal_idx]]
+    def remaining_targets(self) -> List[int]:
+        """Targets not yet visited, in their current planned order."""
+        return [t for t in self.target_nodes if t not in self.visited_targets]
+
+    def mark_target_visited(self, node: int) -> None:
+        """Mark a target as reached."""
+        self.visited_targets.add(node)
+
+    def add_target(self, node: int) -> None:
+        """Add a new target mid-route."""
+        if node not in self.target_nodes:
+            self.target_nodes.append(node)
+
+    def remove_target(self, node: int) -> None:
+        """Remove a target mid-route (user changed their mind)."""
+        self.target_nodes = [t for t in self.target_nodes if t != node]
+        self.visited_targets.discard(node)
 
     @property
-    def all_sub_goals_arrived(self) -> bool:
-        return bool(self.sub_goals) and all(sg.arrived for sg in self.sub_goals)
-
-    @property
-    def shopping_goal_count(self) -> int:
-        """Number of user shopping goals, excluding auto-appended checkout/exit."""
-        return sum(1 for sg in self.sub_goals if not sg.is_terminal)
-
-    @property
-    def shopping_progress_index(self) -> int:
-        """1-based position of the current goal among shopping goals in the visit
-        order. Counts shopping goals up to and including the current one; while at
-        a terminal (checkout/exit) it returns the shopping-goal total."""
-        count = 0
-        for j, order_idx in enumerate(self.tsp_order):
-            if 0 <= order_idx < len(self.sub_goals) and not self.sub_goals[order_idx].is_terminal:
-                count += 1
-            if j == self.current_goal_idx:
-                break
-        return count
-
-    def advance_to_next_goal(self) -> Optional[SubGoal]:
-        """Advance to the next unfinished sub-goal. Returns it, or None if all done."""
-        self.current_goal_idx += 1
-        sg = self.current_sub_goal
-        if sg is not None:
-            self.goal_photo_ids = sg.goal_photo_ids
-            self.goal_objects = sg.goal_objects
-            self.planned_path = []
-            self.last_route_guidance = None
-            self.last_route_waypoints = []
-        return sg
+    def all_targets_visited(self) -> bool:
+        return len(self.remaining_targets) == 0
 
 
 class SessionStore:
     def __init__(self) -> None:
         self._sessions: Dict[str, Session] = {}
 
-    def create(self, goal: str, goal_objects: List[str]) -> Session:
+    def create(self, goal: str, goal_objects: List[str], place: Optional[str] = None,
+               target_objects: Optional[List[str]] = None,
+               context_objects: Optional[List[str]] = None) -> Session:
         sid = uuid.uuid4().hex[:8]
-        s = Session(id=sid, goal=goal, goal_objects=goal_objects)
+        s = Session(id=sid, goal=goal, goal_objects=goal_objects, place=place,
+                    target_objects=list(target_objects if target_objects is not None else goal_objects),
+                    context_objects=list(context_objects or []))
         self._sessions[sid] = s
         return s
 

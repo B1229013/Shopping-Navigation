@@ -1009,7 +1009,27 @@ async def upload_photo(
     localized_photo_id: Optional[int] = None
     localization_score: Optional[float] = None
     localization_candidates: list[dict] = []
+    used_fusion = False
+    # 融合定位（視覺DINO+物件+OCR，Top-1≈66%）；缺 DINO/sidecar 或失敗 → 自動退回 WGM。
     if s.topo_v2 is not None:
+        try:
+            from server.locate_fusion import fusion_localize_for_server
+            ranked = fusion_localize_for_server(
+                s.topo_v2, str(photo_path), det_dicts, ocr_bbox_list or None, top_k=5)
+            if ranked:
+                localized_photo_id = ranked[0][0]
+                localization_score = round(float(ranked[0][1]), 4)
+                s.last_matched_direction = ""  # 融合不判方向（單張無法可靠判朝向）
+                localization_candidates = [
+                    {"nid": p, "photo_id": p, "score": round(float(sc), 4),
+                     "photo_url": f"/snav/{session_id}/topo_photo/{p}"}
+                    for p, sc in ranked[:5]]
+                used_fusion = True
+                log.info("[snav %s] localized (fusion): photo_id=%d score=%.3f",
+                         session_id, localized_photo_id, localization_score)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[snav %s] fusion localize failed, fallback WGM: %s", session_id, e)
+    if s.topo_v2 is not None and not used_fusion:
         try:
             from server.locate_v2 import localize_photo as _localize
             loc_result = _localize(

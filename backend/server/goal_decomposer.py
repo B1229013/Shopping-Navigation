@@ -3,53 +3,27 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List
+from typing import Iterable, List, Tuple
 
 import requests
 
 from server.config import (
-    GEMINI_API_KEY, GEMINI_MODEL,
     OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL,
-    OLLAMA_URL, OLLAMA_MODEL,
-    GOAL_DECOMPOSE_TIMEOUT_S, VLM_BACKEND,
+    GOAL_DECOMPOSE_TIMEOUT_S,
 )
 from server.prompts import GOAL_DECOMPOSE_PROMPT
 
 log = logging.getLogger(__name__)
 
-_MAX_ITEMS = 35
-
-_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+_MAX_ITEMS = 10
 
 
 def _fallback(goal: str) -> List[str]:
-    words = re.findall(r"[a-zA-Z]+", goal.lower())
-    stop = {"find", "the", "a", "an", "to", "where", "is", "are", "all", "every"}
-    return [w for w in words if w not in stop] or [goal.strip().lower()]
-
-
-def _call_gemini(prompt: str) -> str:
-    url = _GEMINI_URL.format(model=GEMINI_MODEL, key=GEMINI_API_KEY)
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 256},
-    }
-    r = requests.post(url, json=body, timeout=GOAL_DECOMPOSE_TIMEOUT_S)
-    r.raise_for_status()
-    candidates = r.json().get("candidates", [])
-    if not candidates:
-        return ""
-    return candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-
-
-def _call_ollama(prompt: str) -> str:
-    r = requests.post(
-        f"{OLLAMA_URL}/api/generate",
-        json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-        timeout=GOAL_DECOMPOSE_TIMEOUT_S,
-    )
-    r.raise_for_status()
-    return r.json().get("response", "")
+    # Extract Chinese tokens (consecutive CJK chars) and English words
+    tokens = re.findall(r'[一-鿿㐀-䶿]+|[a-zA-Z]+', goal)
+    stop = {"find", "the", "a", "an", "to", "where", "is", "are", "all", "every", "x"}
+    result = [w for w in tokens if w.lower() not in stop and len(w) > 0]
+    return result or [goal.strip().lower()]
 
 
 def _call_openai(prompt: str) -> str:
@@ -57,9 +31,10 @@ def _call_openai(prompt: str) -> str:
     body = {
         "model": OPENAI_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "max_tokens": 256,
+        "max_completion_tokens": 2048 if "luna" in OPENAI_MODEL else 256,
     }
+    if "luna" not in OPENAI_MODEL:
+        body["temperature"] = 0.1
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     r = requests.post(url, json=body, headers=headers, timeout=GOAL_DECOMPOSE_TIMEOUT_S)
     r.raise_for_status()
@@ -73,57 +48,68 @@ def decompose_goal(goal: str) -> List[str]:
     prompt = GOAL_DECOMPOSE_PROMPT.format(goal=goal)
 
     try:
-        if VLM_BACKEND == "gemini":
-            if not GEMINI_API_KEY:
-                log.warning("GEMINI_API_KEY not set — using fallback")
-                return _fallback(goal)
-            text = _call_gemini(prompt)
-        elif VLM_BACKEND == "openai":
-            if not OPENAI_API_KEY:
-                log.warning("OPENAI_API_KEY not set — using fallback")
-                return _fallback(goal)
-            text = _call_openai(prompt)
-        else:
-            text = _call_ollama(prompt)
+        if not OPENAI_API_KEY:
+            log.warning("OPENAI_API_KEY not set — using fallback")
+            return _fallback(goal)
+        text = _call_openai(prompt)
     except Exception as e:
-        log.warning("goal decompose failed (%s): %s — falling back", VLM_BACKEND, e)
+        log.warning("goal decompose failed: %s — falling back", e)
         return _fallback(goal)
 
-    items = [s.strip() for s in text.split(",")]
-    items = [s for s in items if 1 <= len(s) <= 40]
+    items = [s.strip().lower() for s in text.split(",")]
+    items = [s for s in items if 1 <= len(s) <= 30]
     if not (1 <= len(items) <= _MAX_ITEMS):
         log.warning("goal decompose produced %d items — falling back", len(items))
         return _fallback(goal)
     return items
 
 
-# ── Multi-goal splitting ──
-
-_QTY_RE = re.compile(r"\s*[xX×]\s*\d+\s*$")
-_SPLIT_RE = re.compile(r"[,，、;；\n]+")
+_QTY_SUFFIX = re.compile(r"\s*x\s*\d+\s*$", re.IGNORECASE)
 
 
-def split_multi_goals(goal: str) -> List[str]:
-    """Split a combined goal string into individual item names.
-
-    Handles formats like:
-      "牛奶 x1, 麵包 x2"       → ["牛奶", "麵包"]
-      "牛奶、麵包、衛生紙"      → ["牛奶", "麵包", "衛生紙"]
-      "找飲水機"                → ["找飲水機"]   (single goal)
-    """
-    parts = _SPLIT_RE.split(goal)
-    items = []
-    for p in parts:
-        p = p.strip()
-        if not p:
+def _goal_items(goal: str) -> List[str]:
+    """Product words from the raw goal string, e.g. "牛奶 x2, find the milk" ->
+    ["牛奶", "milk"]. Splits on commas/、, strips the iOS " xN" quantity suffix and
+    drops stop words via the same tokenizer as the LLM fallback."""
+    items: List[str] = []
+    for part in re.split(r"[,，、]", goal):
+        part = _QTY_SUFFIX.sub("", part).strip().lower()
+        if not part:
             continue
-        p = _QTY_RE.sub("", p).strip()
-        if p:
-            items.append(p)
-    if not items:
-        items = [goal.strip()]
-    seen: List[str] = []
-    for it in items:
-        if it not in seen:
-            seen.append(it)
-    return seen
+        for tok in _fallback(part):
+            tok = tok.lower()
+            if tok and tok not in items:
+                items.append(tok)
+    return items
+
+
+def split_goal_objects(
+    goal: str,
+    goal_objects: List[str],
+    extra_target_terms: Iterable[str] = (),
+) -> Tuple[List[str], List[str]]:
+    """Split decomposed ``goal_objects`` into (targets, context).
+
+    ``decompose_goal`` intentionally mixes the product with its section and nearby
+    landmarks ("dairy section", "cooler") so the detector has context to look for.
+    Only the product and its variants may count as *the target* (for the arrival
+    gate, crop verification and "goal visible in photo" hints); everything else
+    is context. A decomposed object is a target when it contains, or is contained
+    in, one of the goal's own product words (or ``extra_target_terms``, e.g. the
+    GOAL_CLASS_MAP synonyms). The goal's own product words are always targets,
+    listed first, even if the LLM omitted them.
+    """
+    items = _goal_items(goal)
+    seeds = [t.lower().strip() for t in extra_target_terms if t and t.strip()]
+
+    targets: List[str] = list(items)
+    context: List[str] = []
+    for g in goal_objects:
+        gl = g.lower().strip()
+        if not gl:
+            continue
+        if gl in targets:
+            continue
+        is_target = gl in seeds or any(it in gl or gl in it for it in items)
+        (targets if is_target else context).append(gl)
+    return targets, context

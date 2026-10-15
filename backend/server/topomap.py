@@ -61,11 +61,7 @@ class TopoMap:
         }
 
     def summarize_for_vlm(self, current_id: int) -> str:
-        """Walk from start to current, produce prose summary for the VLM.
-
-        Includes per-step OCR signs and a trailing 'areas visited' digest
-        so the VLM can judge whether the user is heading the right way.
-        """
+        """Walk from start to current, produce <150-word prose summary for the VLM."""
         if self.graph.number_of_nodes() == 0:
             return "No locations visited yet."
 
@@ -84,28 +80,18 @@ class TopoMap:
             path = [current_id]
 
         parts: List[str] = []
-        all_signs: List[str] = []
         for i, nid in enumerate(path):
             node = self.graph.nodes[nid]
             label = node["summary"] or ", ".join(node["detected"][:3]) or f"location {nid}"
             ocr = node.get("ocr_texts", [])
             if ocr:
-                label += f' [signs: {", ".join(ocr[:5])}]'
-                all_signs.extend(ocr[:5])
+                label += f' [signs: {", ".join(ocr[:3])}]'
             if i == 0:
                 parts.append(f"Started at {label}")
             else:
                 action = self.graph.edges[path[i - 1], nid]["action"]
                 parts.append(f"{action}, arrived at {label}")
-
-        summary = ". ".join(parts) + "."
-
-        if len(path) >= 3 and all_signs:
-            unique = list(dict.fromkeys(all_signs))
-            summary += f"\n\nAreas passed so far ({len(path)} steps): {', '.join(unique[:12])}. If NONE of these relate to the goal, the user may be heading the wrong direction."
-
-
-        return summary
+        return ". ".join(parts) + "."
 
     def render_png(self, current_id: Optional[int] = None) -> bytes:
         fig, ax = plt.subplots(figsize=(6, 6))

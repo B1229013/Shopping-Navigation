@@ -28,29 +28,16 @@ class VLMResponse(BaseModel):
 
 class StartSessionRequest(BaseModel):
     goal: str
-    place_name: str = ""
+    place: Optional[str] = None  # which map/place to navigate in
 
-
-class SubGoalInfo(BaseModel):
-    name: str
-    arrived: bool = False
-    # True for auto-appended checkout/exit destinations (excluded from the
-    # user-facing goal count; the client can render them separately).
-    is_terminal: bool = False
 
 class StartSessionResponse(BaseModel):
     session_id: str
     guidance: str
     action: Literal["TAKE_PHOTO"] = "TAKE_PHOTO"
     goal_objects: List[str]
-    nav_mode: str = "explore"
-    goal_photo_ids: List[int] = []
-    place_name: str = ""
-    sub_goals: List[SubGoalInfo] = []
-    tsp_order: List[int] = []
-    current_goal_idx: int = 0
-    current_goal_name: str = ""
-    total_goals: int = 1
+    place: Optional[str] = None  # the resolved place used for this session
+    goal_node_id: Optional[int] = None  # first target node for AR arrow
 
 
 class AnswerRequest(BaseModel):
@@ -58,7 +45,12 @@ class AnswerRequest(BaseModel):
 
 
 class ConfirmArrivalRequest(BaseModel):
-    kind: Literal["confirmed", "false_positive", "wrong_instance"]
+    # "repeated_misidentification": the user has rejected an ARRIVED claim for
+    # this same goal multiple times in a row — unlike false_positive/wrong_instance
+    # (which just resume the same MOVE search), this tells the backend the current
+    # strategy keeps failing, so it should change approach (e.g. ask the user a
+    # clarifying question about the item's appearance instead of just retrying).
+    kind: Literal["confirmed", "false_positive", "wrong_instance", "repeated_misidentification"]
 
 
 class TurnResponse(BaseModel):
@@ -67,38 +59,85 @@ class TurnResponse(BaseModel):
     question: Optional[str] = None
     node_id: int
     annotated_photo_url: Optional[str] = None
-    localized_photo_id: Optional[int] = None
-    localization_score: Optional[float] = None
-    localization_candidates: List[dict] = []
-    goal_photo_ids: List[int] = []
-    planned_route: List[int] = []
-    route_target_photo_id: Optional[int] = None
-    route_distance: Optional[float] = None
-    route_hops: Optional[int] = None
-    route_guidance: Optional[str] = None
-    route_waypoints: List[dict] = []
-    sub_goals: List[SubGoalInfo] = []
-    current_goal_idx: int = 0
-    current_goal_name: str = ""
-    total_goals: int = 1
+    # Photo unusable (blurred / dark / occluded / nothing recognisable): ask for a retake.
+    # When set, the photo did not update the user's position.
+    retake_hint: Optional[str] = None
+    # Several places look alike: take one more photo after turning on the spot; the
+    # next photo is combined with this one.
+    second_photo_hint: Optional[str] = None
+    # Neo4j visual localization (position correction)
+    corrected_node_id: Optional[int] = None       # reference map node ID
+    corrected_confidence: Optional[float] = None   # 0.0–1.0
+    corrected_location: Optional[str] = None       # human-readable location name
+    estimated_x: Optional[float] = None            # map position between nodes (m)
+    estimated_y: Optional[float] = None
+    # Heading estimation from directional photo matching
+    heading_deg: Optional[float] = None            # estimated user heading [0, 360)
+    heading_slot: Optional[str] = None             # "front"/"right"/"back"/"left"
+    heading_confidence: Optional[float] = None     # 0.0–1.0
+    # Route-aware navigation context
+    next_instruction: Optional[str] = None         # e.g. "右轉，走向第3區"
+    remaining_targets: Optional[int] = None        # how many targets left
+    # Navigation phase
+    phase: Optional[str] = None                    # "shopping" | "checkout" | "exit" | "done"
+    # Per-item shopping progress
+    visited_item_names: Optional[List[str]] = None   # items already found
+    current_target_name: Optional[str] = None        # item being navigated to now
+    goal_item_names: Optional[List[str]] = None      # all items in route order
+    # Active goal node for AR arrow (the node the user should walk toward)
+    goal_node_id: Optional[int] = None
 
 
-class ConfirmLocationRequest(BaseModel):
-    photo_id: int
+class PathStart(BaseModel):
+    wp: int
+    x: float
+    y: float
+    source: str                      # "phone" | "photo" | "entrance"
 
 
-class ConfirmLocationResponse(BaseModel):
-    guidance: str
-    localized_photo_id: int
-    goal_photo_ids: List[int] = []
-    route_guidance: Optional[str] = None
-    route_waypoints: List[dict] = []
-    route_distance: Optional[float] = None
-    route_hops: Optional[int] = None
-    sub_goals: List[SubGoalInfo] = []
-    current_goal_idx: int = 0
-    current_goal_name: str = ""
-    total_goals: int = 1
+class PathTarget(BaseModel):
+    wp: int
+    x: float
+    y: float
+    products: List[str] = []
+    neo_nid: Optional[int] = None
+
+
+class PathTurn(BaseModel):
+    direction: str                   # heading.RelativeDirection value
+    text_zh: str
+    at: List[float]                  # [x, y] where the step starts
+    to: List[float]                  # [x, y] where the step ends
+    distance_m: float
+    passed_nodes: int
+
+
+class PathNode(BaseModel):
+    id: int
+    x: float
+    y: float
+
+
+class PathEdge(BaseModel):
+    from_id: int = Field(..., alias="from")
+    to: int
+    length: float
+
+    model_config = {"populate_by_name": True}
+
+
+class PathResponse(BaseModel):
+    """Route on the editor map for the phone's PathFollower + mini-map."""
+    place: str
+    goal_item: str
+    start: PathStart
+    target: PathTarget
+    path: List[int]                  # waypoint ids
+    polyline: List[List[float]]      # [[x, y], ...] the phone walks along
+    turns: List[PathTurn]
+    distance_m: float
+    nodes: List[PathNode]            # whole map, for drawing
+    edges: List[PathEdge]
 
 
 class NodeJSON(BaseModel):
@@ -125,32 +164,45 @@ class MapJSON(BaseModel):
     goal_node: Optional[int]
 
 
-class VLMDetectionItem(BaseModel):
-    label: str
-    bbox: List[float] = Field(..., description="[x1,y1,x2,y2] absolute pixels")
-    score: float
-    position: str = ""
-
-
-class VLMOCRItem(BaseModel):
-    text: str
-    bbox: List[List[float]] = Field(..., description="[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]")
-    score: float
-    position: str = ""
-
-
-class AisleSignItem(BaseModel):
-    aisle_number: Optional[int] = None
-    categories: List[str] = []
-    position: str = ""
-
-class VLMPerceptionResponse(BaseModel):
-    detections: List[VLMDetectionItem] = []
-    ocr_texts: List[VLMOCRItem] = []
-    aisle_signs: List[AisleSignItem] = []
-    scene_description: str = ""
-
-
 class ErrorResponse(BaseModel):
     error: str
     detail: str
+
+
+# ── Multi-target route planning ─────────────────────────────────────────
+
+class PlanRouteRequest(BaseModel):
+    """Request to plan an optimised multi-target route."""
+    targets: List[str] = Field(..., description="List of target queries (product names, locations)")
+    start_node: Optional[int] = Field(None, description="Starting node ID (from visual localization)")
+    checkout_node: Optional[int] = Field(None, description="Checkout/counter node ID")
+    exit_node: Optional[int] = Field(None, description="Exit node ID")
+    place: Optional[str] = Field(None, description="Map/place name")
+
+
+class RouteLegResponse(BaseModel):
+    from_node: int = Field(..., alias="from")
+    to: int
+    path: List[int]
+    cost: float
+    actions: List[str]
+    purpose: str  # "target" | "checkout" | "exit"
+
+    class Config:
+        populate_by_name = True
+
+
+class PlanRouteResponse(BaseModel):
+    visit_order: List[int] = Field(..., description="Target nodes in optimal visit order")
+    total_cost: float
+    full_path: List[int]
+    legs: List[RouteLegResponse]
+    resolved_targets: List[dict] = Field(default_factory=list, description="Query → node resolution results")
+    checkout_node: Optional[int] = None
+    exit_node: Optional[int] = None
+
+
+class ModifyRouteRequest(BaseModel):
+    """Add or remove targets mid-route."""
+    add: List[str] = Field(default_factory=list, description="Targets to add")
+    remove: List[str] = Field(default_factory=list, description="Targets to remove")

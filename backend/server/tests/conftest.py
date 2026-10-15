@@ -22,6 +22,16 @@ def _no_image_quality_gate(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_route_graph_cache(monkeypatch):
+    """Route graphs are cached per place name and every test calls its place "test",
+    so one test's map would leak into the next."""
+    import sys
+    srv = sys.modules.get("server.server")
+    if srv is not None:
+        monkeypatch.setattr(srv, "_editor_graphs", {})
+
+
+@pytest.fixture(autouse=True)
 def _no_server_dino(monkeypatch):
     """Server-side DINOv2 would load (or download) facebook/dinov2-base for every API
     test photo; tests that cover it turn it back on and fake the embedding."""

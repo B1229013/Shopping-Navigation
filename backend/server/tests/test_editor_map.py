@@ -165,3 +165,88 @@ def test_far_node_still_gets_a_position_but_donates_no_labels():
     assert g.waypoint_for_neo(3) is None
     products = g.graph.nodes[g.waypoint_for_neo(2)]["products"]
     assert "優格" in products and "狗飼料" not in products
+
+
+# ── Route graph built from the Neo4j reference map ───────────────────────
+
+from server.neo4j_client import RefMap, RefObject, RefPhotoNode
+
+
+def _obj(label, ocr=""):
+    return RefObject(label=label, label_norm=label, score=0.9, ocr_text=ocr, role="商品", grid_cell="c")
+
+
+def _neo_map():
+    """L-shaped aisle: 1 (0,2) → 2 (0,8) → 3 (5,8); 4 sits 0.4 m from 1 but has no WALKWAY."""
+    m = RefMap(place="test")
+    for nid, (x, y), objs, nbrs in [
+        (1, (0, 2), [_obj("貨架")], [2]),
+        (2, (0, 8), [_obj("牛奶區吊牌")], [3]),           # WALKWAY stored one-way
+        (3, (5, 8), [_obj("優格", ocr="特價")], []),
+        (4, (0.4, 2), [_obj("推車")], []),
+    ]:
+        m.photos[nid] = RefPhotoNode(nid=nid, photo_file=f"{nid}.jpg", pdr_x=x, pdr_y=y, heading_deg=0.0,
+                                     session="s", total_steps=0, total_distance_m=0.0, objects=objs,
+                                     neighbor_nids=nbrs)
+    return m
+
+
+class TestBuildFromRefMap:
+    def test_waypoints_are_neo4j_nodes_in_neo4j_coordinates(self):
+        g = em.build_from_ref_map(_neo_map())
+        assert set(g.graph.nodes) == {1, 2, 3, 4}
+        assert g.position(2) == (0.0, 8.0)
+        assert all(g.waypoint_for_neo(n) == n for n in (1, 2, 3, 4))   # no nearest-point mapping
+
+    def test_walkways_are_walkable_both_ways_with_metre_lengths(self):
+        g = em.build_from_ref_map(_neo_map())
+        assert g.graph.has_edge(2, 1) and g.graph.has_edge(3, 2)
+        assert g.graph.edges[1, 2]["length"] == pytest.approx(6.0)
+        assert em.plan(g, 3, 1) == [3, 2, 1]
+
+    def test_labels_are_the_nodes_own_objects_and_ocr(self):
+        g = em.build_from_ref_map(_neo_map())
+        assert g.graph.nodes[3]["products"] == ["優格", "特價"]
+        assert em.find_goal_waypoint(g, "牛奶") == 2
+
+    def test_extra_links_and_virtual_entrance(self):
+        extra = {"links": [{"from": 1, "to": 4}, {"from": 4, "to": 99}],   # 99: unknown → ignored
+                 "entrance": {"x": 0, "y": 0, "links": [1]}}
+        g = em.build_from_ref_map(_neo_map(), extra)
+        assert g.graph.has_edge(1, 4) and 99 not in g.graph
+        assert g.entrance == em.ENTRANCE_ID and g.position(em.ENTRANCE_ID) == (0.0, 0.0)
+        assert g.waypoint_for_neo(em.ENTRANCE_ID) is None          # a route start, never a photo fix
+        assert em.find_goal_waypoint(g, "牛奶") == 2
+        route = em.route_payload(g, em.plan(g, g.entrance, 3))
+        assert route["path"] == [em.ENTRANCE_ID, 1, 2, 3]
+        assert route["distance_m"] == pytest.approx(2 + 6 + 5)
+
+    def test_without_entrance_the_node_nearest_the_origin_is_the_entrance(self):
+        assert em.build_from_ref_map(_neo_map()).entrance == 1
+
+
+def test_route_graph_source_neo4j_reads_place_links_file(tmp_path, monkeypatch):
+    import json
+    from server import server as srv
+    links = tmp_path / "neo4j_links"
+    links.mkdir()
+    (links / "other.json").write_text(json.dumps({"place": "elsewhere", "links": [{"from": 1, "to": 3}]}),
+                                      encoding="utf-8")
+    (links / "test.json").write_text(json.dumps({"place": "test", "links": [{"from": 1, "to": 4}],
+                                                 "entrance": {"x": 0, "y": 0, "links": [1]}}),
+                                     encoding="utf-8")
+
+    class _FakeNeo4j:
+        def load_reference_map(self, place):
+            return _neo_map() if place == "test" else RefMap(place=place)
+
+    monkeypatch.setattr(srv, "EDITOR_MAP_DIR", tmp_path)
+    monkeypatch.setattr(srv._config, "ROUTE_MAP_SOURCE", "neo4j")
+    monkeypatch.setattr(srv, "get_neo4j", lambda: _FakeNeo4j())
+    monkeypatch.setattr(srv, "_editor_graphs", {})
+    g = srv._editor_graph_for("test")
+    assert g.graph.has_edge(1, 4) and not g.graph.has_edge(1, 3)
+    assert g.entrance == em.ENTRANCE_ID
+    assert srv._editor_graph_for("test") is g                     # cached
+    assert srv._editor_graph_for("nowhere") is None               # no Neo4j map → no route
+    assert "nowhere" not in srv._editor_graphs                    # …and retried next time

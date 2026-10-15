@@ -810,10 +810,10 @@ def _build_route_context(s, loc_result, detections=None,
                             and loc_result.confidence >= 0.55)
         user_heading = loc_result.matched_heading if heading_reliable else None
 
-        # Steps are computed on the hand-corrected editor map when one exists —
-        # the same route the phone's PathFollower walks — so the 🗺 line and the
-        # VLM prompt agree with the mini-map. The Neo4j walkway graph (duplicate
-        # coordinates, a "路口" at every node) is only the fallback.
+        # Steps are computed on the route graph (_editor_graph_for: the Neo4j map +
+        # maps/neo4j_links, or the hand-corrected editor map) — the same route the
+        # phone's PathFollower walks — so the 🗺 line and the VLM prompt agree with
+        # the mini-map. The raw walkway-leg conversion below is only the fallback.
         steps_zh: list[str] = []      # for the VLM prompt: step + the area it leads to
         step_texts: list[str] = []    # for the app/TTS: the steps themselves
         next_zh: Optional[str] = None
@@ -823,6 +823,7 @@ def _build_route_context(s, loc_result, detections=None,
         # multi-step chain below must resume after exactly these, or a leg is lost.
         head_steps = 1
         editor = _editor_graph_for(s.place) if localized else None
+        editor_route_found = False
         if editor is not None:
             start_wp = editor.waypoint_for_neo(loc_result.matched_nid)
             if start_wp is None and ref_node is not None:
@@ -830,17 +831,19 @@ def _build_route_context(s, loc_result, detections=None,
             goal_wp = editor_map_mod.find_goal_waypoint(editor, goal_item)
             if goal_wp is None:
                 goal_wp = editor.waypoint_for_neo(current_leg.to_node)
-            if start_wp is not None and goal_wp is not None:
+            path = (editor_map_mod.plan(editor, start_wp, goal_wp)
+                    if start_wp is not None and goal_wp is not None else [])
+            if path:   # unreachable on the route graph → the walkway-leg fallback below
+                editor_route_found = True
                 at_target = at_target or start_wp == goal_wp
-                route = editor_map_mod.route_payload(
-                    editor, editor_map_mod.plan(editor, start_wp, goal_wp), user_heading=user_heading)
+                route = editor_map_mod.route_payload(editor, path, user_heading=user_heading)
                 turns = route["turns"]
                 steps_zh = [t["text_zh"] for t in turns[:3]]
                 step_texts = [t["text_zh"] for t in turns]
                 next_zh = route.get("next_instruction_zh") or None
                 if len(turns) > 1 and turns[0]["direction"] == RelativeDirection.STRAIGHT:
                     head_steps = 2
-        elif heading_reliable:
+        if not editor_route_found and heading_reliable:
             node_positions = {nid: (node.pdr_x, node.pdr_y) for nid, node in ref_map.photos.items()}
             rel_instructions = convert_leg_to_relative(
                 _path_from_current(ref_map, loc_result.matched_nid,
@@ -2968,13 +2971,47 @@ from server.store_map import get_store_topomap
 _editor_graphs: dict = {}
 
 
+def _neo4j_route_graph(place: str):
+    """Route graph built from the Neo4j reference map (+ maps/neo4j_links/*.json for
+    that place), or None when Neo4j has no map for it."""
+    neo4j = get_neo4j()
+    ref_map = neo4j.load_reference_map(place) if neo4j else None
+    if not ref_map or not ref_map.photos:
+        return None
+    extra = None
+    for path in sorted((EDITOR_MAP_DIR / "neo4j_links").glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:  # a broken links file must not take the server down
+            log.warning("neo4j links %s unreadable: %s", path.name, e)
+            continue
+        if data.get("place") == place:
+            extra = data
+            break
+    graph = editor_map_mod.build_from_ref_map(ref_map, extra)
+    if graph.graph.number_of_edges() == 0:
+        log.warning("route map for %s: Neo4j has no WALKWAY edges — no route graph", place)
+        return None
+    log.info("route map for %s from Neo4j: %d nodes, %d edges (extra links: %s, entrance: %s)",
+             place, graph.graph.number_of_nodes(), graph.graph.number_of_edges(),
+             len((extra or {}).get("links", [])), graph.entrance)
+    return graph
+
+
 def _editor_graph_for(place: Optional[str]):
-    """The walkable editor graph for ``place`` (cached), with Neo4j product labels
-    merged in on first use; None when no ``maps/*.json`` declares that place."""
+    """The walkable route graph for ``place`` (cached). ROUTE_MAP_SOURCE=neo4j (default)
+    builds it from the Neo4j reference map, so routes and localization share one set of
+    coordinates; "editor" uses the hand-corrected maps/*.json with Neo4j labels merged
+    in. None when neither has the place."""
     if not place:
         return None
     if place in _editor_graphs:
         return _editor_graphs[place]
+    if _config.ROUTE_MAP_SOURCE == "neo4j":
+        graph = _neo4j_route_graph(place)
+        if graph is not None:      # not cached when Neo4j was unreachable: retry next time
+            _editor_graphs[place] = graph
+        return graph
     graph = None
     for path in sorted(EDITOR_MAP_DIR.glob("*.json")):
         try:
@@ -3019,7 +3056,7 @@ def get_session_path(session_id: str,
     if g is None:
         raise HTTPException(status_code=404, detail={
             "error": "no_editor_map",
-            "detail": f"no editor map for place {s.place!r} in {EDITOR_MAP_DIR}"})
+            "detail": f"no route map for place {s.place!r} (ROUTE_MAP_SOURCE={_config.ROUTE_MAP_SOURCE})"})
 
     goals = _current_goal_objects(s)
     goal_item = goals[0] if goals else (s.target_objects[0] if s.target_objects else s.goal)

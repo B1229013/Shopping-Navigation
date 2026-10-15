@@ -75,6 +75,10 @@ SAM_WEIGHTS = _LOCAL_MODELS / "sam_vit_h_4b8939.pth"
 OUTPUT_ROOT = PROJECT_ROOT / "output" / "sessions"
 # Hand-corrected PDR waypoint maps (see server/editor_map.py); one *.json per place
 EDITOR_MAP_DIR = PROJECT_ROOT / "maps"
+# Where /path routes come from: "neo4j" = the Neo4j reference map itself (one set of
+# coordinates with localization) + maps/neo4j_links/<place>.json for missing links and
+# the entrance; "editor" = the hand-corrected maps/*.json walks.
+ROUTE_MAP_SOURCE = os.environ.get("ROUTE_MAP_SOURCE", "neo4j").strip().lower()
 
 # LLM service — OpenAI GPT-4o
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")

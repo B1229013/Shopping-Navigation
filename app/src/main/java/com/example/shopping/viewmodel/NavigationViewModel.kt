@@ -66,7 +66,14 @@ class NavigationViewModel : ViewModel() {
 
     // ── Route on the editor map (GET /session/{id}/path) ──
     var route: PathResponse? by mutableStateOf(null)
+    /** First step of the route, e.g. "直走 12 公尺後右轉". */
     var routeGuidance: String? by mutableStateOf(null)
+    /** Why there is no route (no editor map / goal not on it / request failed). */
+    var routeStatusMessage: String? by mutableStateOf(null)
+
+    /** Server heading when it is trustworthy enough to draw (mini-map arrow). */
+    val confidentHeadingDeg: Double?
+        get() = headingDeg?.takeIf { (headingConfidence ?: 0.0) >= MIN_HEADING_CONFIDENCE }
 
     // AR guidance arrow — egocentric direction to the first route step.
     // directionDeg: 0 = straight ahead, clockwise positive. null → hide arrow.
@@ -82,9 +89,12 @@ class NavigationViewModel : ViewModel() {
     val captureExecutor = Executors.newSingleThreadExecutor()!!
 
     fun init(sessionId: String?, goal: String, initialGuidance: String) {
+        val isNewSession = sessionId != null && sessionId != this.sessionId
         this.sessionId = sessionId
         this.goal = goal
         this.guidance = initialGuidance
+        // As on iOS: show the route from the entrance before the first photo.
+        if (isNewSession) loadRoute()
     }
 
     private fun handleTurnResponse(response: TurnResponse) {
@@ -148,17 +158,24 @@ class NavigationViewModel : ViewModel() {
                 }
                 route = path
                 routeGuidance = path.turns.firstOrNull()?.text_zh
-                    ?.let { "$it（全程約 ${path.distance_m.toInt()} 公尺）" }
+                routeStatusMessage = null
                 updateArrow(path)
             } catch (e: HttpException) {
                 // 404: no editor map for this place, or the goal is not on it — keep
                 // the VLM guidance only.
-                Log.w("NavRoute", "No route: HTTP ${e.code()}")
+                val body = e.response()?.errorBody()?.string().orEmpty()
+                Log.w("NavRoute", "No route: HTTP ${e.code()} $body")
+                routeStatusMessage = when {
+                    "no_editor_map" in body -> "這個賣場沒有航點地圖，無法顯示路徑"
+                    "goal_not_on_map" in body -> "地圖上找不到「${currentTarget ?: goal}」的位置"
+                    else -> "路徑載入失敗（HTTP ${e.code()}）"
+                }
                 route = null
                 routeGuidance = null
                 clearArrow()
             } catch (e: Exception) {
                 Log.e("NavRoute", "Route request failed", e)
+                routeStatusMessage = "路徑載入失敗：${e.message}"
             }
         }
     }

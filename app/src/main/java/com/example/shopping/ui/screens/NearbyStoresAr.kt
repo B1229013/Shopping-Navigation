@@ -117,6 +117,7 @@ private fun formatDist(m: Double): String =
 fun NearbyStoresAr(
     location: Location,
     modifier: Modifier = Modifier,
+    showCompass: Boolean = true,
 ) {
     val context = LocalContext.current
     val azimuth by rememberDeviceAzimuth()
@@ -156,12 +157,14 @@ fun NearbyStoresAr(
         val density = LocalDensity.current
 
         // Compass badge (top centre)
-        CompassBadge(
-            azimuth = azimuth,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 40.dp)
-        )
+        if (showCompass) {
+            CompassBadge(
+                azimuth = azimuth,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 40.dp)
+            )
+        }
 
         // In-view store markers
         stores.forEach { place ->

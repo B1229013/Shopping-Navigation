@@ -3,6 +3,7 @@ package com.example.shopping.network
 import com.example.shopping.BuildConfig
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -10,15 +11,12 @@ import retrofit2.http.*
 import java.util.concurrent.TimeUnit
 
 // ── Request / Response models ──
+// Mirrors the shared backend (APPNAV_ios backend/server/models.py) and the iOS client
+// (APPNAV_ios/Services/NavigationAPI.swift), so both apps talk to the same server.
 
 data class StartSessionRequest(
     val goal: String,
-    val place_name: String? = null,
-)
-
-data class NavSubGoalInfo(
-    val name: String,
-    val arrived: Boolean = false,
+    val place: String? = null,
 )
 
 data class StartSessionResponse(
@@ -26,15 +24,16 @@ data class StartSessionResponse(
     val guidance: String,
     val action: String,
     val goal_objects: List<String>,
-    val nav_mode: String = "explore",
-    val goal_photo_ids: List<Int> = emptyList(),
-    val place_name: String = "",
-    val sub_goals: List<NavSubGoalInfo> = emptyList(),
-    val tsp_order: List<Int> = emptyList(),
-    val current_goal_idx: Int = 0,
-    val current_goal_name: String = "",
-    val total_goals: Int = 1,
+    val place: String? = null,
+    val goal_node_id: Int? = null,
 )
+
+data class PlaceInfo(
+    val name: String,
+    val photo_count: Int = 0,
+)
+
+data class PlacesResponse(val places: List<PlaceInfo> = emptyList())
 
 data class TurnResponse(
     val action: String,   // "ARRIVED", "MOVE", "ASK"
@@ -42,53 +41,72 @@ data class TurnResponse(
     val question: String?,
     val node_id: Int,
     val annotated_photo_url: String?,
-    val localized_photo_id: Int? = null,
-    val localization_score: Double? = null,
-    val localization_candidates: List<Map<String, Any>> = emptyList(),
-    val goal_photo_ids: List<Int> = emptyList(),
-    val planned_route: List<Int> = emptyList(),
-    val route_target_photo_id: Int? = null,
-    val route_distance: Double? = null,
-    val route_hops: Int? = null,
-    val route_guidance: String? = null,
-    val route_waypoints: List<Map<String, Any>> = emptyList(),
-    val sub_goals: List<NavSubGoalInfo> = emptyList(),
-    val current_goal_idx: Int = 0,
-    val current_goal_name: String = "",
-    val total_goals: Int = 1,
+    // Photo unusable (blurred / dark / blocked by people or carts): ask for a retake.
+    // When set, the photo did not move the user's position.
+    val retake_hint: String? = null,
+    // Several places look alike: turn ~90° on the spot and take one more photo.
+    val second_photo_hint: String? = null,
+    // Visual localization against the Neo4j reference map
+    val corrected_node_id: Int? = null,
+    val corrected_confidence: Double? = null,
+    val corrected_location: String? = null,
+    // Map position between nodes (metres, origin = entrance, heading 0° = +y)
+    val estimated_x: Double? = null,
+    val estimated_y: Double? = null,
+    // User heading in the map frame, from the matched directional photo
+    val heading_deg: Double? = null,
+    val heading_slot: String? = null,
+    val heading_confidence: Double? = null,
+    // Map-derived turn-by-turn line, shown verbatim
+    val next_instruction: String? = null,
+    val remaining_targets: Int? = null,
+    val phase: String? = null,             // "shopping" | "checkout" | "exit" | "done"
+    val goal_item_names: List<String>? = null,
+    val visited_item_names: List<String>? = null,
+    val current_target_name: String? = null,
+    val goal_node_id: Int? = null,
 )
+
+/** Route on the hand-corrected editor map (GET /session/{id}/path). */
+data class PathResponse(
+    val place: String,
+    val goal_item: String,
+    val start: PathStart,
+    val target: PathTarget,
+    val path: List<Int>,
+    val polyline: List<List<Double>>,      // [[x, y], ...] metres
+    val turns: List<PathTurn>,
+    val distance_m: Double,
+    val nodes: List<PathNode> = emptyList(),
+    val edges: List<PathEdge> = emptyList(),
+)
+
+data class PathStart(val wp: Int, val x: Double, val y: Double, val source: String)  // "phone" | "photo" | "entrance"
+
+data class PathTarget(
+    val wp: Int,
+    val x: Double,
+    val y: Double,
+    val products: List<String> = emptyList(),
+    val neo_nid: Int? = null,
+)
+
+data class PathTurn(
+    val direction: String,                 // straight / right / left / slight_* / sharp_* / behind
+    val text_zh: String,
+    val at: List<Double>,
+    val to: List<Double>,
+    val distance_m: Double,
+    val passed_nodes: Int,
+)
+
+data class PathNode(val id: Int, val x: Double, val y: Double)
+
+data class PathEdge(val from: Int, val to: Int, val length: Double)
 
 data class AnswerRequest(val answer: String)
 
 data class ConfirmArrivalRequest(val kind: String)  // "confirmed", "false_positive", "wrong_instance"
-
-data class NavConfirmLocationRequest(val photo_id: Int)
-
-data class NavConfirmLocationResponse(
-    val guidance: String,
-    val localized_photo_id: Int,
-    val goal_photo_ids: List<Int> = emptyList(),
-    val route_guidance: String? = null,
-    val route_waypoints: List<Map<String, Any>> = emptyList(),
-    val route_distance: Double? = null,
-    val route_hops: Int? = null,
-    val sub_goals: List<NavSubGoalInfo> = emptyList(),
-    val current_goal_idx: Int = 0,
-    val current_goal_name: String = "",
-    val total_goals: Int = 1,
-)
-
-data class SessionState(
-    val id: String,
-    val goal: String,
-    val goal_objects: List<String>,
-    val history: List<Map<String, Any>>,
-    val pending_question: String?,
-    val arrived: Boolean,
-    val last_node_id: Int?,
-    val goal_node: Int?,
-    val created_at: String
-)
 
 data class MapNode(
     val id: Int,
@@ -117,14 +135,30 @@ data class HealthResponse(val status: String)
 
 interface NavigationApiService {
 
+    @GET("places")
+    suspend fun getPlaces(): PlacesResponse
+
     @POST("session")
     suspend fun startSession(@Body req: StartSessionRequest): StartSessionResponse
 
+    /**
+     * Optional fields are omitted when null. `heading` / `map_*` / `dist_since_fix` /
+     * `fix_node` are the phone's PDR signals (server/loc_fusion.py); `source = "gallery"`
+     * tells the server the photo was not taken here and now.
+     */
     @Multipart
     @POST("session/{sessionId}/photo")
     suspend fun uploadPhoto(
         @Path("sessionId") sessionId: String,
-        @Part photo: MultipartBody.Part
+        @Part photo: MultipartBody.Part,
+        @Part("heading") heading: RequestBody? = null,
+        @Part("pdr_x") pdrX: RequestBody? = null,
+        @Part("pdr_y") pdrY: RequestBody? = null,
+        @Part("map_x") mapX: RequestBody? = null,
+        @Part("map_y") mapY: RequestBody? = null,
+        @Part("dist_since_fix") distSinceFix: RequestBody? = null,
+        @Part("fix_node") fixNode: RequestBody? = null,
+        @Part("source") source: RequestBody? = null,
     ): TurnResponse
 
     @POST("session/{sessionId}/answer")
@@ -139,20 +173,14 @@ interface NavigationApiService {
         @Body req: ConfirmArrivalRequest
     ): TurnResponse
 
-    @POST("session/{sessionId}/confirm_location")
-    suspend fun confirmLocation(
+    /** Start = phone x/y when given, else the last photo-localized node, else the entrance. */
+    @GET("session/{sessionId}/path")
+    suspend fun getPath(
         @Path("sessionId") sessionId: String,
-        @Body req: NavConfirmLocationRequest
-    ): NavConfirmLocationResponse
-
-    @GET("session/{sessionId}")
-    suspend fun getSession(@Path("sessionId") sessionId: String): SessionState
-
-    @GET("session/{sessionId}/map")
-    suspend fun getMap(
-        @Path("sessionId") sessionId: String,
-        @Query("format") format: String = "json"
-    ): MapResponse
+        @Query("x") x: Double? = null,
+        @Query("y") y: Double? = null,
+        @Query("heading") heading: Double? = null,
+    ): PathResponse
 
     @GET("health")
     suspend fun health(): HealthResponse

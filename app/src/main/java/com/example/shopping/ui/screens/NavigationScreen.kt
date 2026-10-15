@@ -52,6 +52,7 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.example.shopping.model.ShoppingItem
 import com.example.shopping.network.NavigationApi
+import com.example.shopping.network.PlaceInfo
 import com.example.shopping.network.StartSessionRequest
 import com.example.shopping.ui.components.*
 import com.example.shopping.ui.theme.*
@@ -86,7 +87,7 @@ fun TeammateHomeScreen(navController: NavController) {
     var backendError by remember { mutableStateOf<String?>(null) }
 
     // Neo4j map selection
-    var neo4jPlaces by remember { mutableStateOf<List<com.example.shopping.network.Neo4jPlaceInfo>>(emptyList()) }
+    var neo4jPlaces by remember { mutableStateOf<List<PlaceInfo>>(emptyList()) }
     var isLoadingPlaces by remember { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<String?>(null) }
     var placeDropdownExpanded by remember { mutableStateOf(false) }
@@ -95,10 +96,10 @@ fun TeammateHomeScreen(navController: NavController) {
         isLoadingPlaces = true
         try {
             val places = withContext(Dispatchers.IO) {
-                com.example.shopping.network.SensorNavApi.service.listNeo4jPlaces()
+                NavigationApi.service.getPlaces().places
             }
             neo4jPlaces = places
-            if (places.size == 1) selectedPlace = places[0].place_name
+            if (places.size == 1) selectedPlace = places[0].name
         } catch (_: Exception) { }
         isLoadingPlaces = false
     }
@@ -153,12 +154,11 @@ fun TeammateHomeScreen(navController: NavController) {
         scope.launch {
             try {
                 val response = withContext(Dispatchers.IO) {
-                    NavigationApi.service.startSession(StartSessionRequest(goal = goalText, place_name = selectedPlace))
+                    NavigationApi.service.startSession(StartSessionRequest(goal = goalText, place = selectedPlace))
                 }
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_session_id", response.session_id)
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_goal", goalText)
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_guidance", response.guidance)
-                navController.currentBackStackEntry?.savedStateHandle?.set("nav_goal_photo_ids", response.goal_photo_ids.joinToString(","))
                 navController.navigate("ar_navigation")
             } catch (e: Exception) {
                 Log.e("NavSession", "Failed to create session", e)
@@ -311,9 +311,9 @@ fun TeammateHomeScreen(navController: NavController) {
                             )
                             neo4jPlaces.forEach { place ->
                                 DropdownMenuItem(
-                                    text = { Text("${place.place_name}（${place.node_count} 節點）") },
+                                    text = { Text("${place.name}（${place.photo_count} 張參考照片）") },
                                     onClick = {
-                                        selectedPlace = place.place_name
+                                        selectedPlace = place.name
                                         placeDropdownExpanded = false
                                     }
                                 )
@@ -412,11 +412,9 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
     val navSessionId = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_session_id")
     val navGoal = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_goal") ?: ""
     val navGuidance = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_guidance") ?: ""
-    val navGoalPhotoIds = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_goal_photo_ids")
-        ?.split(",")?.mapNotNull { it.toIntOrNull() } ?: emptyList()
 
     LaunchedEffect(navSessionId) {
-        vm.init(navSessionId, navGoal, navGuidance, navGoalPhotoIds)
+        vm.init(navSessionId, navGoal, navGuidance)
     }
 
     var currentLocation by remember { mutableStateOf<Location?>(null) }
@@ -506,25 +504,51 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        if (vm.hasArrived) "已到達目標！"
+                        if (vm.hasArrived) (if (vm.phase == "done") "導航完成！" else "已到達目標！")
                         else if (vm.pendingArrival) "請確認是否到達目標"
-                        else "導航中",
+                        else when (vm.phase) {
+                            "checkout" -> "導航中・前往結帳"
+                            "exit" -> "導航中・前往出口"
+                            else -> "導航中"
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF1A237E)
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "目標　${vm.goal}",
+                        "目標　${vm.currentTarget ?: vm.goal}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(0xFF1A237E).copy(alpha = 0.8f),
                         maxLines = 2
                     )
+                    vm.currentLocation?.let { loc ->
+                        Text(
+                            "位置　$loc",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF1A237E).copy(alpha = 0.7f),
+                            maxLines = 1
+                        )
+                    }
                 }
             }
 
-            // ── Middle: camera view area (spacer) ──
-            Spacer(modifier = Modifier.weight(1f))
+            // ── Middle: camera view area — AR guidance arrow overlay ──
+            val showArrow = vm.directionDeg != null &&
+                !vm.hasArrived && !vm.pendingArrival && vm.pendingQuestion == null
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (showArrow) {
+                    ArGuidanceArrow(
+                        directionDeg = vm.directionDeg ?: 0f,
+                        directionLabel = vm.directionLabel,
+                    )
+                }
+            }
 
             // ── Guidance panel (max 30% of screen, scrollable) ──
             Surface(
@@ -548,8 +572,8 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                         color = Color(0xFF1B5E20).copy(alpha = 0.7f)
                     )
 
-                    // Multi-goal progress chips
-                    if (vm.totalGoals > 1 && vm.subGoals.isNotEmpty()) {
+                    // Shopping-list progress chips
+                    if (vm.goalItems.size > 1) {
                         Spacer(Modifier.height(6.dp))
                         Row(
                             modifier = Modifier
@@ -557,11 +581,11 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            vm.subGoals.forEachIndexed { idx, sg ->
-                                val isCurrent = idx == vm.currentGoalIdx
+                            vm.goalItems.forEach { sg ->
+                                val isCurrent = sg.name == vm.currentTarget
                                 Surface(
                                     color = when {
-                                        sg.arrived -> Color(0xFF10B981)
+                                        sg.visited -> Color(0xFF10B981)
                                         isCurrent -> Color(0xFF3B82F6)
                                         else -> Color(0xFF9CA3AF)
                                     },
@@ -571,7 +595,7 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        if (sg.arrived) {
+                                        if (sg.visited) {
                                             Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                                             Spacer(Modifier.width(4.dp))
                                         }
@@ -585,6 +609,35 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                                 }
                             }
                         }
+                    }
+
+                    // Photo could not be used / one more photo needed
+                    (vm.retakeHint ?: vm.secondPhotoHint)?.let { hint ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            hint,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFE65100),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // Route on the store map: first step + total distance
+                    vm.routeGuidance?.let { r ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "🗺 $r",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFF0D47A1),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    vm.mapInstruction?.takeIf { it != vm.routeGuidance }?.let { m ->
+                        Text(
+                            m,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF0D47A1).copy(alpha = 0.8f)
+                        )
                     }
 
                     Spacer(Modifier.height(8.dp))

@@ -53,7 +53,7 @@ private const val RADIUS_M = 1000.0
 // ── Device azimuth from rotation vector sensor ──────────────
 
 @Composable
-private fun rememberDeviceAzimuth(): State<Float> {
+internal fun rememberDeviceAzimuth(): State<Float> {
     val context = LocalContext.current
     val azimuth = remember { mutableFloatStateOf(0f) }
 

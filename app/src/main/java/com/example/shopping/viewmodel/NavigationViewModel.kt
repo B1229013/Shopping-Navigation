@@ -13,9 +13,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.shopping.network.AnswerRequest
 import com.example.shopping.network.ConfirmArrivalRequest
-import com.example.shopping.network.NavConfirmLocationRequest
-import com.example.shopping.network.NavSubGoalInfo
 import com.example.shopping.network.NavigationApi
+import com.example.shopping.network.PathResponse
 import com.example.shopping.network.TurnResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -23,9 +22,15 @@ import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import retrofit2.HttpException
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
+import kotlin.math.atan2
+
+/** One shopping-list item and whether the user has already picked it up. */
+data class GoalItem(val name: String, val visited: Boolean)
 
 class NavigationViewModel : ViewModel() {
 
@@ -45,66 +50,83 @@ class NavigationViewModel : ViewModel() {
     var errorMessage: String? by mutableStateOf(null)
     var photoCount: Int by mutableIntStateOf(0)
 
-    // Localization
-    var localizationPhase: LocalizationPhase by mutableStateOf(LocalizationPhase.READY)
-    var isConfirmingLocation: Boolean by mutableStateOf(false)
-    var localizedPhotoId: Int? by mutableStateOf(null)
-    var localizationScore: Double? by mutableStateOf(null)
-    var localizationCandidates: List<Map<String, Any>> by mutableStateOf(emptyList())
-    var goalPhotoIds: List<Int> by mutableStateOf(emptyList())
-    var routeGuidance: String? by mutableStateOf(null)
-    var routeWaypoints: List<Map<String, Any>> by mutableStateOf(emptyList())
+    // ── Localization (shared backend: Neo4j reference map, node ids = Neo4j nid) ──
+    var correctedNodeId: Int? by mutableStateOf(null)
+    var correctedConfidence: Double? by mutableStateOf(null)
+    var currentLocation: String? by mutableStateOf(null)
+    /** User heading in the map frame (0° = +y), from the matched directional photo. */
+    var headingDeg: Double? by mutableStateOf(null)
+    var headingConfidence: Double? by mutableStateOf(null)
+    /** Photo unusable (blurred / dark / blocked) — ask for a retake. */
+    var retakeHint: String? by mutableStateOf(null)
+    /** Several places look alike — turn ~90° on the spot and take one more photo. */
+    var secondPhotoHint: String? by mutableStateOf(null)
+    /** The map's own verdict for the last photo (distance / "at the target" / "not localized"). */
+    var mapInstruction: String? by mutableStateOf(null)
 
-    // Multi-goal progress
-    var subGoals: List<NavSubGoalInfo> by mutableStateOf(emptyList())
-    var currentGoalIdx: Int by mutableIntStateOf(0)
-    var currentGoalName: String by mutableStateOf("")
-    var totalGoals: Int by mutableIntStateOf(1)
+    // ── Route on the editor map (GET /session/{id}/path) ──
+    var route: PathResponse? by mutableStateOf(null)
+    var routeGuidance: String? by mutableStateOf(null)
+
+    // AR guidance arrow — egocentric direction to the first route step.
+    // directionDeg: 0 = straight ahead, clockwise positive. null → hide arrow.
+    var directionLabel: String? by mutableStateOf(null)
+    var directionDeg: Float? by mutableStateOf(null)
+
+    // ── Shopping progress (shopping → checkout → exit → done) ──
+    var phase: String by mutableStateOf("shopping")
+    var goalItems: List<GoalItem> by mutableStateOf(emptyList())
+    var currentTarget: String? by mutableStateOf(null)
 
     val imageCapture = ImageCapture.Builder().build()
     val captureExecutor = Executors.newSingleThreadExecutor()!!
 
-    fun init(sessionId: String?, goal: String, initialGuidance: String, initialGoalPhotoIds: List<Int> = emptyList()) {
+    fun init(sessionId: String?, goal: String, initialGuidance: String) {
         this.sessionId = sessionId
         this.goal = goal
         this.guidance = initialGuidance
-        this.goalPhotoIds = initialGoalPhotoIds
     }
 
     private fun handleTurnResponse(response: TurnResponse) {
         guidance = response.guidance
         currentAction = response.action
         annotatedPhotoUrl = response.annotated_photo_url
-        localizedPhotoId = response.localized_photo_id
-        localizationScore = response.localization_score
-        localizationCandidates = response.localization_candidates
-        goalPhotoIds = response.goal_photo_ids
-        routeGuidance = response.route_guidance
-        routeWaypoints = response.route_waypoints
+        retakeHint = response.retake_hint
+        secondPhotoHint = response.second_photo_hint
+        mapInstruction = response.next_instruction
 
-        if (response.localization_candidates.isNotEmpty() &&
-            localizationPhase != LocalizationPhase.NAVIGATING) {
-            val bestCandidate = response.localization_candidates.maxByOrNull {
-                (it["score"] as? Number)?.toDouble() ?: 0.0
-            }
-            val bestNid = (bestCandidate?.get("nid") as? Number)?.toInt()
-            if (bestNid != null) {
-                confirmLocation(bestNid)
+        val phaseChanged = response.phase != null && response.phase != phase
+        response.phase?.let { phase = it }
+
+        if (response.corrected_node_id != null) {
+            correctedNodeId = response.corrected_node_id
+            correctedConfidence = response.corrected_confidence
+            headingDeg = response.heading_deg
+            headingConfidence = response.heading_confidence
+            currentLocation = response.corrected_location?.let { loc ->
+                response.corrected_confidence?.let { "$loc（比對信心 ${(it * 100).toInt()}%）" } ?: loc
             }
         }
+        // A new fix re-anchors the route at the server's node; a phase change means the
+        // path endpoint now plans a different leg.
+        if (response.action != "ARRIVED" && (response.corrected_node_id != null || phaseChanged)) loadRoute()
 
-        // Update multi-goal progress
-        if (response.sub_goals.isNotEmpty()) {
-            subGoals = response.sub_goals
+        response.goal_item_names?.takeIf { it.isNotEmpty() }?.let { names ->
+            val visited = response.visited_item_names.orEmpty().toSet()
+            goalItems = names.map { GoalItem(it, it in visited) }
         }
-        currentGoalIdx = response.current_goal_idx
-        currentGoalName = response.current_goal_name
-        totalGoals = response.total_goals
+        currentTarget = response.current_target_name
 
         when (response.action) {
             "ARRIVED" -> {
-                pendingArrival = true
+                if (phase == "done") {
+                    hasArrived = true
+                    pendingArrival = false
+                } else {
+                    pendingArrival = true
+                }
                 pendingQuestion = null
+                clearArrow()
             }
             "ASK" -> {
                 pendingQuestion = response.question
@@ -115,6 +137,61 @@ class NavigationViewModel : ViewModel() {
             }
         }
     }
+
+    /** Plan from the last photo-localized node (server side) toward the current goal. */
+    private fun loadRoute() {
+        val sid = sessionId ?: return
+        viewModelScope.launch {
+            try {
+                val path = withContext(Dispatchers.IO) {
+                    NavigationApi.service.getPath(sid, heading = headingDeg)
+                }
+                route = path
+                routeGuidance = path.turns.firstOrNull()?.text_zh
+                    ?.let { "$it（全程約 ${path.distance_m.toInt()} 公尺）" }
+                updateArrow(path)
+            } catch (e: HttpException) {
+                // 404: no editor map for this place, or the goal is not on it — keep
+                // the VLM guidance only.
+                Log.w("NavRoute", "No route: HTTP ${e.code()}")
+                route = null
+                routeGuidance = null
+                clearArrow()
+            } catch (e: Exception) {
+                Log.e("NavRoute", "Route request failed", e)
+            }
+        }
+    }
+
+    /**
+     * Arrow toward the first route segment, relative to where the user faces. Only
+     * shown when the heading is trustworthy: guessing it from look-alike reference
+     * photos must not produce a confident "turn left".
+     */
+    private fun updateArrow(path: PathResponse) {
+        val h = headingDeg
+        val pts = path.polyline
+        if (h == null || (headingConfidence ?: 0.0) < MIN_HEADING_CONFIDENCE || pts.size < 2) {
+            clearArrow()
+            return
+        }
+        val (ax, ay) = pts[0][0] to pts[0][1]
+        val (bx, by) = pts[1][0] to pts[1][1]
+        val bearing = Math.toDegrees(atan2(bx - ax, by - ay))   // map frame: 0° = +y
+        val rel = normalizeSigned(bearing - h)
+        directionDeg = rel.toFloat()
+        directionLabel = directionLabelFor(rel)
+    }
+
+    private fun clearArrow() {
+        directionDeg = null
+        directionLabel = null
+    }
+
+    private fun photoPart(file: File): MultipartBody.Part =
+        MultipartBody.Part.createFormData("photo", file.name, file.asRequestBody("image/jpeg".toMediaType()))
+
+    private fun text(v: String) = v.toRequestBody("text/plain".toMediaType())
 
     fun uploadFromGallery(context: Context, uri: Uri) {
         val sid = sessionId ?: return
@@ -129,9 +206,8 @@ class NavigationViewModel : ViewModel() {
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         FileOutputStream(photoFile).use { output -> input.copyTo(output) }
                     } ?: throw Exception("無法讀取照片")
-                    val requestBody = photoFile.asRequestBody("image/jpeg".toMediaType())
-                    val part = MultipartBody.Part.createFormData("photo", photoFile.name, requestBody)
-                    val resp = NavigationApi.service.uploadPhoto(sid, part)
+                    // Not taken here and now: the server ignores sensor data for it
+                    val resp = NavigationApi.service.uploadPhoto(sid, photoPart(photoFile), source = text("gallery"))
                     photoFile.delete()
                     resp
                 }
@@ -173,7 +249,6 @@ class NavigationViewModel : ViewModel() {
         if (isUploading || hasArrived || pendingArrival || pendingQuestion != null) return
         isUploading = true
         errorMessage = null
-        localizationPhase = LocalizationPhase.PROCESSING
 
         val photoFile = File(context.cacheDir, "nav_photo_${System.currentTimeMillis()}.jpg")
         val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
@@ -183,9 +258,7 @@ class NavigationViewModel : ViewModel() {
                 viewModelScope.launch {
                     try {
                         val response = withContext(Dispatchers.IO) {
-                            val requestBody = photoFile.asRequestBody("image/jpeg".toMediaType())
-                            val part = MultipartBody.Part.createFormData("photo", photoFile.name, requestBody)
-                            NavigationApi.service.uploadPhoto(sid, part)
+                            NavigationApi.service.uploadPhoto(sid, photoPart(photoFile))
                         }
                         handleTurnResponse(response)
                         photoCount++
@@ -207,47 +280,6 @@ class NavigationViewModel : ViewModel() {
         })
     }
 
-    fun confirmLocation(photoId: Int) {
-        val sid = sessionId ?: return
-        if (isConfirmingLocation) return
-        isConfirmingLocation = true
-        errorMessage = null
-
-        viewModelScope.launch {
-            try {
-                val response = withContext(Dispatchers.IO) {
-                    NavigationApi.service.confirmLocation(sid, NavConfirmLocationRequest(photo_id = photoId))
-                }
-                localizedPhotoId = response.localized_photo_id
-                goalPhotoIds = response.goal_photo_ids
-                routeGuidance = response.route_guidance
-                routeWaypoints = response.route_waypoints
-                // 保留上傳定位那一輪的 guidance（第一次），避免自動 confirm_location
-                // 再覆寫一次造成指引文字連跳兩次。路線指引仍存在 routeGuidance。
-                if (response.sub_goals.isNotEmpty()) {
-                    subGoals = response.sub_goals
-                }
-                currentGoalIdx = response.current_goal_idx
-                currentGoalName = response.current_goal_name
-                totalGoals = response.total_goals
-                localizationPhase = LocalizationPhase.NAVIGATING
-            } catch (e: Exception) {
-                Log.e("NavConfirmLoc", "Confirm location failed", e)
-                errorMessage = "位置確認失敗: ${e.message}"
-            } finally {
-                isConfirmingLocation = false
-            }
-        }
-    }
-
-    fun retakePhoto() {
-        localizationPhase = LocalizationPhase.READY
-        localizationCandidates = emptyList()
-        localizedPhotoId = null
-        localizationScore = null
-        guidance = "請重新拍一張照片進行定位"
-    }
-
     fun confirmArrival(kind: String) {
         val sid = sessionId ?: return
         if (isConfirming) return
@@ -260,16 +292,51 @@ class NavigationViewModel : ViewModel() {
                     NavigationApi.service.confirmArrival(sid, ConfirmArrivalRequest(kind = kind))
                 }
                 pendingArrival = false
-                handleTurnResponse(response)
-                if (response.action == "ARRIVED" && response.sub_goals.all { it.arrived }) {
-                    hasArrived = true
+                secondPhotoHint = null
+                // POST /confirm is the only endpoint that advances the phase; reaching
+                // "done" also ends the session (a later /photo would be refused).
+                val phaseChanged = response.phase != null && response.phase != phase
+                response.phase?.let { phase = it }
+                guidance = response.guidance
+                response.goal_item_names?.takeIf { it.isNotEmpty() }?.let { names ->
+                    val visited = response.visited_item_names.orEmpty().toSet()
+                    goalItems = names.map { GoalItem(it, it in visited) }
                 }
+                currentTarget = response.current_target_name
+                when (response.action) {
+                    "ARRIVED" -> hasArrived = true
+                    "MOVE" -> pendingQuestion = null
+                }
+                if (!hasArrived && (phaseChanged || kind == "confirmed")) loadRoute()
             } catch (e: Exception) {
                 Log.e("NavConfirm", "Confirm failed", e)
                 errorMessage = "確認失敗: ${e.message}"
             } finally {
                 isConfirming = false
             }
+        }
+    }
+
+    companion object {
+        /** Below this the server's heading is a guess from look-alike photos. */
+        const val MIN_HEADING_CONFIDENCE = 0.5
+
+        fun normalizeSigned(deg: Double): Double {
+            var x = ((deg % 360.0) + 360.0) % 360.0
+            if (x > 180.0) x -= 360.0
+            return x
+        }
+
+        /** 8-way label for an egocentric bearing (0 = ahead, clockwise positive). */
+        fun directionLabelFor(rel: Double): String = when {
+            rel > -22.5 && rel <= 22.5 -> "正前方"
+            rel > 22.5 && rel <= 67.5 -> "右前方"
+            rel > 67.5 && rel <= 112.5 -> "右方"
+            rel > 112.5 && rel <= 157.5 -> "右後方"
+            rel < -22.5 && rel >= -67.5 -> "左前方"
+            rel < -67.5 && rel >= -112.5 -> "左方"
+            rel < -112.5 && rel >= -157.5 -> "左後方"
+            else -> "後方"
         }
     }
 }

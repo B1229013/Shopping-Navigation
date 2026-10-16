@@ -481,6 +481,11 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
     var showPhotoGuide by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { if (consumeFirstPhotoGuide(context)) showPhotoGuide = true }
     val isPhoneUpright by rememberPhoneUpright()
+    // Step / heading tracking only while this screen is shown
+    DisposableEffect(Unit) {
+        vm.startSensors(context)
+        onDispose { vm.stopSensors() }
+    }
 
     val statusTitle = when {
         vm.hasArrived -> if (vm.phase == "done") "導航完成！" else "已到達！"
@@ -565,14 +570,22 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
             when {
                 vm.retakeHint != null -> NavHintBanner("📷 ${vm.retakeHint}", Color(0xFFFF9800).copy(alpha = 0.9f))
                 vm.secondPhotoHint != null -> NavHintBanner("📷 ${vm.secondPhotoHint}", Color(0xFF2196F3).copy(alpha = 0.85f))
+                idle && vm.sensorsRunning && !vm.isOnMap ->
+                    NavHintButton("📍 我在入口，從這裡開始", Color.Black.copy(alpha = 0.6f), onClick = { vm.startAtEntrance() })
+                idle && vm.isOnMap && vm.distanceSinceFix >= NavigationViewModel.PHOTO_REMINDER_M ->
+                    NavHintBanner("📍 已走 ${vm.distanceSinceFix.toInt()} m，拍一張照片校正位置", Color.Black.copy(alpha = 0.55f))
                 idle && !isPhoneUpright -> NavHintBanner("📱 手機請拿直、對準走道前方", Color.Black.copy(alpha = 0.55f))
             }
 
+            val follow = vm.followState
             RoutePanel(
                 route = vm.route,
-                prompt = vm.routeGuidance,
+                prompt = follow?.prompt ?: vm.routeGuidance,
                 statusMessage = vm.routeStatusMessage,
-                userHeadingDeg = vm.confidentHeadingDeg,
+                userHeadingDeg = vm.displayHeadingDeg,
+                userPos = follow?.position,
+                remainingM = follow?.remainingM,
+                offRoute = follow?.needsReplan == true,
             )
 
             // ── Guidance panel ──

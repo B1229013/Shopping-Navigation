@@ -1,31 +1,45 @@
 package com.example.shopping.viewmodel
 
 import android.content.Context
+import android.hardware.SensorManager
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.shopping.navigation.FollowState
+import com.example.shopping.navigation.MapPositionEstimator
+import com.example.shopping.navigation.MapPositionEstimator.FixResult
+import com.example.shopping.navigation.PathFollower
+import com.example.shopping.navigation.Vec2
 import com.example.shopping.network.AnswerRequest
 import com.example.shopping.network.ConfirmArrivalRequest
 import com.example.shopping.network.NavigationApi
 import com.example.shopping.network.PathResponse
 import com.example.shopping.network.TurnResponse
+import com.example.shopping.sensor.PdrTracker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.atan2
 
@@ -64,18 +78,38 @@ class NavigationViewModel : ViewModel() {
     /** The map's own verdict for the last photo (distance / "at the target" / "not localized"). */
     var mapInstruction: String? by mutableStateOf(null)
 
-    // ── Route on the editor map (GET /session/{id}/path) ──
+    // ── PDR position on the map (MapPositionEstimator) ──
+    /** True while the step / heading sensors are running for this screen. */
+    var sensorsRunning: Boolean by mutableStateOf(false); private set
+    /** Map position: null until the first confident photo fix or "I'm at the entrance". */
+    var mapPosition: Vec2? by mutableStateOf(null); private set
+    /** Map metres walked since the last accepted fix (drives the photo reminder and the server's σ). */
+    var distanceSinceFix: Double by mutableDoubleStateOf(0.0); private set
+    /** Reference node of the last accepted fix (the server only considers nodes walkable from it). */
+    var lastFixNodeId: Int? by mutableStateOf(null); private set
+    /** Heading in the map frame: raw compass + offset learned from photo fixes. */
+    var mapHeadingDeg: Double by mutableDoubleStateOf(0.0); private set
+    /** Live route following (prompt, remaining metres, position on the route). */
+    var followState: FollowState? by mutableStateOf(null); private set
+
+    val isOnMap: Boolean get() = mapPosition != null
+
+    // ── Route (GET /session/{id}/path, planned on the Neo4j map) ──
     var route: PathResponse? by mutableStateOf(null)
     /** First step of the route, e.g. "直走 12 公尺後右轉". */
     var routeGuidance: String? by mutableStateOf(null)
-    /** Why there is no route (no editor map / goal not on it / request failed). */
+    /** Why there is no route (no route map / goal not on it / request failed). */
     var routeStatusMessage: String? by mutableStateOf(null)
 
-    /** Server heading when it is trustworthy enough to draw (mini-map arrow). */
+    /** Server heading when it is trustworthy enough to draw (mini-map arrow before PDR has a fix). */
     val confidentHeadingDeg: Double?
         get() = headingDeg?.takeIf { (headingConfidence ?: 0.0) >= MIN_HEADING_CONFIDENCE }
 
-    // AR guidance arrow — egocentric direction to the first route step.
+    /** Heading to draw on the mini-map: live map heading once on the map, else the server's. */
+    val displayHeadingDeg: Double?
+        get() = if (isOnMap) mapHeadingDeg else confidentHeadingDeg
+
+    // AR guidance arrow — egocentric direction along the route.
     // directionDeg: 0 = straight ahead, clockwise positive. null → hide arrow.
     var directionLabel: String? by mutableStateOf(null)
     var directionDeg: Float? by mutableStateOf(null)
@@ -88,6 +122,21 @@ class NavigationViewModel : ViewModel() {
     val imageCapture = ImageCapture.Builder().build()
     val captureExecutor = Executors.newSingleThreadExecutor()!!
 
+    private val estimator = MapPositionEstimator()
+    private val follower = PathFollower()
+    private var tracker: PdrTracker? = null
+    private var headingJob: Job? = null
+    private var rawPdr = Vec2(0.0, 0.0)
+    private var rawHeadingDeg = 0.0
+    /** The follower is fed map-frame positions (identity anchor) once on the map. */
+    private var followInMapFrame = false
+    private var lastReplanAtMs = 0L
+    private var isLoadingRoute = false
+    /** Raw PDR where the server asked for a second photo; the request lapses after walking on. */
+    private var secondPhotoAtRaw: Vec2? = null
+    /** Node coordinates (map frame) from the last route payload. */
+    private var nodeCoords: Map<Int, Vec2> = emptyMap()
+
     fun init(sessionId: String?, goal: String, initialGuidance: String) {
         val isNewSession = sessionId != null && sessionId != this.sessionId
         this.sessionId = sessionId
@@ -97,29 +146,164 @@ class NavigationViewModel : ViewModel() {
         if (isNewSession) loadRoute()
     }
 
-    private fun handleTurnResponse(response: TurnResponse) {
+    // ── Sensors ──
+
+    /** Start step / heading tracking for this navigation screen (idempotent). */
+    fun startSensors(context: Context) {
+        if (tracker != null) return
+        val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager ?: return
+        tracker = PdrTracker(sm).also { t ->
+            t.onStep = { x, y, _ -> onStep(Vec2(x.toDouble(), y.toDouble())) }
+            t.start()
+        }
+        sensorsRunning = true
+        headingJob = viewModelScope.launch {
+            while (isActive) {
+                tracker?.let { rawHeadingDeg = normalize360(it.getCalibratedYawDeg().toDouble()) }
+                mapHeadingDeg = estimator.mapHeading(rawHeadingDeg)
+                if (isOnMap) updateLiveArrow()
+                delay(HEADING_POLL_MS)
+            }
+        }
+    }
+
+    fun stopSensors() {
+        headingJob?.cancel()
+        headingJob = null
+        tracker?.onStep = null
+        tracker?.stop()
+        tracker = null
+        sensorsRunning = false
+    }
+
+    override fun onCleared() {
+        stopSensors()
+        super.onCleared()
+    }
+
+    private fun onStep(raw: Vec2) {
+        rawPdr = raw
+        estimator.ingest(raw)
+        publishEstimate()
+        secondPhotoAtRaw?.let { at ->
+            if ((raw - at).length > SECOND_PHOTO_MAX_MOVE_M) {
+                secondPhotoHint = null
+                secondPhotoAtRaw = null
+            }
+        }
+        val m = mapPosition
+        if (m != null) followMapPosition(m) else followRaw(raw)
+        followState?.let { st ->
+            val now = SystemClock.elapsedRealtime()
+            if (st.needsReplan && now - lastReplanAtMs > REPLAN_MIN_INTERVAL_MS) {
+                lastReplanAtMs = now
+                loadRoute(fromPhone = true)
+            }
+        }
+    }
+
+    private fun publishEstimate() {
+        mapPosition = estimator.mapPosition
+        distanceSinceFix = estimator.distanceSinceFixM
+        mapHeadingDeg = estimator.mapHeading(rawHeadingDeg)
+    }
+
+    /** "I'm at the entrance": put the user on the map at the origin before any photo. */
+    fun startAtEntrance() {
+        if (tracker == null) return
+        estimator.applyFix(Vec2(0.0, 0.0), 1.0, rawPdr)
+        // the reference node nearest the entrance (the server's reachability starts there)
+        lastFixNodeId = nodeCoords.filterKeys { it >= 0 }.minByOrNull { it.value.length }?.key
+        publishEstimate()
+        mapPosition?.let { followMapPosition(it) }
+        currentLocation = "入口"
+    }
+
+    // ── Route following (port of the iOS RouteFollowerModel) ──
+
+    private fun followRaw(raw: Vec2) {
+        if (!follower.hasRoute || followInMapFrame) return
+        followState = follower.update(raw, rawHeadingDeg)
+    }
+
+    private fun followMapPosition(m: Vec2) {
+        val wasInMapFrame = followInMapFrame
+        followInMapFrame = true          // a route loaded later anchors in the map frame too
+        if (!follower.hasRoute) return
+        if (!wasInMapFrame) follower.anchor(m, m)
+        followState = follower.update(m, mapHeadingDeg)
+        updateLiveArrow()
+    }
+
+    private fun installRoute(path: PathResponse, keepPhoneAnchor: Boolean) {
+        val polyline = path.polyline.map { Vec2(it[0], it[1]) }
+        val turns = path.turns.map { Vec2(it.at[0], it.at[1]) to it.direction }
+        val m = mapPosition
+        if (followInMapFrame && m != null) {
+            follower.setRoute(polyline, turns, m, keepAnchor = true)
+            follower.anchor(m, m)
+            followState = follower.update(m, mapHeadingDeg)
+        } else if (sensorsRunning) {
+            follower.setRoute(polyline, turns, rawPdr, keepAnchor = keepPhoneAnchor)
+            followState = follower.update(rawPdr, rawHeadingDeg)
+        } else {
+            follower.setRoute(polyline, turns, Vec2(0.0, 0.0))
+            followState = null
+        }
+    }
+
+    private fun handleTurnResponse(response: TurnResponse, rawAtCapture: Vec2? = null) {
         guidance = response.guidance
         currentAction = response.action
         annotatedPhotoUrl = response.annotated_photo_url
         retakeHint = response.retake_hint
         secondPhotoHint = response.second_photo_hint
+        secondPhotoAtRaw = if (response.second_photo_hint != null) rawAtCapture else null
         mapInstruction = response.next_instruction
 
         val phaseChanged = response.phase != null && response.phase != phase
         response.phase?.let { phase = it }
 
-        if (response.corrected_node_id != null) {
-            correctedNodeId = response.corrected_node_id
+        // A localized photo corrects the map position (and, between two good fixes, the
+        // heading offset and step length). When the server asks for a second photo, wait.
+        var fixNote = if (response.second_photo_hint != null) "，等第二張照片再校正" else ""
+        var fixAccepted = false
+        val nid = response.corrected_node_id
+        if (response.retake_hint == null && response.second_photo_hint == null &&
+            nid != null && rawAtCapture != null && tracker != null) {
+            val ex = response.estimated_x
+            val ey = response.estimated_y
+            val node = if (ex != null && ey != null) Vec2(ex, ey) else nodeCoords[nid]
+            if (node != null) {
+                when (val r = estimator.applyFix(node, response.corrected_confidence ?: 0.0, rawAtCapture)) {
+                    FixResult.Accepted -> {
+                        fixAccepted = true
+                        lastFixNodeId = nid
+                        estimator.ingest(rawPdr)          // replay the steps walked since the shutter
+                        publishEstimate()
+                        mapPosition?.let { followMapPosition(it) }
+                    }
+                    FixResult.RejectedLowConfidence -> fixNote = "，信心不足未校正位置"
+                    is FixResult.RejectedJump -> fixNote = "，跳太遠（${r.distanceM.toInt()} m）未校正位置"
+                }
+            }
+        }
+
+        if (nid != null) {
+            correctedNodeId = nid
             correctedConfidence = response.corrected_confidence
             headingDeg = response.heading_deg
             headingConfidence = response.heading_confidence
             currentLocation = response.corrected_location?.let { loc ->
-                response.corrected_confidence?.let { "$loc（比對信心 ${(it * 100).toInt()}%）" } ?: loc
+                response.corrected_confidence?.let { "$loc（比對信心 ${(it * 100).toInt()}%$fixNote）" } ?: loc
             }
         }
-        // A new fix re-anchors the route at the server's node; a phase change means the
-        // path endpoint now plans a different leg.
-        if (response.action != "ARRIVED" && (response.corrected_node_id != null || phaseChanged)) loadRoute()
+        if (response.action != "ARRIVED") {
+            // Only a fix the phone applied re-anchors the route at the server's node;
+            // otherwise re-plan from where the phone thinks it is.
+            if (nid != null) loadRoute(fromPhone = !fixAccepted)
+            else if (phaseChanged) loadRoute(fromPhone = true)
+        }
 
         response.goal_item_names?.takeIf { it.isNotEmpty() }?.let { names ->
             val visited = response.visited_item_names.orEmpty().toSet()
@@ -148,20 +332,33 @@ class NavigationViewModel : ViewModel() {
         }
     }
 
-    /** Plan from the last photo-localized node (server side) toward the current goal. */
-    private fun loadRoute() {
+    /**
+     * Fetch the route. [fromPhone] plans from the phone's own position (keeping the current
+     * anchor); otherwise the server starts from the last photo fix, or the entrance.
+     */
+    private fun loadRoute(fromPhone: Boolean = false) {
         val sid = sessionId ?: return
+        if (isLoadingRoute) return
+        isLoadingRoute = true
+        val st = followState
+        val usePhone = fromPhone && st != null
         viewModelScope.launch {
             try {
                 val path = withContext(Dispatchers.IO) {
-                    NavigationApi.service.getPath(sid, heading = headingDeg)
+                    if (usePhone && st != null) {
+                        NavigationApi.service.getPath(sid, x = st.position.x, y = st.position.y, heading = st.headingDegrees)
+                    } else {
+                        NavigationApi.service.getPath(sid, heading = if (isOnMap) mapHeadingDeg else headingDeg)
+                    }
                 }
                 route = path
+                nodeCoords = path.nodes.associate { it.id to Vec2(it.x, it.y) }
                 routeGuidance = path.turns.firstOrNull()?.text_zh
                 routeStatusMessage = null
-                updateArrow(path)
+                installRoute(path, keepPhoneAnchor = usePhone)
+                if (isOnMap) updateLiveArrow() else updateArrow(path)
             } catch (e: HttpException) {
-                // 404: no editor map for this place, or the goal is not on it — keep
+                // 404: no route map for this place, or the goal is not on it — keep
                 // the VLM guidance only.
                 val body = e.response()?.errorBody()?.string().orEmpty()
                 Log.w("NavRoute", "No route: HTTP ${e.code()} $body")
@@ -172,18 +369,21 @@ class NavigationViewModel : ViewModel() {
                 }
                 route = null
                 routeGuidance = null
+                followState = null
                 clearArrow()
             } catch (e: Exception) {
                 Log.e("NavRoute", "Route request failed", e)
                 routeStatusMessage = "路徑載入失敗：${e.message}"
+            } finally {
+                isLoadingRoute = false
             }
         }
     }
 
     /**
-     * Arrow toward the first route segment, relative to where the user faces. Only
-     * shown when the heading is trustworthy: guessing it from look-alike reference
-     * photos must not produce a confident "turn left".
+     * Before PDR is on the map: arrow toward the first route segment, relative to the
+     * server's heading — only when that heading is trustworthy (a guess from look-alike
+     * reference photos must not produce a confident "turn left").
      */
     private fun updateArrow(path: PathResponse) {
         val h = headingDeg
@@ -192,10 +392,22 @@ class NavigationViewModel : ViewModel() {
             clearArrow()
             return
         }
-        val (ax, ay) = pts[0][0] to pts[0][1]
-        val (bx, by) = pts[1][0] to pts[1][1]
-        val bearing = Math.toDegrees(atan2(bx - ax, by - ay))   // map frame: 0° = +y
-        val rel = normalizeSigned(bearing - h)
+        val bearing = Math.toDegrees(atan2(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]))   // 0° = +y
+        setArrow(normalizeSigned(bearing - h))
+    }
+
+    /** On the map: arrow toward a point a few metres further along the route, from the live heading. */
+    private fun updateLiveArrow() {
+        if (hasArrived || pendingArrival) return
+        val st = followState ?: return
+        val target = st.lookAhead ?: return
+        val v = target - st.position
+        if (v.length < 0.5) return
+        val bearing = Math.toDegrees(atan2(v.x, v.y))
+        setArrow(normalizeSigned(bearing - mapHeadingDeg))
+    }
+
+    private fun setArrow(rel: Double) {
         directionDeg = rel.toFloat()
         directionLabel = directionLabelFor(rel)
     }
@@ -209,6 +421,8 @@ class NavigationViewModel : ViewModel() {
         MultipartBody.Part.createFormData("photo", file.name, file.asRequestBody("image/jpeg".toMediaType()))
 
     private fun text(v: String) = v.toRequestBody("text/plain".toMediaType())
+
+    private fun num(v: Double): RequestBody = text(String.format(Locale.US, "%.3f", v))
 
     fun uploadFromGallery(context: Context, uri: Uri) {
         val sid = sessionId ?: return
@@ -228,7 +442,7 @@ class NavigationViewModel : ViewModel() {
                     photoFile.delete()
                     resp
                 }
-                handleTurnResponse(response)
+                handleTurnResponse(response)    // no rawAtCapture → never moves the map position
                 photoCount++
             } catch (e: Exception) {
                 Log.e("NavGallery", "Gallery upload failed", e)
@@ -267,6 +481,14 @@ class NavigationViewModel : ViewModel() {
         isUploading = true
         errorMessage = null
 
+        // Sensor state at the shutter, not when the upload finishes
+        val running = tracker != null
+        val raw = rawPdr
+        val mapPos = mapPosition
+        val dist = distanceSinceFix
+        val fixNode = lastFixNodeId
+        val heading = mapHeadingDeg
+
         val photoFile = File(context.cacheDir, "nav_photo_${System.currentTimeMillis()}.jpg")
         val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
@@ -275,9 +497,19 @@ class NavigationViewModel : ViewModel() {
                 viewModelScope.launch {
                     try {
                         val response = withContext(Dispatchers.IO) {
-                            NavigationApi.service.uploadPhoto(sid, photoPart(photoFile))
+                            NavigationApi.service.uploadPhoto(
+                                sid, photoPart(photoFile),
+                                heading = if (running) num(heading) else null,
+                                pdrX = if (running) num(raw.x) else null,
+                                pdrY = if (running) num(raw.y) else null,
+                                // map-frame position only once a fix has put the user on the map
+                                mapX = mapPos?.let { num(it.x) },
+                                mapY = mapPos?.let { num(it.y) },
+                                distSinceFix = mapPos?.let { num(dist) },
+                                fixNode = if (mapPos != null) fixNode?.let { text(it.toString()) } else null,
+                            )
                         }
-                        handleTurnResponse(response)
+                        handleTurnResponse(response, rawAtCapture = if (running) raw else null)
                         photoCount++
                     } catch (e: Exception) {
                         Log.e("NavUpload", "Upload failed", e)
@@ -310,6 +542,7 @@ class NavigationViewModel : ViewModel() {
                 }
                 pendingArrival = false
                 secondPhotoHint = null
+                secondPhotoAtRaw = null
                 // POST /confirm is the only endpoint that advances the phase; reaching
                 // "done" also ends the session (a later /photo would be refused).
                 val phaseChanged = response.phase != null && response.phase != phase
@@ -324,7 +557,8 @@ class NavigationViewModel : ViewModel() {
                     "ARRIVED" -> hasArrived = true
                     "MOVE" -> pendingQuestion = null
                 }
-                if (!hasArrived && (phaseChanged || kind == "confirmed")) loadRoute()
+                // next item / checkout / exit: plan from where the phone is
+                if (!hasArrived && (phaseChanged || kind == "confirmed")) loadRoute(fromPhone = true)
             } catch (e: Exception) {
                 Log.e("NavConfirm", "Confirm failed", e)
                 errorMessage = "確認失敗: ${e.message}"
@@ -337,12 +571,20 @@ class NavigationViewModel : ViewModel() {
     companion object {
         /** Below this the server's heading is a guess from look-alike photos. */
         const val MIN_HEADING_CONFIDENCE = 0.5
+        /** Ask for a photo to re-fix the position after walking this far (iOS photoReminderM). */
+        const val PHOTO_REMINDER_M = 12.0
+        /** Backend SECOND_PHOTO_MAX_MOVE_M: a second photo only counts within this distance. */
+        const val SECOND_PHOTO_MAX_MOVE_M = 3.0
+        private const val REPLAN_MIN_INTERVAL_MS = 8_000L
+        private const val HEADING_POLL_MS = 200L
 
         fun normalizeSigned(deg: Double): Double {
             var x = ((deg % 360.0) + 360.0) % 360.0
             if (x > 180.0) x -= 360.0
             return x
         }
+
+        private fun normalize360(deg: Double): Double = ((deg % 360.0) + 360.0) % 360.0
 
         /** 8-way label for an egocentric bearing (0 = ahead, clockwise positive). */
         fun directionLabelFor(rel: Double): String = when {

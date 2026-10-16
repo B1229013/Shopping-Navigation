@@ -42,10 +42,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.shopping.navigation.Vec2
 import com.example.shopping.network.PathResponse
 import com.example.shopping.viewmodel.GoalItem
 import kotlin.math.acos
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -233,10 +235,26 @@ fun NavHintBanner(text: String, background: Color, modifier: Modifier = Modifier
     )
 }
 
+/** Tappable pill, same look as [NavHintBanner] (e.g. "我在入口，從這裡開始"). */
+@Composable
+fun NavHintButton(text: String, background: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        color = PanelText,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = modifier
+            .clip(CircleShape)
+            .background(background)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
+}
+
 /**
- * Route panel: the first step + distance, and the mini-map below. Without PDR the user
- * dot sits at the route start (the last photo fix); the heading arrow is drawn only
- * when the server's heading is trustworthy.
+ * Route panel: the live prompt + remaining metres, and the mini-map below. [userPos] is
+ * the live position (PDR) when known, else the route start (the last photo fix); the
+ * heading arrow is drawn only when [userHeadingDeg] is known.
  */
 @Composable
 fun RoutePanel(
@@ -245,6 +263,9 @@ fun RoutePanel(
     statusMessage: String?,
     userHeadingDeg: Double?,
     modifier: Modifier = Modifier,
+    userPos: Vec2? = null,
+    remainingM: Double? = null,
+    offRoute: Boolean = false,
 ) {
     if (route != null) {
         Column(
@@ -263,13 +284,15 @@ fun RoutePanel(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                Text("剩 ${route.distance_m.toInt()} m", color = PanelText.copy(alpha = 0.8f), fontSize = 12.sp)
+                Text("剩 ${(remainingM ?: route.distance_m).roundToInt()} m",
+                    color = PanelText.copy(alpha = 0.8f), fontSize = 12.sp)
             }
             RouteMap(
                 route = route,
-                userX = route.start.x,
-                userY = route.start.y,
+                userX = userPos?.x ?: route.start.x,
+                userY = userPos?.y ?: route.start.y,
                 userHeadingDeg = userHeadingDeg,
+                offRoute = offRoute,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(150.dp),
@@ -297,6 +320,7 @@ fun RouteMap(
     userY: Double?,
     userHeadingDeg: Double?,
     modifier: Modifier = Modifier,
+    offRoute: Boolean = false,
 ) {
     Canvas(
         modifier = modifier
@@ -347,7 +371,7 @@ fun RouteMap(
         // user
         if (userX != null && userY != null) {
             val u = toScreen(userX, userY)
-            val green = Color(0xFF4CAF50)
+            val green = if (offRoute) Color(0xFFF44336) else Color(0xFF4CAF50)   // red: off the route
             drawCircle(green, radius = 6.dp.toPx(), center = u)
             drawCircle(Color.White, radius = 6.dp.toPx(), center = u, style = Stroke(width = 1.5.dp.toPx()))
             userHeadingDeg?.let { h ->

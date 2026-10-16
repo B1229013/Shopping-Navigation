@@ -94,6 +94,8 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
     val gpsLng: Double? get() = lastGpsLng
     val gpsAccuracy: Float? get() = lastGpsAccuracy
     var onSampleReady: (() -> Unit)? = null
+    /** After every detected step: new (x, y) in metres and the walking heading (deg, 0 = +y, clockwise). */
+    var onStep: ((x: Float, y: Float, headingDeg: Float) -> Unit)? = null
 
     // ── Internal state ──
 
@@ -590,6 +592,7 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
 
         accelMagMax = 0f
         accelMagMin = Float.MAX_VALUE
+        onStep?.invoke(x, y, Math.toDegrees(yaw).toFloat())
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {

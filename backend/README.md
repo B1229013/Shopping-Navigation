@@ -122,7 +122,44 @@ curl -X POST http://localhost:8000/session/<session_id>/answer \
 
 ---
 
-## 建圖管線（測試階段）
+## 建立新地圖（Neo4j V2 格式）
+
+和 Neo4j 裡的「A7家樂福（9/16)」相同格式（`Waypoint → DirPhoto → Object`，加上 `WALKWAY`、`ADJACENT`），每間店做一次。共用邏輯與格式說明在 `server/map_v2.py`。
+
+| 步驟 | 工具 | 產出 |
+|------|------|------|
+| 1. 現場收資料 | Android App → Sensor Lab：從入口開始錄，每個點位用「四方向拍照」拍前、右、後、左；分好幾趟走，每趟匯出一個 zip | `sensor_log.csv` + `photos/` |
+| 2. 匯入路線 | 建圖頁的「店家」選單 →「＋ 新增店家…」，填店名、勾選 Sensor Lab 資料後按「重建地圖」；或 `python build_map_v2_topomap.py --place "<店名>" walk1.zip walk2.zip …` | 該店的工作資料夾：`01/`、`02/`…照片 + `topomap.json` |
+| 3. 對齊、合併 | 啟動後端，打開 `http://localhost:8000/topomap-builder?place=<店名>`（不給 `place` 會開最近編輯的店）：對齊、合併後按「確認並儲存」 | 該店的 `topomap_confirmed.json` |
+| 4. 上傳 | `python upload_map_v2.py --place "<店名>" --dry-run` 先檢查，沒問題再拿掉 `--dry-run` | `Waypoint`、`HAS_PHOTO`、`DirPhoto`、`WALKWAY` |
+| 5. 產生物件 | `python rebuild_objects_v2.py --place "<店名>" --limit 2 --dry-run` 試跑，再完整執行 | `Object`、`DETECTED`、`ADJACENT` |
+| 6. 設定 | 寫 `maps/neo4j_links/<店名>.json`（入口與補的連線，參考 `a7_carrefour.json`）；App 從 `/places` 選店 | |
+
+- **每間店一個工作資料夾**：`<MAP_BUILD_ROOT>/<店名>/`（預設 `backend/output/mapbuild/<店名>/`；店名裡 Windows 不允許的字元會換成 `_`，例如「A7家樂福（9/16)」→「A7家樂福（9_16)」）。裡面有 `topomap.json`、`topomap_confirmed.json`、各路線照片、`dino_embeddings.pkl`、`floorplan.*`、`imports/`、`vlm_cache/`。建圖頁用頂端的「店家」選單切換，三支腳本依 `--place` 找資料夾（`--workspace` 可以另外指定）。舊的環境變數 `MAP_BUILD_DIR` 現在代表這個總資料夾。
+- **參考底圖**：設定 `MAP_BUILD_REF_PLACE=<Neo4j place>`，建圖頁就會把那張地圖畫在底下（例如同一間店的舊地圖）。
+- **路線…**（建圖頁頂端）：
+  - 列出來源資料夾裡所有 Sensor Lab 匯出，也就是含 `sensor_log.csv` 的資料夾或 zip。來源資料夾預設是 `backend/legacy/testPDR`、`backend/testPDR`，可用 `MAP_BUILD_SOURCES` 設定；也可以直接上傳 zip（存到 `<工作資料夾>/imports/`）。
+  - 勾選路線後按「重建地圖」，效果等同 `build_map_v2_topomap.py`。已在用的路線保留原本編號，新路線依錄製時間接在後面，編號不會重複使用。
+- **CSV 軌跡**（頂端選單）：畫出 `sensor_log.csv` 每一步的 PDR 路線。「跟著節點」會隨對齊、合併一起變形；「原始座標」顯示 CSV 原本算出的結果。滑鼠移到路線圖例上，可以看到步數、距離、時間。
+- **DINO 自動調整**（「對齊工具」最上面）：按「分析照片」後，會比對每個節點的四方向照片（DINOv2，向量快取在 `<工作資料夾>/dino_embeddings.pkl`），列出三類建議：
+  - 閉環：同一趟走回原地。
+  - 重疊：不同趟的同一個位置。
+  - 不確定：預設不勾，按「看」可以並排比對兩個點的照片。
+
+  按「套用勾選」會依序閉環合併（分攤誤差）、把其他路線最小平方旋轉加平移對上第一條、合併重疊點；「復原」一鍵還原。
+- **合併**：點一個節點，按「合併：選另一個點…」，再點另一個節點。同一趟會自動用閉環合併；較早或第一條路線的點會保留位置。
+- **插入路線**：節點站在另一條路線兩個節點之間的走道上時，點它，按「插入路線：選一條邊…」，再點那條邊。邊 a—b 會變成 a—這點—b，節點移到線上，照片保留在自己身上。DINO 分析也會自動找出這種情況，列在「在路線上」：最像的兩個點剛好是另一條路線上相鄰的節點。套用時會在對齊與合併之後插入，若離那條邊超過 5 m 則跳過。
+- **平面圖對齊**（建圖頁右上角的「對齊工具」）：
+  - 載入平面圖：圖檔會存成 `<工作資料夾>/floorplan.*`。可調整中心、寬度（公尺）、旋轉、透明度，也可以直接拖曳移動。
+  - 整體調整節點：對象可選全部節點或某一趟。可以平移，或繞原點、對象中心、選取的節點旋轉；照片的拍攝方向會跟著轉。也可以勾選「拖曳任一節點時整體一起移動」。
+  - 「復原移動」可以一步一步撤銷。
+  - 編輯進度會自動存在瀏覽器裡，重新整理不會不見；「重設全部」會回到原始資料。
+- **VLM**：使用 `.env` 的 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL`。提示詞與 A7 相同，每張照片預設呼叫 3 次再去重（`--calls`）。結果快取在 `<工作資料夾>/vlm_cache/`，中斷後重跑不會重複付費。
+- **OCR**：使用 EasyOCR，文字會掛到中心點落在其框內的物件上（`ocr_text`）。第一次載入模型較慢，可用 `--no-ocr` 略過。
+- **安全**：本工具建立的 `DirPhoto` / `Object` 帶有 `place` 欄位。`upload_map_v2.py --replace` 與 `rebuild_objects_v2.py` 只會動這種 place，同學建的 A7 一律拒絕寫入。
+- **還沒做**：新店照片的 DINOv2 sidecar（`dino_sidecar.pkl` 目前只有 A7）。少了它，新店定位會退回九宮格比對。
+
+## 舊版建圖管線（legacy）
 
 以賣場照片一次性建立拓樸地圖，依序執行：
 

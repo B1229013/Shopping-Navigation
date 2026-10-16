@@ -79,6 +79,16 @@ EDITOR_MAP_DIR = PROJECT_ROOT / "maps"
 # coordinates with localization) + maps/neo4j_links/<place>.json for missing links and
 # the entrance; "editor" = the hand-corrected maps/*.json walks.
 ROUTE_MAP_SOURCE = os.environ.get("ROUTE_MAP_SOURCE", "neo4j").strip().lower()
+# Building a new store map (server/map_v2.py): one workspace folder per store under this root
+# (MAP_BUILD_ROOT/<店名>/ holds topomap.json, <set>/ photos, topomap_confirmed.json, …; see
+# server/map_build.workspace_for), and an optional Neo4j place drawn under the builder as a
+# reference (e.g. an older map of the same store). MAP_BUILD_DIR is the old name of the root.
+MAP_BUILD_ROOT = Path(os.environ.get("MAP_BUILD_ROOT", "") or os.environ.get("MAP_BUILD_DIR", "")
+                      or PROJECT_ROOT / "output" / "mapbuild")
+MAP_BUILD_REF_PLACE = os.environ.get("MAP_BUILD_REF_PLACE", "").strip()
+# Folders the builder's 「路線」 dialog lists Sensor Lab exports from (os.pathsep-separated)
+MAP_BUILD_SOURCES = [Path(p) for p in os.environ.get("MAP_BUILD_SOURCES", "").split(os.pathsep) if p.strip()] \
+    or [PROJECT_ROOT / "legacy" / "testPDR", PROJECT_ROOT / "testPDR"]
 
 # LLM service — OpenAI GPT-4o
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")

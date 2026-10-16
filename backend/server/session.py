@@ -45,6 +45,9 @@ class Session:
     # Second-photo request: image evidence of an unsure photo, combined with the next
     # one taken from (almost) the same place — {"evidence": {nid: v}, "t": epoch s, "raw": (x, y)}
     pending_view: Optional[dict] = None
+    # What localization did for the latest photo (server.session_log.localization_record),
+    # written to output/sessions/<id>/turns.jsonl; None when the photo was not localized.
+    last_loc_log: Optional[dict] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
 
     # ── Heading / orientation ──────────────────────────────────────

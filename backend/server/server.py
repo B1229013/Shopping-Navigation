@@ -99,7 +99,7 @@ from server.vlm import (
     ask_about_image as _vlm_ask_about_image,
 )
 from server.neo4j_client import get_neo4j
-from server import aisle_signs, photo_quality
+from server import aisle_signs, photo_quality, session_log
 from server.loc_fusion import (adaptive_weights, dino_gap, parse_dino_topk, parse_image_k, parse_weights,
                                sensor_sigma)
 from server.visual_localization import (
@@ -1164,6 +1164,9 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
     if not neo4j:
         log.warning("🔴 [session %s] _run_early_localization: Neo4j not connected — skipped", session_id)
         return None
+    s.last_loc_log = None
+    rerank_log: Optional[dict] = None
+    jump_log: Optional[float] = None
     try:
         v2_kwargs = {}
         if _config.LOC_FUSION_V2:
@@ -1232,6 +1235,8 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                 backup_key=OPENAI_BACKUP_KEY,
             )
             log.info("⏱ rerank: %.1fs (%d candidate nodes)", time.time() - t_rerank, len(top))
+            rerank_log = {"candidates": [n for n, _, _ in top],
+                          "picked": reranked[0][0] if reranked else None, "accepted": False}
             if reranked and reranked[0][0] != loc_result.matched_nid:
                 new_nid = reranked[0][0]
                 grid_top_score = top[0][1] if top else 0
@@ -1251,6 +1256,7 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                     loc_result.ref_node = new_ref
                     loc_result.method = "grid+rerank"
                     loc_result.reasoning = reranked[0][2]
+                    rerank_log["accepted"] = True
 
                 if new_ref and new_ref.directional_photos:
                     from server.heading import estimate_heading, best_matching_slot, DirectionalPhoto
@@ -1308,6 +1314,15 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                     loc_result.matched_slot = None
                     loc_result.heading_confidence = 0.0
                     loc_result.confidence *= 0.6
+                    jump_log = jump_m
+
+        # what localization did, for output/sessions/<id>/turns.jsonl
+        s.last_loc_log = session_log.localization_record(
+            loc_result, sigma=v2_kwargs.get("sensor_sigma"), reachable=v2_kwargs.get("reachable"),
+            server_evidence=v2_kwargs.get("server_evidence"), aisle_evidence=v2_kwargs.get("aisle_evidence"),
+            rerank=rerank_log)
+        if jump_log is not None:
+            s.last_loc_log["spatial_jump_penalty_m"] = round(jump_log, 2)
 
         if loc_result.matched_nid is not None:
             s.last_corrected_nid = loc_result.matched_nid
@@ -1384,6 +1399,18 @@ def list_places():
 
 @app.post("/session", response_model=StartSessionResponse)
 def start_session(req: StartSessionRequest) -> StartSessionResponse:
+    resp = _handle_start_session(req)
+    s = _store.get(resp.session_id)
+    if s is not None:
+        out_dir = OUTPUT_ROOT / s.id
+        session_log.append_turn(out_dir, {"kind": "start", "request": {"goal": req.goal, "place": req.place},
+                                          "response": {"guidance": resp.guidance, "goal_objects": resp.goal_objects,
+                                                       "place": resp.place, "goal_node_id": resp.goal_node_id}})
+        session_log.write_session(out_dir, s)
+    return resp
+
+
+def _handle_start_session(req: StartSessionRequest) -> StartSessionResponse:
     if not req.goal.strip():
         raise HTTPException(status_code=400, detail={"error": "bad_request", "detail": "goal is empty"})
     goal_objects = decompose_goal(req.goal)
@@ -1605,6 +1632,40 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
 
 @app.post("/session/{session_id}/photo", response_model=TurnResponse)
 async def upload_photo(
+    session_id: str,
+    photo: UploadFile = File(...),
+    dino_node_hint: Optional[int] = Form(None),
+    dino_topk: Optional[str] = Form(None),
+    pdr_x: Optional[float] = Form(None),
+    pdr_y: Optional[float] = Form(None),
+    map_x: Optional[float] = Form(None),
+    map_y: Optional[float] = Form(None),
+    dist_since_fix: Optional[float] = Form(None),
+    fix_node: Optional[int] = Form(None),
+    heading: Optional[float] = Form(None),
+    source: Optional[str] = Form(None),
+) -> TurnResponse:
+    """Handle one navigation photo, then record the turn in output/sessions/<id>/."""
+    s = _store.get(session_id)
+    if s is not None:
+        s.last_loc_log = None
+    resp = await _handle_photo(session_id, photo, dino_node_hint, dino_topk, pdr_x, pdr_y, map_x, map_y,
+                               dist_since_fix, fix_node, heading, source)
+    if s is not None:
+        out_dir = OUTPUT_ROOT / session_id
+        session_log.append_turn(out_dir, {
+            "kind": "photo",
+            "request": {"source": source or "camera", "pdr_x": pdr_x, "pdr_y": pdr_y, "map_x": map_x, "map_y": map_y,
+                        "dist_since_fix": dist_since_fix, "fix_node": fix_node, "heading": heading,
+                        "dino_node_hint": dino_node_hint, "dino_topk": dino_topk},
+            "localization": s.last_loc_log,
+            "response": session_log.response_record(resp),
+        })
+        session_log.write_session(out_dir, s)
+    return resp
+
+
+async def _handle_photo(
     session_id: str,
     photo: UploadFile = File(...),
     dino_node_hint: Optional[int] = Form(None),
@@ -2238,6 +2299,23 @@ async def upload_photo(
 
 @app.post("/session/{session_id}/answer", response_model=TurnResponse)
 def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
+    resp = _handle_answer(session_id, req)
+    _log_turn(session_id, "answer", {"answer": req.answer}, resp)
+    return resp
+
+
+def _log_turn(session_id: str, kind: str, request: dict, resp) -> None:
+    """Record a non-photo turn (/answer, /confirm) in output/sessions/<id>/."""
+    s = _store.get(session_id)
+    if s is None:
+        return
+    out_dir = OUTPUT_ROOT / session_id
+    session_log.append_turn(out_dir, {"kind": kind, "request": request,
+                                      "response": session_log.response_record(resp)})
+    session_log.write_session(out_dir, s)
+
+
+def _handle_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
     s = _store.get(session_id)
     if s is None:
         raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
@@ -2403,6 +2481,13 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
 
 @app.post("/session/{session_id}/confirm", response_model=TurnResponse)
 def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse:
+    """User confirms or rejects the ARRIVED decision."""
+    resp = _handle_confirm(session_id, req)
+    _log_turn(session_id, "confirm", {"kind": req.kind}, resp)
+    return resp
+
+
+def _handle_confirm(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse:
     """User confirms or rejects the ARRIVED decision."""
     s = _store.get(session_id)
     if s is None:
@@ -3453,66 +3538,230 @@ def serve_reference_photo(nid: int):
     raise HTTPException(status_code=404, detail=f"photo file not found: {photo_file}")
 
 
+def _ws(place: str) -> Path:
+    """The store's map-building workspace, MAP_BUILD_ROOT/<店名>/ (see server/map_build.py)."""
+    from server.map_build import workspace_for
+    try:
+        return workspace_for(place, _config.MAP_BUILD_ROOT)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+def _read_topomap(ws: Path) -> Optional[dict]:
+    p = ws / "topomap.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+
 @app.get("/test-photo/{set_id}/{filename}")
-def serve_test_photo(set_id: str, filename: str):
-    """Serve test photos from 0916 test data."""
-    base = Path("/Users/shingchou/Downloads/學校家樂福/0916測試")
-    p = base / set_id / filename
-    if not p.exists():
-        raise HTTPException(status_code=404, detail=f"not found: {p}")
+def serve_test_photo(set_id: str, filename: str, place: str = Query(...)):
+    """A walk's photo from the store's workspace (<workspace>/<set_id>/<filename>)."""
+    base = _ws(place).resolve()
+    p = (base / set_id / filename).resolve()
+    if base not in p.parents or not p.is_file():
+        raise HTTPException(status_code=404, detail=f"not found: {set_id}/{filename}")
     return FileResponse(str(p), media_type="image/jpeg")
 
 
 @app.get("/topomap-builder")
 def topomap_builder():
-    """Interactive topological map builder page."""
+    """Interactive topological map builder page (?place=<店名> picks the store)."""
     html_path = Path(__file__).parent / "topomap_builder.html"
-    return FileResponse(str(html_path), media_type="text/html")
+    return FileResponse(str(html_path), media_type="text/html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/topomap-places")
+def topomap_places():
+    """Stores that have a map-building workspace, newest first."""
+    from server.map_build import list_places
+    return {"root": str(_config.MAP_BUILD_ROOT), "places": list_places(_config.MAP_BUILD_ROOT)}
 
 
 @app.get("/existing-topomap")
 def existing_topomap():
-    """Serve existing A7 topo map data for the builder's reference background."""
-    import re as _re
-    artifact_path = Path(
-        "/Users/shingchou/.claude/projects/-Users-shingchou-Desktop-APPNAV-ios/"
-        "a6b51ce6-65fa-4d5b-ad57-358da0cc2412/tool-results/"
-        "artifact-fcf22acb-1789444754-adea.html"
-    )
-    if not artifact_path.exists():
-        raise HTTPException(status_code=404, detail="existing topo map artifact not found")
-    html = artifact_path.read_text(encoding="utf-8")
-    m = _re.search(
-        r'<script id="topodata" type="application/json">(.*?)</script>', html, _re.DOTALL
-    )
-    if not m:
-        raise HTTPException(status_code=500, detail="could not parse artifact topodata")
-    data = json.loads(m.group(1))
-    nodes = []
-    for ph in data["ph"]:
-        ocr_texts = [o["t"] for o in ph.get("o", []) if o.get("t")]
-        nodes.append({"id": ph["id"], "x": ph["x"], "y": ph["y"],
-                       "sn": ph.get("sn", ""), "labels": ocr_texts[:3]})
-    edges = [{"a": w["a"], "b": w["b"]} for w in data.get("w", [])]
+    """Reference map drawn under the builder: the Neo4j place MAP_BUILD_REF_PLACE (if set)."""
+    place = _config.MAP_BUILD_REF_PLACE
+    if not place:
+        raise HTTPException(status_code=404, detail="MAP_BUILD_REF_PLACE not set")
+    neo4j = get_neo4j()
+    if neo4j is None:
+        raise HTTPException(status_code=503, detail="Neo4j not configured or not connected")
+    ref = neo4j.load_reference_map(place)
+    nodes = [{"id": p.nid, "x": p.pdr_x, "y": p.pdr_y, "sn": p.session,
+              "labels": [o.ocr_text for o in p.objects if o.ocr_text][:3]}
+             for p in ref.photos.values()]
+    edges = [{"a": e["from"], "b": e["to"]} for e in ref.walkway_edges]
     return JSONResponse({"nodes": nodes, "edges": edges})
 
 
 @app.get("/topomap-data")
-def topomap_data():
-    """Serve the generated topomap JSON."""
-    p = Path("/private/tmp/claude-501/-Users-shingchou-Desktop-APPNAV-ios/a6b51ce6-65fa-4d5b-ad57-358da0cc2412/scratchpad/topomap.json")
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="topomap not generated yet")
-    return JSONResponse(json.loads(p.read_text()))
+def topomap_data(place: str = Query(...)):
+    """The builder's input: <workspace>/topomap.json (from 「路線」 or build_map_v2_topomap.py)."""
+    topo = _read_topomap(_ws(place))
+    if topo is None:
+        raise HTTPException(status_code=404, detail=f"「{place}」還沒有路線：按「路線…」選要匯入的 Sensor Lab 資料")
+    return JSONResponse(topo)
+
+
+@app.get("/topomap-sources")
+def topomap_sources(place: str = Query("")):
+    """Sensor Lab exports the builder can import, and the walks the store's workspace uses now
+    (no place yet = a new store: nothing in use)."""
+    from server.map_build import list_sources
+    ws = _ws(place) if place.strip() else None
+    topo = (_read_topomap(ws) if ws else None) or {}
+    walks = topo.get("walks") or [{"set": s, "source": "", "nodes": n}
+                                  for s, n in (topo.get("stats", {}).get("sets") or {}).items()]
+    return {"place": topo.get("place", place), "walks": walks,
+            "roots": [str(r) for r in _config.MAP_BUILD_SOURCES],
+            "sources": list_sources(_config.MAP_BUILD_SOURCES, ws)}
+
+
+@app.post("/topomap-sources/upload")
+async def topomap_sources_upload(file: UploadFile = File(...), place: str = Query(...)):
+    """A Sensor Lab .zip uploaded from the builder → <workspace>/imports/<name>.zip."""
+    import io
+    import re as _re
+    import zipfile
+    from server.map_build import CSV_NAME, IMPORTS_DIR
+    data = await file.read()
+    if len(data) > 1024 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="zip 超過 1 GB")
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            if not any(n.endswith(CSV_NAME) for n in zf.namelist()):
+                raise HTTPException(status_code=422, detail=f"zip 裡沒有 {CSV_NAME}（不是 Sensor Lab 匯出）")
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=422, detail="不是 zip 檔")
+    folder = _ws(place) / IMPORTS_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = _re.sub(r'[\\/:*?"<>|]+', "_", Path(file.filename or "walk").stem).strip() or "walk"
+    out, k = folder / f"{stem}.zip", 1
+    while out.exists():
+        k += 1
+        out = folder / f"{stem}_{k}.zip"
+    out.write_bytes(data)
+    return {"path": str(out.resolve()), "name": out.stem}
+
+
+@app.post("/topomap-walks")
+def topomap_walks(payload: dict = Body(...)):
+    """(Re)build the store's topomap.json from the chosen Sensor Lab exports (paths from
+    /topomap-sources). A store name with no workspace yet starts a new one. Walks already in
+    the workspace keep their set id; new ones get the next unused id."""
+    from server.map_build import assign_sets, build_workspace, list_sources
+    place = str(payload.get("place") or "").strip()
+    chosen = [str(p) for p in payload.get("sources") or []]
+    if not place:
+        raise HTTPException(status_code=422, detail="請填店名（Neo4j place）")
+    if not chosen:
+        raise HTTPException(status_code=422, detail="至少選一條路線")
+    ws = _ws(place)
+    # the store's own uploads, plus zips uploaded under the store the dialog was opened from
+    dirs = {ws} | ({_ws(str(payload["from_place"]))} if str(payload.get("from_place") or "").strip() else set())
+    allowed = {e["path"] for d in dirs for e in list_sources(_config.MAP_BUILD_SOURCES, d)}
+    bad = [p for p in chosen if str(Path(p).resolve()) not in allowed]
+    if bad:
+        raise HTTPException(status_code=422, detail=f"不在可選的來源裡：{bad[0]}")
+    walks, next_set = assign_sets(_read_topomap(ws), [Path(p) for p in chosen])
+    try:
+        topo, report = build_workspace(place, walks, ws, next_set)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    log.info("topomap rebuilt for %s: %s", place, " | ".join(report))
+    return {"report": report, "nodes": len(topo["nodes"]), "walks": topo.get("walks", []),
+            "place": place, "folder": ws.name}
+
+
+@app.get("/topomap-suggest")
+def topomap_suggest(place: str = Query(...)):
+    """DINOv2 merge suggestions for the builder (loop closures, same spot on two walks, a
+    waypoint on another walk's edge). Photo embeddings are cached in
+    <workspace>/dino_embeddings.pkl ("<set>/<file>" → vector); the first call embeds every
+    photo (about 1 s each on CPU)."""
+    import pickle
+    from server import dino_embed
+    from server.map_v2 import photo_key, suggest_merges
+
+    ws = _ws(place)
+    topo = _read_topomap(ws)
+    if topo is None:
+        raise HTTPException(status_code=404, detail=f"「{place}」還沒有路線")
+    nodes = topo["nodes"]
+    cache_path = ws / "dino_embeddings.pkl"
+    emb = {}
+    if cache_path.exists():
+        try:
+            emb = pickle.loads(cache_path.read_bytes())
+        except Exception:
+            log.warning("unreadable %s — re-embedding", cache_path)
+    todo = [(photo_key(n, s), ws / n["set"] / n["photos"][s]) for n in nodes for s in n["photos"]]
+    todo = [(k, p) for k, p in todo if k not in emb and p.is_file()]
+    if todo:
+        if not dino_embed.available():
+            raise HTTPException(status_code=503, detail="DINOv2 無法載入（需要 torch + transformers）")
+        t0 = time.time()
+        for k, p in todo:
+            v = dino_embed.embed_image(str(p))
+            if v is not None:
+                emb[k] = v
+        cache_path.write_bytes(pickle.dumps(emb))
+        log.info("topomap-suggest: embedded %d photos in %.0fs", len(todo), time.time() - t0)
+    out = suggest_merges(nodes, emb)
+    out["embedded"] = len(todo)
+    return out
+
+
+_FLOORPLAN_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
+
+
+def _floorplan_file(ws: Path) -> Optional[Path]:
+    return next((p for p in ws.glob("floorplan.*") if p.suffix.lower() in _FLOORPLAN_TYPES.values()), None)
+
+
+@app.post("/topomap-floorplan")
+async def topomap_floorplan_upload(file: UploadFile = File(...), place: str = Query(...)):
+    """Floor-plan image drawn under the builder; kept as <workspace>/floorplan.<ext>."""
+    ext = _FLOORPLAN_TYPES.get((file.content_type or "").lower())
+    if not ext:
+        raise HTTPException(status_code=415, detail="請用 PNG / JPG / WebP / GIF 圖檔")
+    data = await file.read()
+    if len(data) > 30 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="圖檔超過 30 MB")
+    base = _ws(place)
+    base.mkdir(parents=True, exist_ok=True)
+    old = _floorplan_file(base)
+    if old:
+        old.unlink()
+    (base / f"floorplan{ext}").write_bytes(data)
+    return {"ok": True}
+
+
+@app.get("/topomap-floorplan")
+def topomap_floorplan(place: str = Query(...)):
+    p = _floorplan_file(_ws(place))
+    if not p:
+        raise HTTPException(status_code=404, detail="no floor plan")
+    return FileResponse(str(p), headers={"Cache-Control": "no-store"})
+
+
+@app.delete("/topomap-floorplan")
+def topomap_floorplan_delete(place: str = Query(...)):
+    p = _floorplan_file(_ws(place))
+    if p:
+        p.unlink()
+    return {"ok": True}
 
 
 @app.post("/topomap-confirm")
 async def topomap_confirm(payload: dict = Body(...)):
-    """Save the confirmed topomap selection for Neo4j upload."""
-    out = Path("/private/tmp/claude-501/-Users-shingchou-Desktop-APPNAV-ios/a6b51ce6-65fa-4d5b-ad57-358da0cc2412/scratchpad/topomap_confirmed.json")
-    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    """Save the builder's result to <workspace>/topomap_confirmed.json for upload_map_v2.py."""
+    place = str(payload.get("place") or "").strip()
+    out = _ws(place) / "topomap_confirmed.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     n_nodes = len(payload.get("nodes", []))
     n_edges = len(payload.get("edges", []))
-    primary = payload.get("primary_set", "?")
-    log.info("Topomap confirmed: primary=%s nodes=%d edges=%d", primary, n_nodes, n_edges)
-    return {"message": f"已確認！路線 {primary}，{n_nodes} 節點、{n_edges} 條邊。準備上傳到 Neo4j…"}
+    log.info("Topomap confirmed: %s nodes=%d edges=%d → %s", place, n_nodes, n_edges, out)
+    return {"message": f"已儲存到 {out.parent.name}/{out.name}（{n_nodes} 個節點、{n_edges} 條邊）。"
+                       f"下一步：python upload_map_v2.py --place \"{place}\" --dry-run",
+            "path": str(out)}

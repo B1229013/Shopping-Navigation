@@ -10,18 +10,30 @@ import android.os.Build
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.widget.Toast
 import android.graphics.Paint as NativePaint
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
+import androidx.camera.core.ZoomState
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -36,22 +48,34 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Observer
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavController
+import coil.compose.AsyncImage
 import com.example.shopping.LocalVolumeKeyHandler
 import com.example.shopping.sensor.PdrPoint
 import com.example.shopping.sensor.PdrTracker
@@ -73,9 +97,18 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
+import kotlin.math.abs
+import kotlin.math.asin
+import kotlin.math.ceil
+import kotlin.math.exp
+import kotlin.math.floor
+import kotlin.math.ln
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 // ── GPS convergence status ──
 
@@ -226,12 +259,24 @@ private fun listSavedLogs(context: Context): List<LogFileInfo> {
             try {
                 ZipFile(f).use { zf ->
                     val csvEntry = zf.entries().asSequence().firstOrNull { it.name.endsWith(".csv") } ?: return@mapNotNull null
-                    val lines = zf.getInputStream(csvEntry).bufferedReader().readLines()
-                    val commentLines = lines.filter { it.startsWith("#") }
-                    val posture = commentLines.firstNotNullOfOrNull { Regex("posture=([^,\\s]*)").find(it)?.groupValues?.get(1) } ?: ""
-                    val gtSteps = commentLines.firstNotNullOfOrNull { Regex("ground_truth_steps=([^,]*)").find(it)?.groupValues?.get(1) } ?: ""
-                    val gtDist = commentLines.firstNotNullOfOrNull { Regex("ground_truth_distance_m=([^,]*)").find(it)?.groupValues?.get(1) } ?: ""
-                    val dataLines = lines.count { !it.startsWith("#") && it.contains(",") } - 1
+                    // 串流逐行讀取，只擷取註解中的 metadata 並計數資料列，
+                    // 不把整份 CSV（可能上萬行）讀進記憶體。
+                    var posture = ""
+                    var gtSteps = ""
+                    var gtDist = ""
+                    var dataLines = 0
+                    zf.getInputStream(csvEntry).bufferedReader().useLines { seq ->
+                        seq.forEach { line ->
+                            if (line.startsWith("#")) {
+                                if (posture.isEmpty()) Regex("posture=([^,\\s]*)").find(line)?.let { posture = it.groupValues[1] }
+                                if (gtSteps.isEmpty()) Regex("ground_truth_steps=([^,]*)").find(line)?.let { gtSteps = it.groupValues[1] }
+                                if (gtDist.isEmpty()) Regex("ground_truth_distance_m=([^,]*)").find(line)?.let { gtDist = it.groupValues[1] }
+                            } else if (line.contains(",")) {
+                                dataLines++
+                            }
+                        }
+                    }
+                    dataLines -= 1  // 扣掉標題列
                     val photos = zf.entries().asSequence().count { it.name.startsWith("photos/") && !it.isDirectory }
                     LogFileInfo(
                         file = f,
@@ -252,12 +297,22 @@ private fun listSavedLogs(context: Context): List<LogFileInfo> {
     val csvLogs = dir.listFiles { f -> f.extension == "csv" }
         ?.sortedByDescending { it.lastModified() }
         ?.map { f ->
-            val lines = f.readLines()
-            val commentLines = lines.filter { it.startsWith("#") }
-            val posture = commentLines.firstNotNullOfOrNull { Regex("posture=([^,\\s]*)").find(it)?.groupValues?.get(1) } ?: ""
-            val gtSteps = commentLines.firstNotNullOfOrNull { Regex("ground_truth_steps=([^,]*)").find(it)?.groupValues?.get(1) } ?: ""
-            val gtDist = commentLines.firstNotNullOfOrNull { Regex("ground_truth_distance_m=([^,]*)").find(it)?.groupValues?.get(1) } ?: ""
-            val dataLines = lines.count { !it.startsWith("#") && it.contains(",") } - 1
+            var posture = ""
+            var gtSteps = ""
+            var gtDist = ""
+            var dataLines = 0
+            f.bufferedReader().useLines { seq ->
+                seq.forEach { line ->
+                    if (line.startsWith("#")) {
+                        if (posture.isEmpty()) Regex("posture=([^,\\s]*)").find(line)?.let { posture = it.groupValues[1] }
+                        if (gtSteps.isEmpty()) Regex("ground_truth_steps=([^,]*)").find(line)?.let { gtSteps = it.groupValues[1] }
+                        if (gtDist.isEmpty()) Regex("ground_truth_distance_m=([^,]*)").find(line)?.let { gtDist = it.groupValues[1] }
+                    } else if (line.contains(",")) {
+                        dataLines++
+                    }
+                }
+            }
+            dataLines -= 1  // 扣掉標題列
             LogFileInfo(
                 file = f,
                 name = f.nameWithoutExtension.removePrefix("sensor_log_"),
@@ -326,9 +381,10 @@ fun SensorLabScreen(navController: NavController) {
 
     // ── Camera ──
     val imageCapture = remember { ImageCapture.Builder().build() }
+    // 綁定後的相機，用來控制對焦與倍率
+    var camera by remember { mutableStateOf<Camera?>(null) }
     val cameraPreview = remember { Preview.Builder().build() }
     val captureExecutor = remember { Executors.newSingleThreadExecutor() }
-    var showCameraPreview by remember { mutableStateOf(false) }
 
     LaunchedEffect(cameraPermissionGranted) {
         if (!cameraPermissionGranted) return@LaunchedEffect
@@ -337,7 +393,7 @@ fun SensorLabScreen(navController: NavController) {
         }
         try {
             cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, cameraPreview, imageCapture)
+            camera = cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, cameraPreview, imageCapture)
         } catch (e: Exception) {
             Log.e("SensorLab", "Camera bind failed", e)
         }
@@ -353,28 +409,19 @@ fun SensorLabScreen(navController: NavController) {
     var pausedElapsedMs by remember { mutableLongStateOf(0L) }
     var recordStartTime by remember { mutableLongStateOf(0L) }
     var elapsedSeconds by remember { mutableDoubleStateOf(0.0) }
-    val records = remember { mutableStateListOf<SensorRecord>() }
+    // 普通清單：50Hz 取樣（在主執行緒的感測器 callback 中）append 時不觸發 Compose 重組。
+    // UI 只觀察 displayRecordCount，由下方 100ms 輪詢同步。
+    val records = remember { mutableListOf<SensorRecord>() }
+    var displayRecordCount by remember { mutableIntStateOf(0) }
 
     // ── Posture ──
     var posture by remember { mutableStateOf(Posture.HAND_HELD) }
 
     // ── Display values (updated via polling) ──
     var displayStepCount by remember { mutableIntStateOf(0) }
-    var displayStepDetected by remember { mutableIntStateOf(0) }
     var displayHeading by remember { mutableFloatStateOf(0f) }
-    var displayAccel by remember { mutableStateOf(floatArrayOf(0f, 0f, 0f)) }
-    var displayGyro by remember { mutableStateOf(floatArrayOf(0f, 0f, 0f)) }
-    var displayMag by remember { mutableStateOf(floatArrayOf(0f, 0f, 0f)) }
-    var displayRotVec by remember { mutableStateOf(floatArrayOf(0f, 0f, 0f, 1f)) }
-    var displayPressure by remember { mutableFloatStateOf(0f) }
-    var displayLight by remember { mutableFloatStateOf(0f) }
     var displayPdrX by remember { mutableFloatStateOf(0f) }
     var displayPdrY by remember { mutableFloatStateOf(0f) }
-    var displayGrvYaw by remember { mutableFloatStateOf(0f) }
-    var displayRvYaw by remember { mutableFloatStateOf(0f) }
-    var displayCompYaw by remember { mutableFloatStateOf(0f) }
-    var displayGyroYaw by remember { mutableFloatStateOf(0f) }
-    var displayCalYaw by remember { mutableFloatStateOf(0f) }
     var displayGpsLat by remember { mutableStateOf<Double?>(null) }
     var displayGpsLng by remember { mutableStateOf<Double?>(null) }
     var displayGpsAcc by remember { mutableStateOf<Float?>(null) }
@@ -415,7 +462,10 @@ fun SensorLabScreen(navController: NavController) {
 
     // ── Ground truth + history ──
     var groundTruth by remember { mutableStateOf(GroundTruth()) }
-    var savedLogs by remember { mutableStateOf(listSavedLogs(context)) }
+    var savedLogs by remember { mutableStateOf<List<LogFileInfo>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        savedLogs = withContext(Dispatchers.IO) { listSavedLogs(context) }
+    }
 
     // ── Start/stop PdrTracker ──
     DisposableEffect(activityPermissionGranted) {
@@ -544,23 +594,11 @@ fun SensorLabScreen(navController: NavController) {
     LaunchedEffect(Unit) {
         while (true) {
             displayStepCount = pdrTracker.totalSteps
-            displayStepDetected = pdrTracker.stepDetectorCount
             displayHeading = pdrTracker.headingDeg
-            displayAccel = pdrTracker.accelValues
-            displayGyro = pdrTracker.gyroValues
-            displayMag = pdrTracker.magValues
-            displayRotVec = pdrTracker.currentRotVec
-            displayPressure = pdrTracker.pressureValue
-            displayLight = pdrTracker.lightValue
             displayPdrX = pdrTracker.x
             displayPdrY = pdrTracker.y
             totalPdrDistance = pdrTracker.totalDistance
             lastStride = pdrTracker.lastStride
-            displayGrvYaw = pdrTracker.getGameRotVecYawDeg()
-            displayRvYaw = pdrTracker.getRotVecYawDeg()
-            displayCompYaw = pdrTracker.getComplementaryYawDeg()
-            displayGyroYaw = pdrTracker.getGyroOnlyYawDeg()
-            displayCalYaw = pdrTracker.getCalibratedYawDeg()
             displayGpsLat = pdrTracker.gpsLat
             displayGpsLng = pdrTracker.gpsLng
             displayGpsAcc = pdrTracker.gpsAccuracy
@@ -569,6 +607,7 @@ fun SensorLabScreen(navController: NavController) {
             if (pdrTracker.gyroCalState == PdrTracker.GyroCalState.CALIBRATING) {
                 gyroCalProgress = pdrTracker.gyroCalProgress
             }
+            displayRecordCount = records.size
             delay(100)
         }
     }
@@ -596,7 +635,6 @@ fun SensorLabScreen(navController: NavController) {
         multiCaptureY = displayPdrY
         multiCaptureStepIndex = displayStepCount
         multiCaptureElapsed = (SystemClock.elapsedRealtime() - recordStartTime) / 1000.0
-        if (!showCameraPreview) showCameraPreview = true
     }
 
     fun finishMultiCapture() {
@@ -665,11 +703,31 @@ fun SensorLabScreen(navController: NavController) {
         }
     }
 
+    // 放在提前 return 之前，拍完照回來時捲動位置不會跑回頂端
+    val scrollState = rememberScrollState()
+
+    // 拍照模式：整個畫面換成全螢幕相機（像相機 App），完成或返回後回到 SensorLab。
+    // 不用 Dialog，音量鍵才會繼續送到 MainActivity（音量↑ = 快門）。
+    if (isMultiCapturing && cameraPermissionGranted) {
+        FullScreenCaptureOverlay(
+            cameraPreview = cameraPreview,
+            imageCapture = imageCapture,
+            camera = camera,
+            dirIndex = multiCaptureDir,
+            photoNames = multiCapturePhotos,
+            isTakingPhoto = isTakingPhoto,
+            heading = displayHeading,
+            onShutter = { captureCurrentDirection() },
+            onDone = { finishMultiCapture() },
+        )
+        return
+    }
+
     Scaffold(
         containerColor = Noir,
         topBar = {
             TopAppBar(
-                title = { Text("SensorLab", style = MaterialTheme.typography.titleLarge, color = TextPrimary) },
+                title = { Text("SensorLab",style = MaterialTheme.typography.titleLarge, color = TextPrimary) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = TextSecondary)
@@ -683,7 +741,7 @@ fun SensorLabScreen(navController: NavController) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Spacer(Modifier.height(4.dp))
@@ -715,16 +773,7 @@ fun SensorLabScreen(navController: NavController) {
 
             // ── Live readings ──
             StaggeredItem(index = 4) {
-                LiveReadingsCard(
-                    stepCount = displayStepCount,
-                    stepDetected = displayStepDetected,
-                    heading = displayHeading,
-                    accel = displayAccel, gyro = displayGyro, mag = displayMag,
-                    rotationVec = displayRotVec,
-                    pressure = displayPressure, light = displayLight,
-                    grvYaw = displayGrvYaw, rvYaw = displayRvYaw,
-                    compYaw = displayCompYaw, gyroYaw = displayGyroYaw, calYaw = displayCalYaw,
-                )
+                LiveReadingsCard(stepCount = displayStepCount, heading = displayHeading)
             }
 
             // ── Recording control ──
@@ -733,12 +782,13 @@ fun SensorLabScreen(navController: NavController) {
                     isRecording = isRecording,
                     isPaused = isPaused,
                     elapsedSeconds = elapsedSeconds,
-                    recordCount = records.size,
+                    recordCount = displayRecordCount,
                     stepCount = displayStepCount,
                     northCalibrated = northCalibrated,
                     magAccuracy = magCalStatus,
                     onStart = {
                         records.clear()
+                        displayRecordCount = 0
                         pdrTracker.reset()
                         northCalibrated = pdrTracker.isNorthCalibrated
                         waypoints.clear()
@@ -762,180 +812,34 @@ fun SensorLabScreen(navController: NavController) {
                         isRecording = false
                         isPaused = false
                     },
+                    canCapture = cameraPermissionGranted && !isTakingPhoto,
+                    onCapture = { startMultiCapture() },
                 )
             }
 
-            // ── Camera preview (during recording) ──
-            if (isRecording && showCameraPreview && cameraPermissionGranted) {
-                StaggeredItem(index = 6) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(20.dp)).background(SurfaceBase),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (isMultiCapturing) {
-                                Text(
-                                    "拍攝 ${PHOTO_DIR_LABELS[multiCaptureDir]} (${multiCaptureDir + 1}/4)",
-                                    style = MaterialTheme.typography.titleSmall, color = ChartBlue,
-                                )
-                            } else {
-                                Text("相機預覽", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
-                            }
-                            if (!isMultiCapturing) {
-                                IconButton(onClick = { showCameraPreview = false }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Default.Close, contentDescription = "關閉預覽", tint = TextSecondary, modifier = Modifier.size(18.dp))
-                                }
-                            }
-                        }
-                        if (isMultiCapturing) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                PHOTO_DIR_LABELS.forEachIndexed { i, label ->
-                                    val done = i < multiCaptureDir
-                                    val current = i == multiCaptureDir
-                                    Box(
-                                        modifier = Modifier.weight(1f).height(32.dp)
-                                            .background(
-                                                when {
-                                                    done -> Success.copy(alpha = 0.15f)
-                                                    current -> ChartBlue.copy(alpha = 0.15f)
-                                                    else -> Border.copy(alpha = 0.3f)
-                                                },
-                                                RoundedCornerShape(8.dp)
-                                            ),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            if (done) "$label ✓" else label,
-                                            fontSize = 13.sp,
-                                            fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
-                                            color = when {
-                                                done -> Success
-                                                current -> ChartBlue
-                                                else -> TextTertiary
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        Box {
-                            AndroidView(
-                                factory = { ctx ->
-                                    PreviewView(ctx).also {
-                                        it.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                                        cameraPreview.setSurfaceProvider(it.surfaceProvider)
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
-                                    .clip(RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)),
-                            )
-                            if (isMultiCapturing) {
-                                Box(
-                                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
-                                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
-                                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                                ) {
-                                    Text(
-                                        "請拍攝${PHOTO_DIR_LABELS[multiCaptureDir]}",
-                                        color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Waypoint + photo buttons (during recording) ──
+            // ── Waypoint button (during recording) ──
             if (isRecording) {
                 StaggeredItem(index = 6) {
-                    if (isMultiCapturing) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = { waypointName = ""; showWaypointDialog = true },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = ChartAmber),
+                            shape = RoundedCornerShape(14.dp),
                         ) {
-                            Button(
-                                onClick = { captureCurrentDirection() },
-                                modifier = Modifier.weight(1f).height(48.dp),
-                                enabled = !isTakingPhoto,
-                                colors = ButtonDefaults.buttonColors(containerColor = ChartBlue),
-                                shape = RoundedCornerShape(14.dp),
-                            ) {
-                                if (isTakingPhoto) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(20.dp))
-                                }
-                                Spacer(Modifier.width(6.dp))
-                                Text("拍攝${PHOTO_DIR_LABELS[multiCaptureDir]}", fontWeight = FontWeight.SemiBold)
-                            }
-                            Button(
-                                onClick = { finishMultiCapture() },
-                                modifier = Modifier.height(48.dp),
-                                enabled = multiCapturePhotos.isNotEmpty() && !isTakingPhoto,
-                                colors = ButtonDefaults.buttonColors(containerColor = Success),
-                                shape = RoundedCornerShape(14.dp),
-                            ) {
-                                Icon(Icons.Default.Check, null, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("完成", fontWeight = FontWeight.SemiBold)
-                            }
+                            Icon(Icons.Default.AddLocation, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("標記點位", fontWeight = FontWeight.SemiBold)
                         }
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Button(
-                                onClick = { waypointName = ""; showWaypointDialog = true },
-                                modifier = Modifier.weight(1f).height(48.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = ChartAmber),
-                                shape = RoundedCornerShape(14.dp),
+                        if (waypoints.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier.size(48.dp).background(ChartAmber.copy(alpha = 0.10f), RoundedCornerShape(14.dp)),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.AddLocation, null, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("標記點位", fontWeight = FontWeight.SemiBold)
-                            }
-                            Button(
-                                onClick = { startMultiCapture() },
-                                modifier = Modifier.weight(1f).height(48.dp),
-                                enabled = cameraPermissionGranted && !isTakingPhoto,
-                                colors = ButtonDefaults.buttonColors(containerColor = ChartBlue),
-                                shape = RoundedCornerShape(14.dp),
-                            ) {
-                                Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("拍照標記", fontWeight = FontWeight.SemiBold)
-                            }
-                            IconButton(
-                                onClick = { showCameraPreview = !showCameraPreview },
-                                modifier = Modifier.size(48.dp)
-                                    .background(
-                                        if (showCameraPreview) ChartBlue.copy(alpha = 0.15f) else ChartBlue.copy(alpha = 0.10f),
-                                        RoundedCornerShape(14.dp)
-                                    ),
-                            ) {
-                                Icon(
-                                    if (showCameraPreview) Icons.Default.VideocamOff else Icons.Default.Videocam,
-                                    contentDescription = "切換相機預覽",
-                                    tint = ChartBlue,
-                                    modifier = Modifier.size(22.dp),
-                                )
-                            }
-                            if (waypoints.isNotEmpty()) {
-                                Box(
-                                    modifier = Modifier.size(48.dp).background(ChartAmber.copy(alpha = 0.10f), RoundedCornerShape(14.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("${waypoints.size}", fontWeight = FontWeight.Bold, color = ChartAmber, fontSize = 18.sp)
-                                }
+                                Text("${waypoints.size}", fontWeight = FontWeight.Bold, color = ChartAmber, fontSize = 18.sp)
                             }
                         }
                     }
@@ -962,7 +866,7 @@ fun SensorLabScreen(navController: NavController) {
                 GroundTruthCard(
                     groundTruth = groundTruth,
                     onUpdate = { groundTruth = it },
-                    recordCount = records.size,
+                    recordCount = displayRecordCount,
                     posture = posture,
                     onExport = {
                         if (!isExporting) {
@@ -976,7 +880,7 @@ fun SensorLabScreen(navController: NavController) {
                                     exportZip(context, snapshot, wpSnapshot, gt, pos)
                                 }
                                 if (file != null) {
-                                    savedLogs = listSavedLogs(context)
+                                    savedLogs = withContext(Dispatchers.IO) { listSavedLogs(context) }
                                     val photoCount = wpSnapshot.sumOf { it.photoFiles.size }
                                     val msg = if (photoCount > 0) "已匯出: ${file.name} ($photoCount 張照片)" else "已匯出: ${file.name}"
                                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -1002,9 +906,13 @@ fun SensorLabScreen(navController: NavController) {
                         logs = savedLogs,
                         onShare = { shareFile(context, it.file) },
                         onDelete = { info ->
-                            info.file.delete()
-                            savedLogs = listSavedLogs(context)
-                            Toast.makeText(context, "已刪除 ${info.name}", Toast.LENGTH_SHORT).show()
+                            exportScope.launch {
+                                savedLogs = withContext(Dispatchers.IO) {
+                                    info.file.delete()
+                                    listSavedLogs(context)
+                                }
+                                Toast.makeText(context, "已刪除 ${info.name}", Toast.LENGTH_SHORT).show()
+                            }
                         },
                     )
                 }
@@ -1064,6 +972,452 @@ fun SensorLabScreen(navController: NavController) {
     }
 }
 
+
+// ── Full-screen capture (camera-app style) ──
+
+@Composable
+private fun FullScreenCaptureOverlay(
+    cameraPreview: Preview,
+    imageCapture: ImageCapture,
+    camera: Camera?,
+    dirIndex: Int,
+    photoNames: List<String>,
+    isTakingPhoto: Boolean,
+    heading: Float,
+    onShutter: () -> Unit,
+    onDone: () -> Unit,
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    // PreviewView 的觸控 listener 只建立一次，透過這個 State 讀到最新的 camera
+    val currentCamera by rememberUpdatedState(camera)
+
+    // ── 倍率：跟著相機的 ZoomState 走（雙指縮放與倍率按鈕都會更新它） ──
+    var zoomRatio by remember { mutableFloatStateOf(1f) }
+    var minZoom by remember { mutableFloatStateOf(1f) }
+    var maxZoom by remember { mutableFloatStateOf(1f) }
+    DisposableEffect(camera, lifecycleOwner) {
+        val zoomLive = camera?.cameraInfo?.zoomState ?: return@DisposableEffect onDispose { }
+        val observer = Observer<ZoomState> { z ->
+            zoomRatio = z.zoomRatio
+            minZoom = z.minZoomRatio
+            maxZoom = z.maxZoomRatio
+        }
+        zoomLive.observe(lifecycleOwner, observer)
+        onDispose { zoomLive.removeObserver(observer) }
+    }
+    fun setZoom(ratio: Float) {
+        currentCamera?.cameraControl?.setZoomRatio(ratio.coerceIn(minZoom, maxZoom))
+    }
+    // 每次打開相機都從 1x 開始，像手機相機 App 一樣
+    LaunchedEffect(camera) { camera?.cameraControl?.setZoomRatio(1f) }
+
+    // ── 實際照片尺寸（寬×高，已套用旋轉：直拍時感光元件長邊變成高），用來畫拍攝範圍框 ──
+    val photoSize = remember(camera) {
+        imageCapture.resolutionInfo?.let { info ->
+            val r = info.resolution
+            if (info.rotationDegrees % 180 == 0) r.width to r.height else r.height to r.width
+        }
+    }
+
+    // ── 弧形轉盤：在倍率按鈕上左右拖曳就展開，放開 1.5 秒後收回成按鈕 ──
+    var showDial by remember { mutableStateOf(false) }
+    var dialDragging by remember { mutableStateOf(false) }
+    // 拖曳中自己累積 ln(倍率)，不等相機回報，轉盤才會順
+    var dialLn by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(showDial, dialDragging) {
+        if (showDial && !dialDragging) {
+            delay(1500)
+            showDial = false
+        }
+    }
+
+    // ── 點擊對焦：記錄點擊位置，顯示對焦圈後淡出 ──
+    var focusPoint by remember { mutableStateOf<Offset?>(null) }
+    var focusTick by remember { mutableIntStateOf(0) }
+    val focusRingAlpha = remember { Animatable(0f) }
+    LaunchedEffect(focusTick) {
+        if (focusTick > 0) {
+            focusRingAlpha.snapTo(1f)
+            delay(800)
+            focusRingAlpha.animateTo(0f, tween(400))
+        }
+    }
+    val photoDir = remember { File(context.getExternalFilesDir(null), "sensor_lab/photos") }
+    // 拍滿 4 張時 multiCaptureDir 會先變成 4 才關閉畫面，避免越界
+    val dir = dirIndex.coerceIn(0, PHOTO_DIR_LABELS.lastIndex)
+
+    // 快門白閃：螢幕按鈕與音量↑ 都會讓 isTakingPhoto 變 true
+    val flashAlpha = remember { Animatable(0f) }
+    LaunchedEffect(isTakingPhoto) {
+        if (isTakingPhoto) {
+            flashAlpha.snapTo(0.7f)
+            flashAlpha.animateTo(0f, tween(250))
+        }
+    }
+
+    BackHandler(onBack = onDone)
+    DisposableEffect(Unit) {
+        onDispose { cameraPreview.setSurfaceProvider(null) }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        AndroidView(
+            factory = { ctx ->
+                PreviewView(ctx).also { view ->
+                    view.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                    // FIT_CENTER 顯示完整 4:3 畫面（上下留黑邊），所見即所拍。
+                    // FILL_CENTER 會為了填滿長螢幕裁掉左右約 38%，看起來比實際拍到的窄。
+                    view.scaleType = PreviewView.ScaleType.FIT_CENTER
+                    cameraPreview.setSurfaceProvider(view.surfaceProvider)
+
+                    // 雙指縮放
+                    var pinched = false
+                    val scaleDetector = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                            pinched = true
+                            return true
+                        }
+                        override fun onScale(detector: ScaleGestureDetector): Boolean {
+                            val current = currentCamera?.cameraInfo?.zoomState?.value?.zoomRatio ?: return true
+                            setZoom(current * detector.scaleFactor)
+                            return true
+                        }
+                    })
+                    // 單指點擊對焦（縮放手勢結束時的放開不算點擊）
+                    val tapDetector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+                        override fun onSingleTapUp(e: MotionEvent): Boolean {
+                            if (pinched) return false
+                            val cam = currentCamera ?: return false
+                            val point = view.meteringPointFactory.createPoint(e.x, e.y)
+                            val action = FocusMeteringAction.Builder(
+                                point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                            ).setAutoCancelDuration(3, TimeUnit.SECONDS).build()
+                            cam.cameraControl.startFocusAndMetering(action)
+                            focusPoint = Offset(e.x, e.y)
+                            focusTick++
+                            return true
+                        }
+                    })
+                    view.setOnTouchListener { v, event ->
+                        if (event.actionMasked == MotionEvent.ACTION_DOWN) pinched = false
+                        scaleDetector.onTouchEvent(event)
+                        tapDetector.onTouchEvent(event)
+                        if (event.actionMasked == MotionEvent.ACTION_UP) v.performClick()
+                        true
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = flashAlpha.value }.background(Color.White))
+
+        // 拍攝範圍框：FIT_CENTER 下整張照片在畫面中的位置（與照片同比例、置中），框內就是會拍進去的內容
+        photoSize?.let { (pw, ph) ->
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val aspect = pw.toFloat() / ph
+                val frameW = if (maxWidth / maxHeight < aspect) maxWidth else maxHeight * aspect
+                Box(
+                    modifier = Modifier.align(Alignment.Center)
+                        .size(frameW, frameW / aspect)
+                        .border(1.dp, Color.White.copy(alpha = 0.7f))
+                )
+            }
+        }
+
+        // 對焦圈（PreviewView 與這個 Box 同樣鋪滿畫面，觸控座標可直接沿用）
+        focusPoint?.let { p ->
+            val ringPx = with(LocalDensity.current) { 64.dp.toPx() }
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset((p.x - ringPx / 2).roundToInt(), (p.y - ringPx / 2).roundToInt()) }
+                    .size(64.dp)
+                    .graphicsLayer { alpha = focusRingAlpha.value }
+                    .border(2.dp, Color(0xFFFFD54F), CircleShape)
+            )
+        }
+
+        // ── Top: direction prompt + progress ──
+        // 漸層底色：落在黑邊上看不出來，壓到畫面時文字仍清楚，又不會整塊遮住照片範圍
+        Column(
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onDone) {
+                    Icon(Icons.Default.Close, contentDescription = "關閉相機", tint = Color.White)
+                }
+                Text(
+                    "請拍攝${PHOTO_DIR_LABELS[dir]}（${dir + 1}/4）",
+                    color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "朝向 %.0f°".format(heading),
+                    color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 14.sp,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PHOTO_DIR_LABELS.forEachIndexed { i, label ->
+                    val done = i < dirIndex
+                    val current = i == dir
+                    Box(
+                        modifier = Modifier.weight(1f).height(30.dp)
+                            .background(
+                                when {
+                                    done -> Success.copy(alpha = 0.35f)
+                                    current -> ChartBlue.copy(alpha = 0.45f)
+                                    else -> Color.White.copy(alpha = 0.12f)
+                                },
+                                RoundedCornerShape(8.dp)
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (done) "$label ✓" else label,
+                            fontSize = 13.sp,
+                            fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
+                            color = Color.White,
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Bottom: zoom presets, then last photo · shutter · done ──
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))))
+                .navigationBarsPadding()
+                .padding(top = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (maxZoom > minZoom) {
+                val presets = remember(minZoom, maxZoom) {
+                    (listOf(minZoom) + listOf(1f, 2f, 5f, 10f))
+                        .filter { it in minZoom..maxZoom }
+                        .distinctBy { formatZoom(it) }
+                }
+                // 目前倍率落在哪一檔：不超過目前倍率的最大檔位
+                val active = presets.lastOrNull { it <= zoomRatio + 0.05f } ?: presets.first()
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .height(if (showDial) 150.dp else 52.dp)
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures(
+                                onDragStart = {
+                                    dialLn = ln(zoomRatio)
+                                    dialDragging = true
+                                    showDial = true
+                                },
+                                onDragEnd = { dialDragging = false },
+                                onDragCancel = { dialDragging = false },
+                            ) { change, dx ->
+                                change.consume()
+                                // 往左拖 = 右邊較大的刻度轉到中央 = 放大
+                                dialLn = (dialLn - dx * dialLnPerPx(size.width.toFloat()))
+                                    .coerceIn(ln(minZoom), ln(maxZoom))
+                                setZoom(exp(dialLn))
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (showDial) {
+                        ZoomArcDial(
+                            zoom = if (dialDragging) exp(dialLn) else zoomRatio,
+                            minZoom = minZoom,
+                            maxZoom = maxZoom,
+                            labels = presets,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(50))
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            presets.forEach { preset ->
+                                val selected = preset == active
+                                Box(
+                                    modifier = Modifier.size(if (selected) 44.dp else 38.dp)
+                                        .clip(CircleShape)
+                                        .background(if (selected) Color.White.copy(alpha = 0.25f) else Color.Transparent)
+                                        .clickable { setZoom(preset) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        if (selected) "${formatZoom(zoomRatio)}x" else formatZoom(preset),
+                                        color = if (selected) DIAL_COLOR_ACCENT else Color.White,
+                                        fontSize = if (selected) 13.sp else 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 20.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    photoNames.lastOrNull()?.let { name ->
+                        AsyncImage(
+                            model = File(photoDir, name),
+                            contentDescription = "最後一張照片",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier.size(78.dp)
+                        .border(4.dp, Color.White, CircleShape)
+                        .padding(8.dp)
+                        .clip(CircleShape)
+                        .background(if (isTakingPhoto) Color.White.copy(alpha = 0.4f) else Color.White)
+                        .clickable(enabled = !isTakingPhoto, onClick = onShutter),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isTakingPhoto) {
+                        CircularProgressIndicator(modifier = Modifier.size(26.dp), color = Color.Black, strokeWidth = 3.dp)
+                    }
+                }
+                Box(
+                    modifier = Modifier.size(56.dp).clip(CircleShape)
+                        .background(if (photoNames.isNotEmpty()) Success else Color.White.copy(alpha = 0.12f))
+                        .clickable(enabled = photoNames.isNotEmpty() && !isTakingPhoto, onClick = onDone),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = "完成", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+            }
+        }
+    }
+}
+
+// ── 弧形倍率轉盤 ──
+// 刻度以對數分布：每「十倍」佔 60°，所以 1x→2x 與 2x→4x 轉的角度一樣。
+// 轉盤半徑 = 畫面寬 × 0.8，圓心在畫面下方，只露出頂端一段弧。
+private const val DIAL_DEG_PER_DECADE = 60f
+private const val DIAL_RADIUS_FRACTION = 0.8f
+private val DIAL_DEG_PER_LN = DIAL_DEG_PER_DECADE / ln(10f)
+private val DIAL_COLOR_ACCENT = Color(0xFFFFD54F)
+
+/** 手指水平拖曳 1px 對應的 ln(倍率) 變化量，讓轉盤刻度貼著手指移動。 */
+private fun dialLnPerPx(widthPx: Float): Float =
+    1f / (widthPx * DIAL_RADIUS_FRACTION * Math.toRadians(DIAL_DEG_PER_LN.toDouble()).toFloat())
+
+@Composable
+private fun ZoomArcDial(
+    zoom: Float,
+    minZoom: Float,
+    maxZoom: Float,
+    labels: List<Float>,
+    modifier: Modifier = Modifier,
+) {
+    val textPaint = remember {
+        NativePaint().apply {
+            isAntiAlias = true
+            textAlign = NativePaint.Align.CENTER
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+    }
+    Canvas(modifier = modifier) {
+        val cx = size.width / 2f
+        val radius = size.width * DIAL_RADIUS_FRACTION
+        val apexY = 34.dp.toPx()                    // 弧頂（指針）位置，上方留給目前倍率文字
+        val pivot = Offset(cx, apexY + radius)
+        val band = 46.dp.toPx()
+        // 畫面寬度內看得到的最大角度（再往外的刻度就畫出畫面了）
+        val visibleDeg = Math.toDegrees(asin((cx / radius).coerceAtMost(1f).toDouble())).toFloat()
+        val curLn = ln(zoom)
+
+        // 轉盤底色：一段粗弧
+        val bandRadius = radius - band / 2f
+        drawArc(
+            color = Color.Black.copy(alpha = 0.5f),
+            startAngle = -90f - visibleDeg - 5f,
+            sweepAngle = 2f * (visibleDeg + 5f),
+            useCenter = false,
+            topLeft = Offset(pivot.x - bandRadius, pivot.y - bandRadius),
+            size = Size(bandRadius * 2f, bandRadius * 2f),
+            style = Stroke(width = band),
+        )
+
+        // 角度愈偏離中央愈淡
+        fun fadeAt(deg: Float) = (1f - (abs(deg) / visibleDeg).pow(2)).coerceIn(0f, 1f)
+
+        // 小刻度：每 0.05（約 5%）一格
+        val step = 0.05f
+        for (i in ceil(ln(minZoom) / step).toInt()..floor(ln(maxZoom) / step).toInt()) {
+            val deg = (i * step - curLn) * DIAL_DEG_PER_LN
+            if (abs(deg) > visibleDeg) continue
+            rotate(deg, pivot) {
+                drawLine(
+                    Color.White.copy(alpha = 0.5f * fadeAt(deg)),
+                    Offset(cx, apexY + 4.dp.toPx()), Offset(cx, apexY + 11.dp.toPx()),
+                    strokeWidth = 1.5.dp.toPx(),
+                )
+            }
+        }
+
+        // 大刻度與數字：預設檔位（0.6、1、2、5…）
+        textPaint.textSize = 12.sp.toPx()
+        labels.forEach { v ->
+            val deg = (ln(v) - curLn) * DIAL_DEG_PER_LN
+            if (abs(deg) > visibleDeg) return@forEach
+            val fade = fadeAt(deg)
+            rotate(deg, pivot) {
+                drawLine(
+                    Color.White.copy(alpha = fade),
+                    Offset(cx, apexY + 4.dp.toPx()), Offset(cx, apexY + 18.dp.toPx()),
+                    strokeWidth = 2.dp.toPx(),
+                )
+                textPaint.color = Color.White.copy(alpha = fade).toArgb()
+                drawContext.canvas.nativeCanvas.drawText(formatZoom(v), cx, apexY + 34.dp.toPx(), textPaint)
+            }
+        }
+
+        // 中央指針與目前倍率（固定不動，轉的是刻度）
+        drawLine(
+            DIAL_COLOR_ACCENT,
+            Offset(cx, apexY), Offset(cx, apexY + 22.dp.toPx()),
+            strokeWidth = 2.5.dp.toPx(),
+        )
+        val pointer = Path().apply {
+            moveTo(cx - 6.dp.toPx(), apexY - 4.dp.toPx())
+            lineTo(cx + 6.dp.toPx(), apexY - 4.dp.toPx())
+            lineTo(cx, apexY + 3.dp.toPx())
+            close()
+        }
+        drawPath(pointer, DIAL_COLOR_ACCENT)
+        textPaint.color = DIAL_COLOR_ACCENT.toArgb()
+        textPaint.textSize = 15.sp.toPx()
+        drawContext.canvas.nativeCanvas.drawText("${formatZoom(zoom)}x", cx, apexY - 10.dp.toPx(), textPaint)
+    }
+}
+
+/** 倍率顯示：整數倍顯示成 "1"、"2"，其他顯示一位小數如 "0.6"、"1.8"。 */
+private fun formatZoom(ratio: Float): String =
+    if (ratio >= 1f && kotlin.math.abs(ratio - ratio.roundToInt()) < 0.05f) "${ratio.roundToInt()}"
+    else "%.1f".format(ratio)
 
 // ── UI Cards ──
 
@@ -1334,12 +1688,7 @@ private fun GpsStatusCard(lat: Double?, lng: Double?, accuracy: Float?, hasPermi
 }
 
 @Composable
-private fun LiveReadingsCard(
-    stepCount: Int, stepDetected: Int, heading: Float,
-    accel: FloatArray, gyro: FloatArray, mag: FloatArray,
-    rotationVec: FloatArray, pressure: Float, light: Float,
-    grvYaw: Float, rvYaw: Float, compYaw: Float, gyroYaw: Float, calYaw: Float,
-) {
+private fun LiveReadingsCard(stepCount: Int, heading: Float) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
             .clip(RoundedCornerShape(20.dp)).background(SurfaceBase).padding(20.dp),
@@ -1356,25 +1705,7 @@ private fun LiveReadingsCard(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             BigStat(value = "$stepCount", label = "步數")
             BigStat(value = "%.0f°".format(heading), label = "朝向")
-            BigStat(value = if (pressure > 0) "%.1f".format(pressure) else "—", label = "氣壓 hPa")
         }
-
-        HorizontalDivider(color = Border)
-
-        SensorRow("加速度 (m/s²)", "X=%.2f  Y=%.2f  Z=%.2f".format(accel[0], accel[1], accel[2]))
-        SensorRow("陀螺儀 (rad/s)", "X=%.4f  Y=%.4f  Z=%.4f".format(gyro[0], gyro[1], gyro[2]))
-        SensorRow("磁力 (μT)", "X=%.1f  Y=%.1f  Z=%.1f".format(mag[0], mag[1], mag[2]))
-        SensorRow("步伐偵測", "$stepDetected 次")
-        SensorRow("旋轉向量", "X=%.3f Y=%.3f Z=%.3f W=%.3f".format(rotationVec[0], rotationVec[1], rotationVec[2], rotationVec[3]))
-        SensorRow("光線 (lux)", "%.0f".format(light))
-
-        HorizontalDivider(color = Border)
-        Text("Heading 融合", style = MaterialTheme.typography.labelMedium, color = TextTertiary, fontWeight = FontWeight.SemiBold)
-        SensorRow("Game RotVec Yaw", "%.1f°".format(grvYaw))
-        SensorRow("RotVec Yaw", "%.1f°".format(rvYaw))
-        SensorRow("互補濾波 Yaw", "%.1f°".format(compYaw))
-        SensorRow("純 Gyro Yaw", "%.1f°".format(gyroYaw))
-        SensorRow("校正 Yaw (導航用)", "%.1f°".format(calYaw))
     }
 }
 
@@ -1387,19 +1718,12 @@ private fun BigStat(value: String, label: String) {
 }
 
 @Composable
-private fun SensorRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-        Text(value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextPrimary)
-    }
-}
-
-@Composable
 private fun RecordingCard(
     isRecording: Boolean, isPaused: Boolean,
     elapsedSeconds: Double, recordCount: Int, stepCount: Int,
     northCalibrated: Boolean, magAccuracy: Int,
     onStart: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onStop: () -> Unit,
+    canCapture: Boolean, onCapture: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
@@ -1516,6 +1840,17 @@ private fun RecordingCard(
                         Text("停止記錄", fontWeight = FontWeight.SemiBold)
                     }
                 }
+                Button(
+                    onClick = onCapture,
+                    enabled = canCapture,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = ChartBlue),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("拍照", fontWeight = FontWeight.SemiBold)
+                }
             }
             isPaused -> {
                 Row(
@@ -1560,7 +1895,7 @@ private fun RecordingCard(
 
         if (!isRecording && !isPaused && recordCount == 0) {
             Text(
-                "按下「開始記錄」後走一段已知距離的路線，\n停止後輸入實際步數和距離，匯出分析準確率。\n\n記錄中：音量↓ = 標記點位 · 音量↑ = 拍照標記",
+                "按下「開始記錄」後走一段已知距離的路線，\n停止後輸入實際步數和距離，匯出分析準確率。\n\n記錄中：音量↓ = 標記點位 · 音量↑ = 開相機／快門",
                 style = MaterialTheme.typography.bodySmall, color = TextTertiary,
                 textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
             )

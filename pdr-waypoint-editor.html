@@ -1,0 +1,485 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PDR Waypoint 編輯器</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #f6f5f2; --surface: #fff; --surface-alt: #edecea;
+  --text: #2a2926; --text-muted: #7a7770; --border: #d6d4cf;
+  --accent: #c45a3c; --accent-dim: rgba(196,90,60,0.12);
+  --grid: #dddbd6; --origin: #2a2926;
+  --t1: #c45a3c; --t2: #3a7ca5; --t3: #6b8e4e; --t4: #9b6fb0; --t5: #c49a3c;
+  font-family: 'Noto Sans TC', sans-serif; font-size: 14px; color: var(--text);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1c1b19; --surface: #27261f; --surface-alt: #33322b;
+    --text: #e4e2dc; --text-muted: #9a978e; --border: #44423b;
+    --accent: #e07050; --accent-dim: rgba(224,112,80,0.15);
+    --grid: #3a3832; --origin: #e4e2dc;
+    --t1: #e07050; --t2: #5da0c8; --t3: #8eb86a; --t4: #b890d0; --t5: #ddb854;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1c1b19; --surface: #27261f; --surface-alt: #33322b;
+  --text: #e4e2dc; --text-muted: #9a978e; --border: #44423b;
+  --accent: #e07050; --accent-dim: rgba(224,112,80,0.15);
+  --grid: #3a3832; --origin: #e4e2dc;
+  --t1: #e07050; --t2: #5da0c8; --t3: #8eb86a; --t4: #b890d0; --t5: #ddb854;
+}
+body { background: var(--bg); margin: 0; }
+.app { max-width: 1200px; margin: 0 auto; padding: 16px 16px 48px; }
+header { margin-bottom: 12px; }
+header h1 { font-size: 18px; font-weight: 700; margin: 0 0 2px; letter-spacing: -0.02em; }
+header p { font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.4; }
+.layout { display: grid; grid-template-columns: 1fr 260px; gap: 12px; align-items: start; }
+.canvas-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; position: relative; }
+canvas { display: block; width: 100%; cursor: grab; }
+canvas:active { cursor: grabbing; }
+canvas.node-hover { cursor: pointer; }
+canvas.node-drag { cursor: grabbing; }
+.hint { position: absolute; bottom: 6px; left: 8px; font: 11px 'JetBrains Mono', monospace; color: var(--text-muted); pointer-events: none; }
+.panel { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; max-height: 90vh; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+.card h3 { font-size: 11px; font-weight: 500; margin: 0 0 6px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.sess-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px; }
+.sess-row .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.sess-row label { flex: 1; cursor: pointer; }
+.sess-row input { accent-color: var(--accent); }
+.sel-info { font: 12px 'JetBrains Mono', monospace; line-height: 1.6; }
+.sel-info .lbl { color: var(--text-muted); font-size: 11px; }
+.export-box { font: 12px 'JetBrains Mono', monospace; line-height: 1.5; white-space: pre-wrap; word-break: break-all; background: var(--surface-alt); border-radius: 4px; padding: 6px 8px; max-height: 200px; overflow-y: auto; font-variant-numeric: tabular-nums; }
+.btn { display: inline-flex; align-items: center; justify-content: center; padding: 5px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); font: 500 12px inherit; cursor: pointer; }
+.btn:hover { background: var(--surface-alt); }
+.btn.accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.map-ctrl { display:grid; grid-template-columns:auto 1fr; gap:4px 8px; align-items:center; font-size:12px; margin-top:8px; }
+.map-ctrl input[type=number] { width:70px; padding:2px 4px; border:1px solid var(--border); border-radius:3px; background:var(--surface-alt); color:var(--text); font:12px 'JetBrains Mono',monospace; }
+.map-ctrl input[type=range] { width:100%; accent-color:var(--accent); }
+@media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>PDR Waypoint 編輯器</h1>
+    <p>Waypoint 直線連接版。節點可拖曳調整，顯示歐氏距離。</p>
+  </header>
+  <div class="layout">
+    <div class="canvas-wrap">
+      <canvas id="c" height="620"></canvas>
+      <div class="hint">滾輪縮放 · 拖曳平移 · 點擊節點移動 · Shift+拖曳移動底圖</div>
+    </div>
+    <div class="panel" id="panel"></div>
+  </div>
+</div>
+
+<script>
+const COLORS = ['var(--t1)','var(--t2)','var(--t3)','var(--t4)','var(--t5)'];
+const RAW_WP = [
+  {name:"家樂福1",pts:[[0,0],[1.56,11.07],[2.26,11.15],[0.63,13.43],[-1.05,15.33],[-0.81,28.17],[-14.45,29.61],[-22.01,30.01],[-25.61,-7.69],[-14.9,-7.88],[-14.26,0.2]]},
+  {name:"家樂福2",pts:[[0,0],[-0.68,0.09],[-0.56,10.55],[-4.11,16.2],[-8.26,15.51],[-6.8,-13.17],[-13.48,-10.62],[-12.58,1.46],[-14.27,12.02],[-21.75,11.54],[-22.34,-2.75],[-20.58,-22],[-9.86,-21.04],[-7.81,-12.36]]},
+  {name:"家樂福3",pts:[[0,0],[-15.44,1.74],[-18.25,-4.65],[-27.27,-1.06],[-30.02,17.17],[-28.37,33.04],[-17.04,33.48],[1.75,30.76],[2.17,15.6],[3.48,14.79],[3.22,12.77],[-1.13,13.67]]},
+  {name:"家樂福4",pts:[[0,0],[0,0],[-4.48,2.64],[-1.52,4.77],[0.72,4.72],[-0.98,11.43],[-3.13,13.41],[0.11,20.64],[4.18,21.62],[2.49,26.63],[-2.98,31.63],[-0.5,35.34],[7.37,38.45],[6.61,42.09],[-13.18,40.05],[-13.18,40.05],[-7.29,38.4],[-8.5,34.19],[-12.47,33.95],[-12.32,30.38],[-6.99,27.59],[-8.6,24.9],[-14.98,24.92],[-13.8,23.11],[-8.5,20.97],[-10.56,19.55],[-16.26,18.26],[-15.4,16.52],[-9.33,14.27],[-12.88,11.06],[-21.54,10.05],[-20.55,7.28]]},
+  {name:"家樂福5",pts:[[0,0],[0,0],[-9.37,0.87],[-15.33,-2.09],[-14.57,-13.13],[-24.87,-12.56],[-24.22,-10.12],[-15.02,-6.2],[-17.31,-3.79],[-26.5,-3.5],[-24.68,-0.98],[-16.18,2.59],[-19.27,7.78],[-32.27,12.78],[-30.27,14.98],[-22.73,19.31],[-24.11,20.8],[-32.63,22.5],[-32.47,26.78],[-22.94,29.53],[-25.7,32.05],[-34.69,33.67],[-32.7,34.4],[-23.1,37.32],[-25.1,39.26],[-33.02,40.61],[-30.23,42.79],[-20.29,47.04],[-17.94,51.6],[-1.76,50.86],[-2.5,47.16],[-6,43.6],[-2.19,40.78],[3.52,39.28],[1.86,32.66],[-1.72,29.43],[0.29,21.91],[2.19,20.46],[1.99,15.55],[-3.05,11.82],[0.39,8.04]]}
+];
+
+const ADJ = {
+ "家樂福1":[[0.05,0],[0.01,13.07],[5.9,13.06],[5.97,16.43],[2.99,16.45],[2.92,29.8],[-12.04,29.53],[-22.19,29.48],[-22.31,-8.34],[-12.6,-8.59],[-12.22,0.15]],
+ "家樂福2":[[0.17,-0.06],[-2.13,3.27],[-2.23,13.47],[-2.16,29.7],[-7.18,29.63],[-7.68,4.99],[-12.34,4.91],[-12.25,19.9],[-12.04,29.57],[-22.2,29.56],[-22.1,11.53],[-22.34,-8.57],[-12.55,-8.6],[-12.12,0.32]],
+ "家樂福3":[[0,0],[-12.31,0.3],[-12.53,-8.54],[-22.43,-8.54],[-22.24,11.27],[-22.15,29.46],[-12.01,29.54],[2.99,29.74],[3.02,16.38],[5.93,16.43],[5.95,13.04],[1.69,13]],
+ "家樂福4":[[0,0],[-0.05,3.09],[-2,3.07],[-2.16,4.29],[0.13,4.31],[0.05,11.72],[-2.15,11.77],[-2.2,17.32],[2.97,17.36],[2.99,22.13],[-2.1,22.09],[-2.2,25.5],[2.97,25.39],[2.96,29.86],[-11.99,29.5],[-12.05,27.98],[-7.22,28.03],[-7.26,23.62],[-12.23,23.57],[-12.16,19.99],[-7.33,19.96],[-7.42,16.09],[-12.31,16.13],[-12.37,14.02],[-7.55,14.01],[-7.53,10.43],[-12.33,10.44],[-12.22,8.67],[-7.59,8.71],[-7.69,4.91],[-12.37,4.97],[-12.25,0.38]],
+ "家樂福5":[[0,-0.08],[-3.92,0.11],[-4.92,2.47],[-9.9,2.44],[-9.89,-8.57],[-22.37,-8.53],[-22.28,-5.5],[-12.39,-5.49],[-12.31,-2.66],[-22.29,-2.75],[-22.26,-0.05],[-12.2,0.03],[-12.22,2.75],[-22.21,2.79],[-22.22,8.42],[-12.41,8.39],[-12.06,11.27],[-22.18,11.32],[-22,16.33],[-12.33,16.23],[-12.17,20.03],[-22.31,20.17],[-22.29,23.46],[-12.22,23.54],[-12.11,26.21],[-22.11,25.91],[-22.29,28.02],[-12.06,28],[-12.07,29.52],[2.38,29.9],[2.45,27.45],[-0.99,27.37],[-0.97,25.4],[3,25.31],[2.94,22.11],[-0.63,22.13],[-0.28,15.07],[3.01,15.07],[2.98,7.94],[0.08,7.98],[-1.01,4.33]]
+};
+
+function gridSnap(threshold) {
+  function cluster(vals) {
+    const indexed = vals.map((v,i) => ({v,i})).sort((a,b) => a.v - b.v);
+    const groups = [];
+    let g = [indexed[0]];
+    for (let k = 1; k < indexed.length; k++) {
+      if (indexed[k].v - g[g.length-1].v <= threshold) g.push(indexed[k]);
+      else { groups.push(g); g = [indexed[k]]; }
+    }
+    groups.push(g);
+    const snap = new Float64Array(vals.length);
+    const lines = [];
+    for (const grp of groups) {
+      if (grp.length < 2) { snap[grp[0].i] = grp[0].v; continue; }
+      const mean = grp.reduce((s,e) => s+e.v, 0) / grp.length;
+      const rounded = Math.round(mean * 100) / 100;
+      lines.push(rounded);
+      for (const e of grp) snap[e.i] = rounded;
+    }
+    return {snap, lines};
+  }
+  const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+  const sx = cluster(xs), sy = cluster(ys);
+  for (let i = 0; i < nodes.length; i++) {
+    nodes[i].x = sx.snap[i];
+    nodes[i].y = sy.snap[i];
+  }
+  return {xLines: sx.lines, yLines: sy.lines};
+}
+let snapLines = null;
+
+const nodes = [];
+const edges = [];
+const sessions = [];
+RAW_WP.forEach((s, si) => {
+  const base = nodes.length;
+  s.pts.forEach(([x,y], pi) => nodes.push({sid:si, idx:pi, x, y}));
+  for (let j = 1; j < s.pts.length; j++) edges.push({a: base+j-1, b: base+j});
+  sessions.push({name: s.name, color: COLORS[si], base, count: s.pts.length, visible: true});
+});
+sessions.forEach((s,si) => {
+  const adj = ADJ[s.name];
+  if (adj) for (let j=0;j<s.count&&j<adj.length;j++) { nodes[s.base+j].x=adj[j][0]; nodes[s.base+j].y=adj[j][1]; }
+});
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let dpr = 1, W, H;
+let panX = 0, panY = 0, zoom = 8;
+let selNode = -1, hoverNode = -1;
+let drag = null;
+let bgImg = null, imgX = 0, imgY = 0, imgScale = 0.1, imgRot = 0, imgAlpha = 0.4, imgFlipH = false, imgFlipV = false;
+
+function rc(v) { const m = v.match(/var\(--(.*?)\)/); return m ? getComputedStyle(document.documentElement).getPropertyValue('--'+m[1]).trim() : v; }
+
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect();
+  W = r.width; H = 620; dpr = devicePixelRatio || 1;
+  cv.width = W * dpr; cv.height = H * dpr;
+  cv.style.height = H + 'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+function toS(mx,my) { return [W/2+(mx+panX)*zoom, H/2-(my+panY)*zoom]; }
+function toM(sx,sy) { return [(sx - W/2)/zoom - panX, -(sy - H/2)/zoom - panY]; }
+function dist(a,b) { return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2); }
+
+function gridStep() { for (const t of [1,2,5,10,20,50]) if (t*zoom>=40) return t; return 100; }
+
+function draw() {
+  ctx.clearRect(0,0,W,H);
+  const gs = gridStep(), gc = rc('var(--grid)');
+  ctx.strokeStyle = gc; ctx.lineWidth = 0.5;
+  const l = -(W/2+panX*zoom)/zoom, r2 = (W/2-panX*zoom)/zoom;
+  const bt = -(H/2+panY*zoom)/zoom, tp = (H/2-panY*zoom)/zoom;
+  ctx.beginPath();
+  for (let gx=Math.floor(l/gs)*gs; gx<=r2; gx+=gs) { const [sx]=toS(gx,0); ctx.moveTo(sx,0); ctx.lineTo(sx,H); }
+  for (let gy=Math.floor(bt/gs)*gs; gy<=tp; gy+=gs) { const [,sy]=toS(0,gy); ctx.moveTo(0,sy); ctx.lineTo(W,sy); }
+  ctx.stroke();
+  ctx.fillStyle = rc('var(--text-muted)'); ctx.font = '10px "JetBrains Mono",monospace'; ctx.textAlign='left'; ctx.textBaseline='top';
+  const [,oy]=toS(0,0);
+  for (let gx=Math.floor(l/gs)*gs; gx<=r2; gx+=gs) { if (Math.abs(gx)<.01) continue; const [sx]=toS(gx,0); ctx.fillText(gx.toFixed(0)+'m',sx+2,oy+2); }
+  for (let gy=Math.floor(bt/gs)*gs; gy<=tp; gy+=gs) { if (Math.abs(gy)<.01) continue; const [,sy]=toS(0,gy); ctx.fillText(gy.toFixed(0),toS(0,0)[0]+2,sy+2); }
+  const [ox2,oy2]=toS(0,0);
+  ctx.strokeStyle=rc('var(--origin)'); ctx.lineWidth=1.5; ctx.globalAlpha=0.3;
+  ctx.beginPath(); ctx.moveTo(ox2-12,oy2); ctx.lineTo(ox2+12,oy2); ctx.moveTo(ox2,oy2-12); ctx.lineTo(ox2,oy2+12); ctx.stroke();
+  ctx.globalAlpha=1;
+
+  if (snapLines) {
+    ctx.save(); ctx.globalAlpha = 0.35;
+    ctx.setLineDash([4,4]);
+    ctx.strokeStyle = rc('var(--accent)'); ctx.lineWidth = 1;
+    for (const lx of snapLines.xLines) { const [sx]=toS(lx,0); ctx.beginPath(); ctx.moveTo(sx,0); ctx.lineTo(sx,H); ctx.stroke(); }
+    for (const ly of snapLines.yLines) { const [,sy]=toS(0,ly); ctx.beginPath(); ctx.moveTo(0,sy); ctx.lineTo(W,sy); ctx.stroke(); }
+    ctx.setLineDash([]); ctx.restore();
+  }
+
+  if (bgImg) {
+    ctx.save();
+    const [cx,cy] = toS(imgX, imgY);
+    ctx.globalAlpha = imgAlpha;
+    ctx.translate(cx, cy);
+    ctx.rotate(imgRot * Math.PI / 180);
+    ctx.scale(imgFlipH ? -1 : 1, imgFlipV ? 1 : -1);
+    const sc = imgScale * zoom;
+    ctx.drawImage(bgImg, -bgImg.width*sc/2, -bgImg.height*sc/2, bgImg.width*sc, bgImg.height*sc);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  sessions.forEach((s,si) => {
+    if (!s.visible) return;
+    const color = rc(s.color);
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let j = 0; j < s.count; j++) {
+      const n = nodes[s.base+j];
+      const [sx,sy] = toS(n.x, n.y);
+      j===0 ? ctx.moveTo(sx,sy) : ctx.lineTo(sx,sy);
+    }
+    ctx.stroke();
+
+    for (let j = 0; j < s.count - 1; j++) {
+      const na = nodes[s.base+j], nb = nodes[s.base+j+1];
+      const [ax,ay] = toS(na.x, na.y), [bx,by] = toS(nb.x, nb.y);
+      const segLen = Math.hypot(bx-ax, by-ay);
+      if (segLen < 8) continue;
+
+      const mx = (ax+bx)/2, my = (ay+by)/2;
+      const ang = Math.atan2(by-ay, bx-ax);
+      ctx.fillStyle = color;
+      ctx.save(); ctx.translate(mx,my); ctx.rotate(ang);
+      ctx.beginPath(); ctx.moveTo(6,0); ctx.lineTo(-3,-3.5); ctx.lineTo(-3,3.5); ctx.closePath(); ctx.fill();
+      ctx.restore();
+
+      if (segLen > 36) {
+        const d = dist(na, nb);
+        const txt = d.toFixed(1)+'m';
+        ctx.font = '500 9px "JetBrains Mono",monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        const tw = ctx.measureText(txt).width;
+        ctx.fillStyle = rc('var(--surface)'); ctx.globalAlpha = 0.8;
+        ctx.fillRect(mx-tw/2-3, my-15, tw+6, 13);
+        ctx.globalAlpha = 1; ctx.fillStyle = color;
+        ctx.fillText(txt, mx, my - 3);
+      }
+    }
+  });
+
+  nodes.forEach((n,ni) => {
+    if (!sessions[n.sid].visible) return;
+    const [sx,sy] = toS(n.x, n.y);
+    const isHover = ni === hoverNode, isSel = ni === selNode;
+    const r = isSel ? 7 : isHover ? 6 : 4;
+    ctx.fillStyle = rc(sessions[n.sid].color);
+    ctx.beginPath(); ctx.arc(sx,sy,r,0,Math.PI*2); ctx.fill();
+    if (isSel || isHover) {
+      ctx.strokeStyle = rc('var(--text)'); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(sx,sy,r+2,0,Math.PI*2); ctx.stroke();
+    }
+    ctx.fillStyle = rc('var(--text)'); ctx.font = '500 9px "JetBrains Mono",monospace';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText(n.idx, sx+6, sy-2);
+    if (n.idx === 0) {
+      ctx.strokeStyle = rc(sessions[n.sid].color); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(sx,sy,10,0,Math.PI*2); ctx.stroke();
+    }
+  });
+
+  if (selNode >= 0) {
+    const n = nodes[selNode];
+    const [sx,sy] = toS(n.x,n.y);
+    ctx.fillStyle = rc('var(--text)'); ctx.font = '500 11px "Noto Sans TC",sans-serif';
+    ctx.textAlign='left'; ctx.textBaseline='bottom';
+    ctx.fillText(`${sessions[n.sid].name}[${n.idx}] (${n.x.toFixed(2)}, ${n.y.toFixed(2)})`, sx+12, sy-4);
+  }
+
+  const bm = gridStep(), bp = bm*zoom, bx = W-20-bp, by = H-20;
+  ctx.strokeStyle=rc('var(--text-muted)'); ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+bp,by); ctx.moveTo(bx,by-4); ctx.lineTo(bx,by+4); ctx.moveTo(bx+bp,by-4); ctx.lineTo(bx+bp,by+4); ctx.stroke();
+  ctx.fillStyle=rc('var(--text-muted)'); ctx.font='11px "JetBrains Mono",monospace'; ctx.textAlign='center'; ctx.textBaseline='bottom';
+  ctx.fillText(bm+' m', bx+bp/2, by-6);
+}
+
+function hitTest(sx,sy) {
+  let best = -1, bestD = 12;
+  nodes.forEach((n,ni) => {
+    if (!sessions[n.sid].visible) return;
+    const [nx,ny] = toS(n.x,n.y);
+    const d = Math.sqrt((sx-nx)**2 + (sy-ny)**2);
+    if (d < bestD) { bestD = d; best = ni; }
+  });
+  return best;
+}
+
+cv.addEventListener('mousedown', e => {
+  const rect = cv.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  if (e.shiftKey && bgImg) {
+    drag = {type:'img', startX:e.clientX, startY:e.clientY, ox:imgX, oy:imgY};
+    updatePanel(); draw(); return;
+  }
+  const hit = hitTest(sx, sy);
+  if (hit >= 0) {
+    selNode = hit;
+    drag = {type:'node', ni: hit, startX: e.clientX, startY: e.clientY, ox: nodes[hit].x, oy: nodes[hit].y};
+  } else {
+    selNode = -1;
+    drag = {type:'pan', startX: e.clientX, startY: e.clientY, px: panX, py: panY};
+  }
+  updatePanel(); draw();
+});
+window.addEventListener('mousemove', e => {
+  if (drag) {
+    const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
+    if (drag.type === 'img') {
+      imgX = drag.ox + dx / zoom;
+      imgY = drag.oy - dy / zoom;
+      updateMapCtrl();
+    } else if (drag.type === 'node') {
+      nodes[drag.ni].x = drag.ox + dx / zoom;
+      nodes[drag.ni].y = drag.oy - dy / zoom;
+      cv.className = 'node-drag';
+      updateSelInfo();
+    } else {
+      panX = drag.px + dx / zoom;
+      panY = drag.py - dy / zoom;
+    }
+    draw();
+  } else {
+    const rect = cv.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    const h = hitTest(sx, sy);
+    if (h !== hoverNode) { hoverNode = h; cv.className = h >= 0 ? 'node-hover' : ''; draw(); }
+  }
+});
+window.addEventListener('mouseup', () => { drag = null; cv.className = hoverNode >= 0 ? 'node-hover' : ''; });
+cv.addEventListener('wheel', e => { e.preventDefault(); zoom = Math.max(1, Math.min(40, zoom * (e.deltaY > 0 ? 0.9 : 1.1))); draw(); }, {passive:false});
+window.addEventListener('keydown', e => { if (e.key==='Escape') { selNode=-1; updatePanel(); draw(); } });
+
+let lastTD = null;
+cv.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (e.touches.length===1) {
+    const rect = cv.getBoundingClientRect();
+    const sx = e.touches[0].clientX - rect.left, sy = e.touches[0].clientY - rect.top;
+    const hit = hitTest(sx,sy);
+    if (hit>=0) { selNode=hit; drag={type:'node',ni:hit,startX:e.touches[0].clientX,startY:e.touches[0].clientY,ox:nodes[hit].x,oy:nodes[hit].y}; }
+    else { selNode=-1; drag={type:'pan',startX:e.touches[0].clientX,startY:e.touches[0].clientY,px:panX,py:panY}; }
+    updatePanel(); draw();
+  }
+  if (e.touches.length===2) { const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY; lastTD=Math.sqrt(dx*dx+dy*dy); }
+}, {passive:false});
+cv.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length===1&&drag) {
+    const dx=e.touches[0].clientX-drag.startX,dy=e.touches[0].clientY-drag.startY;
+    if (drag.type==='node') { nodes[drag.ni].x=drag.ox+dx/zoom; nodes[drag.ni].y=drag.oy-dy/zoom; updateSelInfo(); }
+    else { panX=drag.px+dx/zoom; panY=drag.py-dy/zoom; }
+    draw();
+  }
+  if (e.touches.length===2&&lastTD) { const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY; const d=Math.sqrt(dx*dx+dy*dy); zoom=Math.max(1,Math.min(40,zoom*d/lastTD)); lastTD=d; draw(); }
+}, {passive:false});
+cv.addEventListener('touchend', () => { drag=null; lastTD=null; });
+
+function updateMapCtrl() {
+  const eX = document.getElementById('miX'), eY = document.getElementById('miY');
+  if (eX) eX.value = imgX.toFixed(1);
+  if (eY) eY.value = imgY.toFixed(1);
+  const dim = document.getElementById('mapDim');
+  if (dim && bgImg) dim.textContent = `${(bgImg.width*imgScale).toFixed(1)}×${(bgImg.height*imgScale).toFixed(1)} m`;
+}
+function updateSelInfo() {
+  const el = document.getElementById('selInfo');
+  if (!el) return;
+  if (selNode < 0) { el.innerHTML = '<span class="lbl">未選取節點</span>'; return; }
+  const n = nodes[selNode], s = sessions[n.sid];
+  let html = `<span class="lbl">${s.name} #${n.idx}</span><br>x: ${n.x.toFixed(2)} m<br>y: ${n.y.toFixed(2)} m`;
+  if (n.idx > 0) {
+    const prev = nodes[s.base+n.idx-1];
+    html += `<br><span class="lbl">← 前段</span> ${dist(prev, n).toFixed(2)} m`;
+  }
+  if (n.idx < s.count - 1) {
+    const next = nodes[s.base+n.idx+1];
+    html += `<br><span class="lbl">→ 後段</span> ${dist(n, next).toFixed(2)} m`;
+  }
+  el.innerHTML = html;
+}
+
+function updatePanel() {
+  const panel = document.getElementById('panel');
+  panel.innerHTML = '';
+
+  const mc = document.createElement('div'); mc.className = 'card';
+  let mh = '<h3>底圖</h3><input type="file" id="mapFile" accept="image/*" hidden>';
+  mh += `<div class="btn-row"><button class="btn" id="mapBtn">${bgImg?'更換圖片':'載入地圖'}</button>`;
+  if (bgImg) mh += '<button class="btn" id="mapClr">清除</button>';
+  mh += '</div>';
+  if (bgImg) {
+    mh += `<div class="map-ctrl">
+      <span>X</span><input type="number" id="miX" value="${imgX.toFixed(1)}" step="0.5">
+      <span>Y</span><input type="number" id="miY" value="${imgY.toFixed(1)}" step="0.5">
+      <span>縮放</span><input type="number" id="miS" value="${imgScale}" step="0.005" min="0.001">
+      <span>旋轉°</span><input type="number" id="miR" value="${imgRot}" step="1">
+      <span>透明</span><input type="range" id="miA" min="0" max="1" step="0.05" value="${imgAlpha}">
+    </div><div class="btn-row" style="margin-top:6px"><button class="btn" id="flipH">水平翻轉</button><button class="btn" id="flipV">垂直翻轉</button></div><div id="mapDim" style="font:11px 'JetBrains Mono',monospace;color:var(--text-muted);margin-top:4px">${(bgImg.width*imgScale).toFixed(1)}×${(bgImg.height*imgScale).toFixed(1)} m · Shift+拖曳移動底圖</div>`;
+  }
+  mc.innerHTML = mh; panel.appendChild(mc);
+  document.getElementById('mapBtn').onclick = () => document.getElementById('mapFile').click();
+  document.getElementById('mapFile').onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader(); r.onload = ev => {
+      const img = new Image(); img.onload = () => { bgImg = img; updatePanel(); draw(); };
+      img.src = ev.target.result;
+    }; r.readAsDataURL(f);
+  };
+  if (bgImg) {
+    document.getElementById('mapClr').onclick = () => { bgImg = null; imgFlipH = false; imgFlipV = false; updatePanel(); draw(); };
+    document.getElementById('flipH').onclick = () => { imgFlipH = !imgFlipH; draw(); };
+    document.getElementById('flipV').onclick = () => { imgFlipV = !imgFlipV; draw(); };
+    for (const [id,fn] of [['miX',v=>imgX=v],['miY',v=>imgY=v],['miS',v=>{imgScale=v;updateMapCtrl();}],['miR',v=>imgRot=v],['miA',v=>imgAlpha=v]]) {
+      document.getElementById(id).oninput = e => { fn(+e.target.value); draw(); };
+    }
+  }
+
+  const tc = document.createElement('div'); tc.className = 'card';
+  tc.innerHTML = '<h3>路線顯示</h3>' + sessions.map((s,i) =>
+    `<div class="sess-row"><span class="dot" style="background:${s.color}"></span><label><input type="checkbox" data-si="${i}" ${s.visible?'checked':''}> ${s.name} (${s.count})</label></div>`
+  ).join('');
+  panel.appendChild(tc);
+  tc.querySelectorAll('input').forEach(el => el.addEventListener('change', e => {
+    sessions[+e.target.dataset.si].visible = e.target.checked; draw();
+  }));
+
+  const gc = document.createElement('div'); gc.className = 'card';
+  gc.innerHTML = `<h3>網格對齊</h3>
+    <div style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:6px">
+      <span>閾值</span><input type="number" id="snapT" value="1.0" step="0.1" min="0.3" max="3" style="width:60px;padding:2px 4px;border:1px solid var(--border);border-radius:3px;background:var(--surface-alt);color:var(--text);font:12px 'JetBrains Mono',monospace"><span>m</span>
+    </div>
+    <div class="btn-row"><button class="btn accent" id="snapBtn">Grid Snap</button><button class="btn" id="snapClr">清除格線</button></div>
+    <div id="snapInfo" style="font:11px 'JetBrains Mono',monospace;color:var(--text-muted);margin-top:6px"></div>`;
+  panel.appendChild(gc);
+  document.getElementById('snapBtn').onclick = () => {
+    const t = +document.getElementById('snapT').value || 1.0;
+    snapLines = gridSnap(t);
+    document.getElementById('snapInfo').textContent = `X: ${snapLines.xLines.length} 條, Y: ${snapLines.yLines.length} 條`;
+    updateExport(); draw();
+  };
+  document.getElementById('snapClr').onclick = () => {
+    snapLines = null;
+    document.getElementById('snapInfo').textContent = '';
+    draw();
+  };
+
+  const sc = document.createElement('div'); sc.className = 'card';
+  sc.innerHTML = '<h3>選取節點</h3><div class="sel-info" id="selInfo"></div>';
+  panel.appendChild(sc);
+  updateSelInfo();
+
+  const ec = document.createElement('div'); ec.className = 'card';
+  ec.innerHTML = '<h3>匯出座標</h3><div class="export-box" id="expBox"></div><div class="btn-row" style="margin-top:6px"><button class="btn accent" id="cpBtn">複製 JSON</button><button class="btn" id="rstBtn">全部還原</button></div>';
+  panel.appendChild(ec);
+  updateExport();
+  document.getElementById('cpBtn').addEventListener('click', () => {
+    navigator.clipboard.writeText(document.getElementById('expBox').textContent).then(() => {
+      const b = document.getElementById('cpBtn'); b.textContent='已複製'; setTimeout(()=>b.textContent='複製 JSON',1500);
+    });
+  });
+  document.getElementById('rstBtn').addEventListener('click', () => {
+    sessions.forEach((s,si) => { const adj=ADJ[s.name]||RAW_WP[si].pts; for(let j=0;j<s.count;j++){const p=adj[j]||RAW_WP[si].pts[j]; nodes[s.base+j].x=p[0]; nodes[s.base+j].y=p[1];} });
+    selNode=-1; updatePanel(); draw();
+  });
+}
+
+function updateExport() {
+  const out = {};
+  sessions.forEach((s,si) => {
+    out[s.name] = [];
+    for (let j=0; j<s.count; j++) { const n=nodes[s.base+j]; out[s.name].push([+n.x.toFixed(2), +n.y.toFixed(2)]); }
+  });
+  const el = document.getElementById('expBox');
+  if (el) el.textContent = JSON.stringify(out, null, 1);
+}
+
+window.addEventListener('resize', () => { resize(); draw(); });
+resize(); updatePanel(); draw();
+</script>
+</body>
+</html>

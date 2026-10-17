@@ -5,12 +5,16 @@ Step 3 of building a new store map: reads <workspace>/topomap_confirmed.json (sa
 Waypoint / HAS_PHOTO / DirPhoto / WALKWAY. Objects come afterwards from rebuild_objects_v2.py.
 
 Usage (from backend/):
-    python upload_map_v2.py --dry-run           # show what would be written, write nothing
-    python upload_map_v2.py                     # create the place (refuses if it exists)
-    python upload_map_v2.py --replace           # delete this place first, then create it
+    python upload_map_v2.py --place 系辦 --dry-run      # show what would be written, write nothing
+    python upload_map_v2.py --place 系辦                # create the place (refuses if it exists)
+    python upload_map_v2.py --place 系辦 --replace      # delete this place first, then create it
+    python upload_map_v2.py --place 系辦 --dedupe-walkways  # keep one WALKWAY per stretch
 
---replace only deletes a place this script created (its DirPhotos carry ``place``); places
-built another way — e.g. the classmate's "A7家樂福（9/16)" — are never touched.
+One WALKWAY per walkable stretch, like the classmate's A7 map: its arrow is only how it is
+stored — a and b are walkable both ways (server/neo4j_client links neighbours both ways; query
+with an undirected pattern, (a)-[:WALKWAY]-(b)). --replace / --dedupe-walkways only touch a
+place this script created (its DirPhotos carry ``place``); places built another way — e.g. the
+classmate's "A7家樂福（9/16)" — are never touched.
 """
 from __future__ import annotations
 
@@ -44,6 +48,26 @@ def existing_state(q, place: str) -> dict:
     return r
 
 
+def add_walkways(q, place: str, rows) -> None:
+    """One WALKWAY per stretch (a→b), unless a and b are already joined either way."""
+    q("""
+        UNWIND $rows AS r
+        MATCH (a:Waypoint {place: $place, nid: r.from}), (b:Waypoint {place: $place, nid: r.to})
+        WHERE NOT (a)-[:WALKWAY]-(b)
+        CREATE (a)-[:WALKWAY {distance_m: r.distance_m, steps: 0, direction: ''}]->(b)
+    """, {"rows": rows, "place": place})
+
+
+def dedupe_walkways(q, place: str) -> int:
+    """Where a stretch is stored both ways (a→b and b→a), delete one of the two; returns how many."""
+    return q("""
+        MATCH (a:Waypoint {place: $place})-[e1:WALKWAY]->(b:Waypoint {place: $place})-[e2:WALKWAY]->(a)
+        WHERE elementId(e1) < elementId(e2)
+        DELETE e2
+        RETURN count(e2) AS n
+    """, {"place": place})[0]["n"]
+
+
 def delete_place(q, place: str) -> None:
     """Objects (with their ADJACENT/DETECTED), then DirPhotos, then Waypoints — in batches."""
     for label, match in (
@@ -68,6 +92,8 @@ def main() -> int:
                     help="建圖工作資料夾（預設依 --place）；給了就可以不給 --place")
     ap.add_argument("--dry-run", action="store_true", help="只顯示會寫入什麼，不寫 Neo4j")
     ap.add_argument("--replace", action="store_true", help="place 已存在時先刪掉再建（只限本工具建的 place）")
+    ap.add_argument("--dedupe-walkways", action="store_true",
+                    help="只把已上傳 place 裡兩個方向都存了的 WALKWAY 刪成一條（其他都不動）")
     args = ap.parse_args()
 
     if not args.place and not args.workspace:
@@ -106,6 +132,18 @@ def main() -> int:
         return 1
     q = client._query
     state = existing_state(q, place)
+    if args.dedupe_walkways:
+        if not state["waypoints"]:
+            print(f"Neo4j 還沒有 place「{place}」")
+            return 1
+        if state["foreign_photos"]:
+            print("這個 place 不是本工具建的（DirPhoto 沒有 place 欄位），不動它。")
+            return 1
+        if args.dry_run:
+            print("--dry-run：沒有寫入")
+            return 0
+        print(f"刪掉重複的反向 WALKWAY：{dedupe_walkways(q, place)} 條")
+        return 0
     if state["waypoints"]:
         print(f"Neo4j 已有這個 place：Waypoint {state['waypoints']}、DirPhoto {state['photos']}")
         if state["foreign_photos"]:
@@ -136,11 +174,7 @@ def main() -> int:
                    (:DirPhoto {photo_file: r.photo_file, heading_deg: r.heading_deg, place: $place})
         """, {"rows": chunk, "place": place})
     for chunk in batches(rows["walkways"]):
-        q("""
-            UNWIND $rows AS r
-            MATCH (a:Waypoint {place: $place, nid: r.from}), (b:Waypoint {place: $place, nid: r.to})
-            CREATE (a)-[:WALKWAY {distance_m: r.distance_m, steps: 0, direction: ''}]->(b)
-        """, {"rows": chunk, "place": place})
+        add_walkways(q, place, chunk)
 
     check = q("""
         MATCH (w:Waypoint {place: $place})

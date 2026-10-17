@@ -186,6 +186,26 @@ def _load_sidecar(path: str) -> Optional[Dict[str, np.ndarray]]:
     return _sidecar["embs"]
 
 
+_combined_cache: dict = {"key": None, "embs": None}
+
+
+def _reference_embeddings(ref_map: RefMap, sidecar: Optional[Dict[str, np.ndarray]]):
+    """Sidecar vectors plus DirPhoto.dino vectors from Neo4j (Neo4j wins), keyed by
+    photo_file. The same dict object is returned while the inputs stay the same, so the
+    fusion index cache below keeps working."""
+    from_db = {dp.photo_file: dp.dino for node in ref_map.photos.values()
+               for dp in node.directional_photos if getattr(dp, "dino", None)}
+    if not from_db:
+        return sidecar
+    key = (id(ref_map), id(sidecar))
+    if _combined_cache["key"] != key:
+        embs = dict(sidecar or {})
+        embs.update({k: np.asarray(v, dtype=np.float32) for k, v in from_db.items()})
+        _combined_cache.update(key=key, embs=embs)
+        log_.info("DINOv2 reference vectors: %d from Neo4j, %d in total", len(from_db), len(embs))
+    return _combined_cache["embs"]
+
+
 def _index_for(ref_map: RefMap, embs: Dict[str, np.ndarray]) -> dict:
     # RefMap is cached per place by the Neo4j client, so its id is a stable key.
     key = (id(ref_map), id(embs))
@@ -205,7 +225,7 @@ def server_image_evidence(
     """{nid: 0..2} image evidence for every reference node, or None when the DINOv2
     model, the sidecar or the photo's embedding is unavailable (caller falls back)."""
     from pathlib import Path
-    embs = _load_sidecar(sidecar_path)
+    embs = _reference_embeddings(ref_map, _load_sidecar(sidecar_path))
     if not embs or not ref_map.photos or not Path(image_path).is_file():
         return None
     from server import dino_embed

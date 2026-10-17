@@ -58,6 +58,7 @@ class DirectionalRef:
     heading_deg: float    # absolute heading of this directional photo
     photo_file: str
     objects: List[RefObject] = field(default_factory=list)
+    dino: Optional[List[float]] = None   # DirPhoto.dino (DINOv2 vector) when stored in Neo4j
 
 
 @dataclass
@@ -84,6 +85,17 @@ class RefMap:
     photos: Dict[int, RefPhotoNode] = field(default_factory=dict)
     walkway_edges: List[dict] = field(default_factory=list)
     adjacent_map: Dict[tuple, Dict[tuple, str]] = field(default_factory=dict)
+
+
+def _link_neighbors(ref: "RefMap", a: int, b: int) -> None:
+    """A WALKWAY means a and b are walkable both ways, whichever way it is stored: each
+    node lists the other as a neighbour (once, also if the database holds both a→b and b→a)."""
+    if a == b or a not in ref.photos or b not in ref.photos:
+        return
+    if b not in ref.photos[a].neighbor_nids:
+        ref.photos[a].neighbor_nids.append(b)
+    if a not in ref.photos[b].neighbor_nids:
+        ref.photos[b].neighbor_nids.append(a)
 
 
 # ── HTTP-based Neo4j client ───────────────────────────────────────────────
@@ -369,6 +381,21 @@ class Neo4jClient:
         log.info("V2: loaded %d directional photos, %d objects",
                  len(dir_data), obj_count)
 
+        # 2b) DINOv2 vectors stored on DirPhoto (store_dino_v2.py) — a query of its own so the
+        #     768 floats are not repeated on every object row above
+        rows = self._query("""
+            MATCH (w:Waypoint {place: $place})-[hp:HAS_PHOTO]->(p:DirPhoto)
+            WHERE p.dino IS NOT NULL
+            RETURN w.nid AS nid, hp.slot AS slot, p.dino AS dino
+        """, {"place": place})
+        by_slot = {(nid, dr.slot): dr for nid, node in ref.photos.items() for dr in node.directional_photos}
+        for r in rows:
+            dr = by_slot.get((r["nid"], r["slot"]))
+            if dr is not None:
+                dr.dino = r["dino"]
+        if rows:
+            log.info("V2: %d DirPhoto DINOv2 vectors from Neo4j", len(rows))
+
         # 3) Walkway edges
         rows = self._query("""
             MATCH (a:Waypoint {place: $place})-[r:WALKWAY]->(b:Waypoint)
@@ -389,8 +416,7 @@ class Neo4jClient:
                 "distance_m": r["distance_m"] or 0.0,
                 "steps": r["steps"] or 0,
             })
-            if from_nid in ref.photos:
-                ref.photos[from_nid].neighbor_nids.append(to_nid)
+            _link_neighbors(ref, from_nid, to_nid)
 
         log.info("V2: loaded %d walkway edges", len(ref.walkway_edges))
 
@@ -531,8 +557,7 @@ class Neo4jClient:
                 "distance_m": r["distance_m"] or 0.0,
                 "steps": r["steps"] or 0,
             })
-            if from_nid in ref.photos:
-                ref.photos[from_nid].neighbor_nids.append(to_nid)
+            _link_neighbors(ref, from_nid, to_nid)
 
         log.info("V1: loaded %d walkway edges", len(ref.walkway_edges))
         return ref

@@ -513,12 +513,12 @@ def _infer_target_direction(matched_node, target_nid, ref_map,
                 current_nid = nid
                 break
         if current_nid is not None and hasattr(ref_map, 'walkway_edges'):
-            for edge in ref_map.walkway_edges:
-                neighbor_nid = None
-                if edge.get('from') == current_nid:
-                    neighbor_nid = edge['to']
-                elif edge.get('to') == current_nid:
-                    neighbor_nid = edge['from']
+            # each neighbour once, also when WALKWAY is stored both ways (a→b and b→a)
+            neighbor_nids = dict.fromkeys(
+                edge['to'] if edge.get('from') == current_nid else edge['from']
+                for edge in ref_map.walkway_edges
+                if current_nid in (edge.get('from'), edge.get('to')))
+            for neighbor_nid in neighbor_nids:
                 if neighbor_nid and neighbor_nid in ref_map.photos:
                     nb_scores, nb_landmarks = _score_node_slots(
                         ref_map.photos[neighbor_nid])

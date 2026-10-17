@@ -66,6 +66,7 @@ def localization_record(loc_result, *, sigma: Optional[float] = None, reachable=
         "heading_deg": loc_result.matched_heading,
         "heading_slot": loc_result.matched_slot,
         "heading_confidence": loc_result.heading_confidence,
+        "matched_photo": getattr(loc_result, "matched_photo", None),
         "reasoning": loc_result.reasoning,
     }
     rec["image_evidence"] = loc_result.image_evidence

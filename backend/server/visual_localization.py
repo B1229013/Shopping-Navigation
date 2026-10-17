@@ -134,6 +134,8 @@ class LocalizationResult:
     matched_heading: Optional[float] = None
     matched_slot: Optional[str] = None
     heading_confidence: float = 0.0
+    # the matched node's reference photo that the image matcher found most similar
+    matched_photo: Optional[str] = None
 
     top_candidates: list = None  # [(nid, score, reason), ...] for optional re-ranking
 
@@ -885,10 +887,13 @@ def _zone_boost_for_candidate(zone: str, ref_objects: list) -> float:
     return 0.0
 
 
-def estimate_node_heading(matched_ref, detected_labels, ocr_texts, confidence: float):
+def estimate_node_heading(matched_ref, detected_labels, ocr_texts, confidence: float,
+                          best_photo=None):
     """(heading_deg, slot, heading_confidence) of the user's view at ``matched_ref``.
 
-    Matches the live labels/OCR against the node's four directional photos.
+    ``best_photo``: the node's directional photo the image matcher (server DINOv2
+    fusion) found most similar — its heading is the user's. Without it, matches the
+    live labels/OCR against the node's four directional photos.
     Kept separate from :func:`localize` so the caller can re-run it whenever the
     matched node changes afterwards (e.g. VLM re-ranking) — a heading carried
     over from a different node would make every relative turn wrong.
@@ -896,6 +901,13 @@ def estimate_node_heading(matched_ref, detected_labels, ocr_texts, confidence: f
     matched_heading: Optional[float] = None
     matched_slot: Optional[str] = None
     heading_conf = 0.0
+
+    if (matched_ref and best_photo is not None
+            and any(dp.photo_file == best_photo.photo_file for dp in matched_ref.directional_photos)):
+        # Uncalibrated maps store the same heading for all four photos.
+        if len({dp.heading_deg for dp in matched_ref.directional_photos}) > 1:
+            return best_photo.heading_deg, best_photo.slot, min(confidence, 0.8)
+        return None, best_photo.slot, 0.0
 
     if matched_ref and matched_ref.directional_photos:
         from server.heading import estimate_heading, best_matching_slot, DirectionalPhoto
@@ -958,6 +970,7 @@ def localize(
     extra_evidence: Optional[Dict[int, float]] = None,
     aisle_evidence: Optional[Dict[int, float]] = None,
     server_evidence: Optional[Dict[int, float]] = None,
+    server_best_photo: Optional[Dict[int, object]] = None,
     server_image_k: Optional[ImageK] = None,
     phone_image_k: Optional[ImageK] = None,
 ) -> LocalizationResult:
@@ -976,6 +989,8 @@ def localize(
         server_evidence: server-side DINOv2 fusion evidence {nid: 0..2}
             (locate_fusion.server_image_evidence), used as the v2 image evidence when
             the phone sent no DINOv2 top-K; fused with server_image_k.
+        server_best_photo: {nid: DirectionalRef} — the photo behind each node's
+            server_evidence; the matched node's one gives the heading.
         phone_image_k: k(σ) for the phone-evidence path (default loc_fusion constants).
     """
     ref_map = neo4j.load_reference_map(place)
@@ -999,12 +1014,14 @@ def localize(
     if v2 and (dino_sims or sensor_pos is not None or extra_evidence or server_evidence):
         dsims = {n: s for n, s in (dino_sims or {}).items() if n in ref_map.photos}
         image_k = phone_image_k
+        best_photos = {}
         if server_evidence and not dsims:
             # Server DINOv2 already fused objects + OCR; add only the aisle signs.
             ev = {n: v for n, v in server_evidence.items() if n in ref_map.photos}
             for nid, v in (aisle_evidence or {}).items():
                 ev[nid] = ev.get(nid, 0.0) + AISLE_WEIGHT * v
             image_k = server_image_k
+            best_photos = server_best_photo or {}
             match_method = "server_dino"
         else:
             ev = image_evidence(candidates, dsims, aisle_evidence)
@@ -1030,11 +1047,13 @@ def localize(
                 matched_nid=None,
                 reasoning=f"Best probability {best_p:.2f} below threshold ({best_reason})", **common)
         matched_ref = ref_map.photos.get(best_nid)
+        best_photo = best_photos.get(best_nid)
         matched_heading, matched_slot, heading_conf = estimate_node_heading(
-            matched_ref, detected_labels, ocr_texts, best_p)
+            matched_ref, detected_labels, ocr_texts, best_p, best_photo=best_photo)
         return LocalizationResult(
             matched_nid=best_nid, reasoning=best_reason, ref_node=matched_ref,
             matched_heading=matched_heading, matched_slot=matched_slot, heading_confidence=heading_conf,
+            matched_photo=best_photo.photo_file if best_photo is not None else None,
             **common,
         )
 

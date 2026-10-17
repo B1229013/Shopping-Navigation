@@ -1124,8 +1124,9 @@ def _fusion_weights_for(dist_since_fix, n_objects, dino_sims=None):
 
 
 def _server_dino_evidence(session_id, ref_map, image_path, detected_labels, ocr_texts):
-    """Server-side DINOv2 + object + OCR evidence for a phone that sent no dino_topk,
-    or None (model / sidecar missing, or embedding failed) → grid matching as before."""
+    """Server-side DINOv2 + object + OCR evidence (ServerImageEvidence) for a phone that
+    sent no dino_topk, or None (model / sidecar missing, or embedding failed) → grid
+    matching as before."""
     from server.locate_fusion import server_image_evidence
     t0 = time.time()
     try:
@@ -1135,9 +1136,9 @@ def _server_dino_evidence(session_id, ref_map, image_path, detected_labels, ocr_
         log.exception("[session %s] server DINOv2 evidence failed — using grid matching", session_id)
         return None
     if ev:
-        top = sorted(ev.items(), key=lambda kv: -kv[1])[:3]
+        top = sorted(ev.scores.items(), key=lambda kv: -kv[1])[:3]
         log.info("⏱ server DINOv2: %.1fs, top3 %s", time.time() - t0,
-                 [(n, round(v, 2)) for n, v in top])
+                 [(n, round(v, 2), getattr(ev.best_photo.get(n), "slot", None)) for n, v in top])
     else:
         log.info("[session %s] server DINOv2 unavailable — using grid matching", session_id)
     return ev
@@ -1191,7 +1192,8 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                 server_ev = _server_dino_evidence(session_id, ref_for_v2, image_path,
                                                   detected_labels, ocr_texts)
                 if server_ev:
-                    v2_kwargs.update(server_evidence=server_ev,
+                    v2_kwargs.update(server_evidence=server_ev.scores,
+                                     server_best_photo=server_ev.best_photo,
                                      server_image_k=parse_image_k(_config.LOC_SERVER_IMAGE_K))
         loc_result = _localize_photo(
             detected_labels=detected_labels,
@@ -1256,35 +1258,18 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                     loc_result.ref_node = new_ref
                     loc_result.method = "grid+rerank"
                     loc_result.reasoning = reranked[0][2]
+                    loc_result.matched_photo = None   # it was the old node's photo
                     rerank_log["accepted"] = True
 
                 if new_ref and new_ref.directional_photos:
-                    from server.heading import estimate_heading, best_matching_slot, DirectionalPhoto
-                    _live_labels = {l.lower().strip() for l in detected_labels if l}
-                    _live_ocr = {t.lower().strip() for t in ocr_texts if t}
-                    _dir_photos = [
-                        DirectionalPhoto(
-                            slot=dp.slot, heading_deg=dp.heading_deg,
-                            photo_file=dp.photo_file,
-                            objects=[{"label": o.label, "ocr_text": o.ocr_text}
-                                     for o in dp.objects],
-                        )
-                        for dp in new_ref.directional_photos
-                    ]
-                    new_heading = estimate_heading(_live_labels, _live_ocr, _dir_photos)
-                    new_slot = best_matching_slot(_live_labels, _live_ocr, _dir_photos)
-                    new_slot_str = new_slot if isinstance(new_slot, str) else (
-                        new_slot.value if new_slot else None)
-                    all_h = [dp.heading_deg for dp in new_ref.directional_photos]
-                    has_real = len(set(all_h)) > 1
-                    if has_real and new_heading is not None:
+                    best_photo = (v2_kwargs.get("server_best_photo") or {}).get(new_nid)
+                    loc_result.matched_photo = best_photo.photo_file if best_photo is not None else None
+                    new_heading, new_slot_str, new_conf = _estimate_node_heading(
+                        new_ref, detected_labels, ocr_texts, loc_result.confidence, best_photo=best_photo)
+                    if new_heading is not None:
                         loc_result.matched_heading = new_heading
                         loc_result.matched_slot = new_slot_str
-                        unique_sets = len({
-                            frozenset(o.label for o in dp.objects)
-                            for dp in new_ref.directional_photos
-                        })
-                        loc_result.heading_confidence = min(loc_result.confidence, 0.8) if unique_sets > 1 else 0.2
+                        loc_result.heading_confidence = new_conf
                         log.info("[session %s] rerank: recomputed heading=%.0f° slot=%s for WP%d",
                                  session_id, new_heading, new_slot_str, new_nid)
                     else:

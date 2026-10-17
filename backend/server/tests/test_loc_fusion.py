@@ -436,10 +436,61 @@ def test_server_evidence_scales_fused_score_to_0_2(dino_files, monkeypatch):
     sidecar, photo = dino_files
     from server import dino_embed
     monkeypatch.setattr(dino_embed, "embed_image", lambda p: _unit(0.2, 1, 0))   # looks like node 2
-    ev = locate_fusion.server_image_evidence(_dino_map(), photo, [], [], sidecar)
+    ev = locate_fusion.server_image_evidence(_dino_map(), photo, [], [], sidecar).scores
     assert set(ev) == {1, 2, 3}
     assert ev[2] == pytest.approx(2.0) and min(ev.values()) == pytest.approx(0.0)
     assert ev[1] > ev[3]
+
+
+def _four_way_map():
+    """Node 1 with four calibrated directional photos (front faces 30°)."""
+    m = RefMap(place="test")
+    n = _node(1, 0.0, 0.0)
+    for slot, h in (("front", 30.0), ("right", 120.0), ("back", 210.0), ("left", 300.0)):
+        n.directional_photos.append(DirectionalRef(
+            slot=slot, heading_deg=h, photo_file=f"set01/1_{slot}.jpg",
+            objects=[RefObject(label="shelf", label_norm="shelf", score=0.9,
+                               ocr_text="", role="商品", grid_cell="mid-center")]))
+    m.photos[1] = n
+    m.photos[2] = _node(2, 10.0, 0.0)
+    return m
+
+
+def test_server_evidence_records_each_nodes_most_similar_photo(tmp_path, monkeypatch):
+    sidecar = tmp_path / "sidecar.pkl"
+    sidecar.write_bytes(pickle.dumps({"1_front.jpg": _unit(1, 0, 0, 0), "1_right.jpg": _unit(0, 1, 0, 0),
+                                      "1_back.jpg": _unit(0, 0, 1, 0), "1_left.jpg": _unit(0, 0, 0, 1)}))
+    photo = tmp_path / "q.jpg"
+    photo.write_bytes(b"jpeg")
+    monkeypatch.setattr(locate_fusion, "_sidecar", {"path": None, "embs": None})
+    monkeypatch.setattr(locate_fusion, "_index_cache", {})
+    from server import dino_embed
+    monkeypatch.setattr(dino_embed, "embed_image", lambda p: _unit(0, 0.3, 1, 0))   # looks like 1/back
+    ev = locate_fusion.server_image_evidence(_four_way_map(), photo, [], [], str(sidecar))
+    assert ev.best_photo[1].slot == "back" and ev.best_photo[1].heading_deg == 210.0
+    assert 2 not in ev.best_photo                  # no directional photos → no photo to name
+
+
+def test_heading_comes_from_the_best_photo_not_label_overlap():
+    m = _four_way_map()
+    back = m.photos[1].directional_photos[2]
+    # labels match every photo equally, so label overlap alone would pick "front"
+    h, slot, conf = vl.estimate_node_heading(m.photos[1], ["shelf"], [], 0.9, best_photo=back)
+    assert (h, slot, conf) == (210.0, "back", 0.8)
+    with patch.object(vl, "match_by_objects", return_value=[]):
+        out = vl.localize(["shelf"], [], _FakeNeo4j(m), place="test", v2=True,
+                          server_evidence={1: 2.0, 2: 0.0}, server_best_photo={1: back},
+                          server_image_k=ImageK(32, 64, 8))
+    assert out.matched_nid == 1 and out.matched_slot == "back" and out.matched_heading == 210.0
+    assert out.matched_photo == "set01/1_back.jpg"
+
+
+def test_best_photo_on_uncalibrated_node_gives_slot_but_no_heading():
+    m = _four_way_map()
+    for dp in m.photos[1].directional_photos:
+        dp.heading_deg = 0.0
+    back = m.photos[1].directional_photos[2]
+    assert vl.estimate_node_heading(m.photos[1], ["shelf"], [], 0.9, best_photo=back) == (None, "back", 0.0)
 
 
 def test_server_evidence_unavailable_returns_none(dino_files, monkeypatch, tmp_path):
@@ -481,11 +532,13 @@ def test_run_early_localization_adds_server_dino_without_phone_dino():
          patch.object(srv._config, "LOC_FUSION_V2", True), \
          patch.object(srv._config, "LOC_SERVER_DINO", True), \
          patch.object(srv._config, "LOC_SERVER_IMAGE_K", "32,64,8"), \
-         patch("server.locate_fusion.server_image_evidence", return_value={2: 2.0}) as sev, \
+         patch("server.locate_fusion.server_image_evidence",
+               return_value=locate_fusion.ServerImageEvidence({2: 2.0}, {2: "photo"})) as sev, \
          patch("server.server._localize_photo", return_value=result) as loc:
         srv._run_early_localization(s, "sid", ["shelf"], ["7"], image_path="q.jpg")
         kw = loc.call_args.kwargs
         assert kw["server_evidence"] == {2: 2.0} and kw["server_image_k"] == ImageK(32, 64, 8)
+        assert kw["server_best_photo"] == {2: "photo"}
         assert sev.call_args.args[2:4] == (["shelf"], ["7"])
         # the phone sent DINOv2 top-K → the server does not embed the photo
         sev.reset_mock()

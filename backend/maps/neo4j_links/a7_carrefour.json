@@ -11,5 +11,9 @@
     "y": 0.0,
     "links": [25],
     "why": "PDR 原點與「我在入口」都在 (0,0)；Neo4j 最近的節點是 25（走查起點，離 2.2 m）"
-  }
+  },
+  "starts": [
+    {"id": "entrance", "name": "入口", "x": 0.0, "y": 0.0, "heading_deg": 0.0, "photo": "entrance.jpg",
+     "why": "面向賣場內（遠處橘色冷藏牆）= 地圖 ↑；照片是 25 號點 set02 的 front（0.5°）"}
+  ]
 }

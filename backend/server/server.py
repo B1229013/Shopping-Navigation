@@ -116,7 +116,7 @@ from server.vlm import (
     ask_about_image as _vlm_ask_about_image,
 )
 from server.neo4j_client import get_neo4j
-from server import aisle_signs, photo_quality, session_log
+from server import aisle_signs, photo_quality, session_log, start_points
 from server.loc_fusion import (adaptive_weights, dino_gap, parse_dino_topk, parse_image_k, parse_weights,
                                sensor_sigma)
 from server.visual_localization import (
@@ -3595,6 +3595,49 @@ def _ws(place: str) -> Path:
 def _read_topomap(ws: Path) -> Optional[dict]:
     p = ws / "topomap.json"
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+
+# ── Start points (server/start_points.py): where a walk begins and which way to face ──
+
+def _start_payload(place: str, s: dict) -> dict:
+    from urllib.parse import quote
+    out = {k: s[k] for k in ("id", "name", "x", "y", "heading_deg")}
+    out["photo_url"] = (f"/starts/photo?place={quote(place)}&id={quote(s['id'])}"
+                        if start_points.photo_path(place, s["id"], EDITOR_MAP_DIR) else None)
+    return out
+
+
+@app.get("/starts")
+def get_starts(place: str = Query(...)):
+    """The store's start points for the app's 「我在起點」 (empty list when none are set)."""
+    return {"place": place,
+            "starts": [_start_payload(place, s) for s in start_points.load_starts(place, EDITOR_MAP_DIR)]}
+
+
+@app.get("/starts/photo")
+def get_start_photo(place: str = Query(...), id: str = Query(...)):
+    p = start_points.photo_path(place, id, EDITOR_MAP_DIR)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"no photo for start {id!r}")
+    return FileResponse(str(p), media_type="image/jpeg")
+
+
+@app.post("/starts")
+def save_starts(payload: dict = Body(...), place: str = Query(...)):
+    """Replace the store's start points (the map builder's 「起點」 panel)."""
+    starts = payload.get("starts")
+    if not isinstance(starts, list):
+        raise HTTPException(status_code=422, detail="body needs a 'starts' list")
+    try:
+        ws = _ws(place)
+    except HTTPException:
+        ws = None
+    try:
+        saved = start_points.save_starts(place, starts, EDITOR_MAP_DIR,
+                                         workspace=ws if ws is not None and ws.is_dir() else None)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"place": place, "starts": [_start_payload(place, s) for s in saved]}
 
 
 @app.get("/test-photo/{set_id}/{filename}")

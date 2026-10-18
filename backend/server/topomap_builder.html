@@ -17,6 +17,7 @@
   --font-body: 'DM Sans', system-ui, sans-serif;
   --selected: #a78bfa;
   --merge-color: #f472b6;
+  --start-color: #facc15;
 }
 * { box-sizing: border-box; margin: 0; }
 body {
@@ -446,6 +447,15 @@ body {
   border-color: var(--merge-color);
 }
 .btn-merge:hover { background: rgba(244,114,182,.1); }
+.start-dirs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+.start-dirs .btn { padding: 5px 6px; font-size: 11px; }
+.start-name { width: 100%; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface-raised); color: var(--text-bright); font-family: var(--font-body); font-size: 12px; }
+.start-list { display: grid; gap: 4px; margin-top: 6px; }
+.start-item { display: flex; align-items: center; gap: 8px; font-family: var(--font-data); font-size: 11px; color: var(--text); }
+.start-item b { color: var(--start-color); font-family: var(--font-body); font-weight: 600; }
+.start-item img { width: 34px; height: 45px; object-fit: cover; border-radius: 3px; }
+.start-item .x { margin-left: auto; background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 13px; }
+.start-hint { font-family: var(--font-data); font-size: 10px; color: var(--text-dim); margin-top: 6px; line-height: 1.5; }
 .btn-warn {
   background: transparent;
   color: var(--set03);
@@ -620,6 +630,8 @@ let PLACE = new URLSearchParams(location.search).get('place') || '';
 const withPlace = (url, place = PLACE) => url + (url.includes('?') ? '&' : '?') + 'place=' + encodeURIComponent(place);
 const builderUrl = place => '/topomap-builder?place=' + encodeURIComponent(place);
 let refMap = null;
+// Start points of this store (GET/POST /starts): where the app's 「我在起點」 puts the user
+let starts = [];
 let visibleSets = new Set();
 let showRef = true;
 let showLabels = true;
@@ -814,7 +826,29 @@ function draw() {
     }
   }
 
+  drawStarts();
   ctx.restore();
+}
+
+// Start points: a yellow arrow pointing the way the user faces (heading clockwise from +y)
+function drawStarts() {
+  for (const s of starts) {
+    const p = worldToScreen(s.x, s.y);
+    const a = s.heading_deg * Math.PI / 180;
+    const ux = Math.sin(a), uy = -Math.cos(a);           // screen y grows downward
+    ctx.fillStyle = '#facc15';
+    ctx.strokeStyle = '#0c1018';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(p.x + ux * 16, p.y + uy * 16);
+    ctx.lineTo(p.x - uy * 7 - ux * 4, p.y + ux * 7 - uy * 4);
+    ctx.lineTo(p.x + uy * 7 - ux * 4, p.y - ux * 7 - uy * 4);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.font = '11px "DM Sans", sans-serif';
+    ctx.fillStyle = '#facc15';
+    ctx.textAlign = 'center';
+    ctx.fillText('起點：' + s.name, p.x, p.y + 22);
+  }
 }
 
 function drawGrid(W, H) {
@@ -1854,7 +1888,7 @@ function showDetail() {
     panel.innerHTML = `<div class="panel-empty">
       <div class="panel-empty-icon">◎</div>
       <div class="panel-empty-text">拖曳節點調整位置<br>Shift+點擊多選後合併<br>點擊節點查看照片</div>
-    </div>`;
+    </div>` + startListHtml();
     return;
   }
 
@@ -1927,6 +1961,7 @@ function showDetail() {
   }
 
   html += buildPhotoSection(activeSource);
+  html += startSectionHtml(node, activeSource);
 
   // Neighbors
   const neighbors = findNeighbors(node);
@@ -1939,6 +1974,74 @@ function showDetail() {
   }
 
   panel.innerHTML = html;
+}
+
+// ── Start points ──
+
+const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function loadStarts() {
+  try {
+    const r = await fetch(withPlace('/starts'));
+    starts = r.ok ? (await r.json()).starts || [] : [];
+  } catch (e) { starts = []; }
+}
+
+function startListHtml() {
+  if (!starts.length) {
+    return `<div class="panel-section"><h2>起點</h2>
+      <div class="start-hint">還沒有起點。點一個節點，在「設為起點」選要面向的照片。App 開始導航時會讓使用者選起點，站好、面向照片的方向再按。</div></div>`;
+  }
+  return `<div class="panel-section"><h2>起點（${starts.length}）</h2><div class="start-list">` +
+    starts.map(s => `<div class="start-item">
+      ${s.photo_url ? `<img src="${s.photo_url}" alt="">` : ''}
+      <span><b>${escHtml(s.name)}</b><br>(${s.x}, ${s.y}) · 面向 ${s.heading_deg}°</span>
+      <button class="x" title="刪除這個起點" onclick="removeStart('${s.id}')">✕</button></div>`).join('') +
+    '</div></div>';
+}
+
+// Set the selected node as a start: its position, and the heading of one of its photos
+function startSectionHtml(node, src) {
+  const slots = ['front', 'right', 'back', 'left'].filter(k => src.photos?.[k] && src.headings?.[k] != null);
+  if (!slots.length) return '';
+  return `<div class="panel-section"><h2>設為起點</h2>
+    <input class="start-name" id="startName" placeholder="起點名稱，例如 正門、電梯口" value="${starts.length ? '' : '入口'}">
+    <div class="start-dirs">${slots.map(k =>
+      `<button class="btn" onclick="addStart(${node.id}, ${src.id}, '${k}')">面向「${DIR_LABELS[k]}」照片（${Math.round(src.headings[k])}°）</button>`).join('')}</div>
+    <div class="start-hint">使用者站在這個點、面向選的那張照片，就是 App 上「我在起點」要面對的方向。請在地圖對齊完成後再設定；之後再移動或旋轉地圖，起點不會跟著動，要重設。</div>
+  </div>` + startListHtml();
+}
+
+async function addStart(nodeId, srcId, slot) {
+  const node = nodeById(nodeId), src = nodeById(srcId);
+  const name = (document.getElementById('startName')?.value || '').trim();
+  const msg = document.getElementById('statusMsg');
+  if (!name) { msg.textContent = '請先填起點名稱'; return; }
+  const next = [...starts.map(s => ({ id: s.id, name: s.name, x: s.x, y: s.y, heading_deg: s.heading_deg })),
+    { name, x: node.x, y: node.y, heading_deg: src.headings[slot], photo: { set: src.set, file: src.photos[slot] } }];
+  await saveStarts(next, `已新增起點「${name}」`);
+}
+
+async function removeStart(id) {
+  const s = starts.find(x => x.id === id);
+  const next = starts.filter(x => x.id !== id).map(x => ({ id: x.id, name: x.name, x: x.x, y: x.y, heading_deg: x.heading_deg }));
+  await saveStarts(next, `已刪除起點「${s ? s.name : id}」`);
+}
+
+async function saveStarts(list, okText) {
+  const msg = document.getElementById('statusMsg');
+  try {
+    const r = await fetch(withPlace('/starts'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ starts: list }) });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.status);
+    starts = body.starts || [];
+    msg.textContent = okText;
+  } catch (e) {
+    msg.textContent = '起點儲存失敗：' + e.message;
+  }
+  showDetail();
+  draw();
 }
 
 // Merge controls for one selected node: pick the other node on the map next
@@ -2260,6 +2363,8 @@ async function init() {
     updateStats();
     updateFpInputs();
     showFloorplan(restored && draft.fp ? draft.fp : null);
+    await loadStarts();
+    showDetail();
     fitToData();
     draw();
     if (!canvas.width) {

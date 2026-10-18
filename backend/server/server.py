@@ -575,6 +575,42 @@ TURN_DIRECTION_MIN_HEADING_CONFIDENCE = 0.6
 LOCALIZE_FAILED_HINT = "這張照片對不到地圖上的位置，請換個角度、拍到走道標示牌或招牌再試一次"
 
 
+def _goal_node_score(objects, search_terms: list[str]) -> tuple[float, float]:
+    """How well a reference node's objects match a goal item, as a sortable (text, match) pair.
+
+    text  — summed over objects: text read off the photo (signs, shelf labels, packaging)
+            equal to a search term counts 1.0, containing one 0.8. The milk fridge with
+            「Milk」「Milk」「鮮乳」 beats a shelf where one drink reads 「milk」.
+    match — the old score, deciding ties on text: the best single object (text as above,
+            a detector label naming the item 0.7) plus 0.02 per matching object, up to 0.1.
+
+    Single-character text ("E", "D") is ignored: as a substring it "matches" almost any term.
+    """
+    terms = [t.lower() for t in search_terms]
+    text_sum = 0.0
+    best = 0.0
+    matches = 0
+    for obj in objects:
+        text_score = 0.0
+        label_score = 0.0
+        ocr = (obj.ocr_text or "").strip().lower()
+        label = obj.label.lower()
+        for term in terms:
+            if len(ocr) >= 2:
+                if term == ocr:
+                    text_score = max(text_score, 1.0)
+                elif term in ocr or ocr in term:
+                    text_score = max(text_score, 0.8)
+            if label and (term in label or label in term):
+                label_score = 0.7
+        obj_score = max(text_score, label_score)
+        if obj_score > 0:
+            matches += 1
+        text_sum += text_score
+        best = max(best, obj_score)
+    return round(text_sum, 4), best + min(matches * 0.02, 0.1)
+
+
 def _useful_area_name(area: str) -> Optional[str]:
     if not area or not any(k in area for k in ("走道", "結帳", "出口", "收銀")):
         return None
@@ -845,9 +881,13 @@ def _build_route_context(s, loc_result, detections=None,
             start_wp = editor.waypoint_for_neo(loc_result.matched_nid)
             if start_wp is None and ref_node is not None:
                 start_wp = editor_map_mod.nearest_waypoint(editor, ref_node.pdr_x, ref_node.pdr_y)
-            goal_wp = editor_map_mod.find_goal_waypoint(editor, goal_item)
+            # The session's leg first, as the mini-map's /path does, so the steps lead
+            # to the node the area name and the arrival check use (泡麵: 40, not the
+            # label search's 7); the label search only without a leg for this phase.
+            leg = _phase_leg(s)
+            goal_wp = editor.waypoint_for_neo(leg.to_node) if leg is not None else None
             if goal_wp is None:
-                goal_wp = editor.waypoint_for_neo(current_leg.to_node)
+                goal_wp = editor_map_mod.find_goal_waypoint(editor, goal_item)
             path = (editor_map_mod.plan(editor, start_wp, goal_wp)
                     if start_wp is not None and goal_wp is not None else [])
             if path:   # unreachable on the route graph → the walkway-leg fallback below
@@ -965,6 +1005,19 @@ def _build_route_context(s, loc_result, detections=None,
         route_description=route_desc,
     )
     return context_block, next_instruction
+
+
+def _phase_leg(s):
+    """The route leg the user walks now — chosen when the session started — or None.
+
+    Only a leg serving the current phase counts: without a checkout node on the map
+    the plan has no checkout leg, and the checkout phase must not keep pointing at
+    the last shopping target.
+    """
+    if not (s.route_plan and getattr(s.route_plan, "legs", None)):
+        return None
+    leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
+    return leg if leg.purpose == {"checkout": "checkout", "exit": "exit"}.get(s.phase, "target") else None
 
 
 def _current_goal_node_id(s) -> int | None:
@@ -1514,31 +1567,13 @@ def _handle_start_session(req: StartSessionRequest) -> StartSessionResponse:
                 for item in goal_items:
                     search_terms = _expand_search_terms(item)
                     best_nid = None
-                    best_score = 0.0
+                    best_key = (0.0, 0.0)
                     for nid, node in ref_map.photos.items():
-                        node_best = 0.0
-                        match_count = 0
-                        for obj in node.objects:
-                            obj_score = 0.0
-                            for term in search_terms:
-                                term_lower = term.lower()
-                                if obj.ocr_text:
-                                    ocr_lower = obj.ocr_text.lower()
-                                    if term_lower == ocr_lower:
-                                        obj_score = max(obj_score, 1.0)
-                                    elif term_lower in ocr_lower or ocr_lower in term_lower:
-                                        obj_score = max(obj_score, 0.8)
-                                label_lower = obj.label.lower()
-                                if term_lower in label_lower or label_lower in term_lower:
-                                    obj_score = max(obj_score, 0.7)
-                            if obj_score > 0:
-                                match_count += 1
-                            node_best = max(node_best, obj_score)
-                        # Bonus for nodes with multiple matching objects (more relevant)
-                        node_score = node_best + min(match_count * 0.02, 0.1)
-                        if node_score > best_score:
-                            best_score = node_score
+                        key = _goal_node_score(node.objects, search_terms)
+                        if key > best_key:
+                            best_key = key
                             best_nid = nid
+                    best_score = best_key[1]
                     if best_nid is not None and best_score >= 0.5:
                         if best_nid not in target_nodes:
                             target_nodes.append(best_nid)
@@ -3139,8 +3174,9 @@ def get_session_path(session_id: str,
 
     Start = the phone's dead-reckoned position (``x``/``y``) when given, else the
     waypoint of the last photo localization, else the entrance. Target = the
-    current route leg's Neo4j node mapped onto the editor map, else the waypoint
-    whose product/sign labels name the current goal item.
+    current route leg's Neo4j node (chosen when the session started — the same
+    node the text guidance and the arrival check use) mapped onto the editor map,
+    else the waypoint whose product/sign labels name the current goal item.
     """
     s = _store.get(session_id)
     if s is None:
@@ -3154,12 +3190,13 @@ def get_session_path(session_id: str,
     goals = _current_goal_objects(s)
     goal_item = goals[0] if goals else (s.target_objects[0] if s.target_objects else s.goal)
 
-    # Sign-weighted label search first (a "牛奶區" category sign beats scattered
-    # product mentions); the session's Neo4j route leg is the fallback.
-    target_wp = editor_map_mod.find_goal_waypoint(g, goal_item)
-    if target_wp is None and s.route_plan and getattr(s.route_plan, "legs", None):
-        leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
-        target_wp = g.waypoint_for_neo(leg.to_node)
+    # The session's route leg first, so the mini-map heads where the text guidance
+    # does (a separate label search picked other nodes: 「牛奶」 misses a 「牛乳」 sign).
+    leg = _phase_leg(s)
+    target_wp = g.waypoint_for_neo(leg.to_node) if leg is not None else None
+    if target_wp is None:
+        # Sign-weighted label search: a "牛奶區" category sign beats scattered product mentions
+        target_wp = editor_map_mod.find_goal_waypoint(g, goal_item)
     if target_wp is None:
         raise HTTPException(status_code=404, detail={
             "error": "goal_not_on_map",

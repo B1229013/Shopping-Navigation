@@ -61,6 +61,42 @@ def test_path_starts_from_last_photo_localization():
     assert body["polyline"][0] == [0.0, 12.0]
 
 
+def _set_leg(sid, to_node, purpose="target", phase="shopping"):
+    """Give the session a one-leg route plan, as session start does when the goal matches a node."""
+    from types import SimpleNamespace
+    from server.server import _store
+    s = _store.get(sid)
+    s.route_plan = SimpleNamespace(legs=[SimpleNamespace(to_node=to_node, purpose=purpose, path=[to_node])],
+                                   visit_order=[to_node])
+    s.current_leg_index = 0
+    s.phase = phase
+
+
+def test_path_heads_for_the_node_chosen_at_session_start():
+    # The text guidance targets the leg's node; the mini-map must not pick another
+    # node just because its labels mention the item more often.
+    client = TestClient(app)
+    sid = _session(client)
+    _set_leg(sid, 7)                                        # node 7 → waypoint (0, 12), no 「牛奶」 label
+    with patch("server.server._editor_graph_for", return_value=_graph()):
+        r = client.get(f"/session/{sid}/path")
+    body = r.json()
+    assert body["target"]["neo_nid"] == 7
+    assert body["polyline"][-1] == [0.0, 12.0]
+
+
+def test_path_ignores_a_shopping_leg_once_in_checkout():
+    # No checkout node on the map: the plan's last leg is still a shopping target, so
+    # the label search for 收銀台 decides (and here finds nothing).
+    client = TestClient(app)
+    sid = _session(client)
+    _set_leg(sid, 7, purpose="target", phase="checkout")
+    with patch("server.server._editor_graph_for", return_value=_graph()):
+        r = client.get(f"/session/{sid}/path")
+    assert r.status_code == 404
+    assert r.json()["error"] == "goal_not_on_map"
+
+
 def test_path_404_when_no_editor_map_for_place():
     client = TestClient(app)
     sid = _session(client)

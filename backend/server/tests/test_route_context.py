@@ -205,6 +205,29 @@ def test_next_instruction_comes_from_editor_map_when_available():
     assert "左轉後直走約 6 公尺" in ctx
 
 
+def test_editor_map_steps_lead_to_the_sessions_target_not_the_label_search_pick():
+    # Node 11 sits at B1 (-6, 6.3) and mentions 「牛奶」 more often than the session's
+    # target 13 at B2 (6, 6), whose sign reads 「牛乳」. The steps must lead to 13 (left
+    # turn), the node the area name, the mini-map and the arrival check use — not to
+    # 11 (right turn).
+    ref_map = _two_aisle_map()
+    s = _session_with_route(ref_map, [10, 11, 12, 13])
+    s.goal = "牛奶"; s.target_objects = ["牛奶"]
+    g = em.build_graph({"place": "test", "walks": [
+        {"name": "A", "points": [[0, 0], [0, 6], [0, 12]]},
+        {"name": "B", "points": [[-6, 6.3], [0.2, 6.1], [6, 6]]},
+    ]})
+    em.merge_labels(g, [{"nid": 13, "x": 5.5, "y": 6.4, "labels": ["牛乳"]},
+                        {"nid": 11, "x": -5.8, "y": 6.2, "labels": ["牛奶區吊牌 milk sign", "牛奶盒", "牛奶瓶"]},
+                        {"nid": 10, "x": 0.3, "y": 11.8, "labels": ["door"]}])
+    assert em.find_goal_waypoint(g, "牛奶") == g.waypoint_for_neo(11)     # the decoy the label search picks
+    loc = _localized_at(ref_map, 10, heading=180.0)
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
+         patch("server.server._editor_graph_for", return_value=g):
+        _, next_instr = srv._build_route_context(s, loc, detections=[])
+    assert next_instr.startswith("直走約 6 公尺，然後左轉")
+
+
 def test_editor_map_at_target_is_reported():
     ref_map = _two_aisle_map()
     s = _session_with_route(ref_map, [10, 11, 12, 13])

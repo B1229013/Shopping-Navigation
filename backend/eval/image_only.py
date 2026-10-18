@@ -20,6 +20,8 @@ gate" block of the report counts it as no answer.
 Variants (same detections, same DINOv2 embedding):
   prod       — the server as configured
   dino_only  — locate_fusion W_N = W_O = 0 and no aisle signs: DINOv2 alone
+  no_objects — W_N = 0 (OCR and aisle signs kept)
+  no_text    — W_O = 0 and no aisle signs (objects kept)
 
 Caches (under --cache, default backend/output/eval/image_only/<set>/): the resized
 photos, perception.json (quality, OCR, GroundingDINO, occlusion, stage times) and
@@ -63,6 +65,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 DATA = Path(__file__).resolve().parent / "data"
 SETS = ("0916", "field1017", "route1")
 VARIANTS = ("prod", "dino_only")
+ABLATIONS = ("no_objects", "no_text")    # one of the two extras switched off
 CONF_LEVELS = (0.3, 0.6)
 STAGES = ("quality", "ocr", "gdino", "dino", "fusion")
 AT_NODE_M = 1.0          # 0916: test waypoint within this of its node counts as "at node"
@@ -318,14 +321,32 @@ def variant(name):
     from server import locate_fusion as LF
     saved = (LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES)
     try:
-        if name == "dino_only":
-            LF.W_N = LF.W_O = 0.0
+        if name in ("dino_only", "no_objects"):
+            LF.W_N = 0.0
+        if name in ("dino_only", "no_text"):
+            LF.W_O = 0.0
             C.AISLE_SIGN_PLACES = set()
-        elif name != "prod":
+        if name not in VARIANTS + ABLATIONS:
             raise ValueError(name)
         yield
     finally:
         LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES = saved
+
+
+def text_coverage(perc_all, ref_map, place):
+    """How many photos the text signals can act on at all: an OCR string equal to one in
+    the map (locate_fusion matches exact normalized strings) / aisle-sign evidence."""
+    from server import aisle_signs
+    from server import locate_fusion as LF
+    from server.ocr import OCRResult
+    ref = set().union(*[e["ocrset"] for e in LF.build_fusion_index(ref_map, {})["entries"]])
+    tok = sign = 0
+    for p in perc_all.values():
+        tok += bool({LF._norm_ocr(o["text"]) for o in p["ocr"]} & ref)
+        nums = aisle_signs.numbers_from_ocr([OCRResult(o["text"], o["confidence"], o["bbox"]) for o in p["ocr"]],
+                                            *p["size"])
+        sign += bool(nums and aisle_signs.sign_evidence(nums, ref_map, place))
+    return {"photos": len(perc_all), "with_ocr_text_in_map": tok, "with_aisle_sign_evidence": sign}
 
 
 def localize(srv, place, perc, img_path):
@@ -513,6 +534,9 @@ def markdown(rep):
     for k in STAGES + ("total",):
         L.append(f"| {k} | {_fmt(t[k]['mean'])} | {_fmt(t[k]['median'])} |")
     L.append(f"\n機器：{rep['machine']}")
+    tc = rep["text_coverage"]
+    L += ["", f"文字證據能作用的照片：OCR 字串和地圖完全相同 {tc['with_ocr_text_in_map']}/{tc['photos']}、"
+              f"有走道號碼證據 {tc['with_aisle_sign_evidence']}/{tc['photos']}"]
     for v, s in rep["variants"].items():
         f = s["failures"]
         L += ["", f"## 失敗案例（{v}）", "",
@@ -585,16 +609,17 @@ def main(argv=None):
     perc_all = perceive_all(list(imgs.items()), cache / "perception.json", args.redetect)
     if not dino_embed.available():      # load the model now so its load time isn't billed to photo 1
         sys.exit("DINOv2 not available — pip install torch transformers")
-    embed =EmbedCache(cache / "dino.json", dino_embed.embed_image, dino_embed._MODEL_NAME, args.reembed)
+    embed = EmbedCache(cache / "dino.json", dino_embed.embed_image, dino_embed._MODEL_NAME, args.reembed)
     dino_embed.embed_image = embed
 
-    per_variant = {v: [] for v in VARIANTS}
+    variants = VARIANTS + ABLATIONS
+    per_variant = {v: [] for v in variants}
     times = {k: [] for k in STAGES + ("total",)}
     t_run = time.perf_counter()
     for i, it in enumerate(items, 1):
         img, p = imgs[it["id"]], perc_all[it["id"]]
         embed.key = it["id"]
-        for v in VARIANTS:
+        for v in variants:
             embed.spent = 0.0
             t0 = time.perf_counter()
             with variant(v):
@@ -640,6 +665,7 @@ def main(argv=None):
                    "confident_threshold": CONFIDENT_THRESHOLD,
                    "dino_model": dino_embed._MODEL_NAME, "perception": perception_signatures()},
         "timing_s": {k: _stats(v) for k, v in times.items()},
+        "text_coverage": text_coverage({it["id"]: perc_all[it["id"]] for it in items}, ref_map, C.NEO4J_PLACE),
         "variants": {v: {"metrics": summarize(rs), "failures": failures(rs)} for v, rs in per_variant.items()},
         "notes": notes,
         "per_photo": per_variant,

@@ -122,7 +122,15 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
     // ── Startup calibration (first Rot Vec yaw → north offset for Game Rot Vec) ──
     private var initialRotVecYawRad: Double? = null
     private var initialGameRotVecYawRad: Double? = null
+    private var hasGameRotVec = false
     val isNorthCalibrated: Boolean get() = initialRotVecYawRad != null
+    /** How far the heading jumped when north was calibrated (degrees, clockwise); null before. */
+    val northCorrectionDeg: Double?
+        get() {
+            val rv = initialRotVecYawRad ?: return null
+            val grv = initialGameRotVecYawRad ?: return null
+            return Math.toDegrees(rv - grv)
+        }
     var onNorthCalibrated: (() -> Unit)? = null
 
     // Segment tracking (between snapshots)
@@ -236,7 +244,7 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
         gyroOnlyYawRad = 0.0; gyroOnlyInitialized = false
         gyroCalState = GyroCalState.UNCALIBRATED; gyroCalProgress = 0f; gyroCalNoise = 0f
         gyroBias = floatArrayOf(0f, 0f, 0f); gyroCalSamples.clear()
-        initialRotVecYawRad = null; initialGameRotVecYawRad = null
+        initialRotVecYawRad = null; initialGameRotVecYawRad = null; hasGameRotVec = false
         magFieldStrength = 0f; magQuality = MagQuality.UNKNOWN
         lastGpsLat = null; lastGpsLng = null; lastGpsAccuracy = null
         accelValues = floatArrayOf(0f, 0f, 0f)
@@ -506,12 +514,17 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
                 else sqrt((1f - v[0] * v[0] - v[1] * v[1] - v[2] * v[2]).coerceAtLeast(0f))
                 rotVec = floatArrayOf(v[0], v[1], v[2], w)
                 rotVecBuf.add(floatArrayOf(elapsed.toFloat(), v[0], v[1], v[2], w))
-                if (initialRotVecYawRad == null) {
-                    if (magAccuracy >= SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM) {
-                        initialRotVecYawRad = quatToYawRad(rotVec)
-                        Log.i("PdrTracker", "Initial RotVec yaw: ${"%.1f".format(Math.toDegrees(initialRotVecYawRad!!))}° (magAccuracy=$magAccuracy)")
-                        onNorthCalibrated?.invoke()
-                    }
+                // North offset = RotVec yaw − GameRotVec yaw, both read at THIS moment. Reading
+                // the GameRotVec yaw at its first sample instead (seconds earlier, before the
+                // magnetometer is accurate) turned any turn in between into a fixed heading
+                // error for the whole walk — 90° in the 2026-10-17 store test.
+                if (initialRotVecYawRad == null && hasGameRotVec &&
+                    magAccuracy >= SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM) {
+                    initialRotVecYawRad = quatToYawRad(rotVec)
+                    initialGameRotVecYawRad = quatToYawRad(gameRotVec)
+                    Log.i("PdrTracker", "North calibrated: RotVec yaw ${"%.1f".format(Math.toDegrees(initialRotVecYawRad!!))}°, " +
+                        "GameRotVec yaw ${"%.1f".format(Math.toDegrees(initialGameRotVecYawRad!!))}° (magAccuracy=$magAccuracy)")
+                    onNorthCalibrated?.invoke()
                 }
             }
 
@@ -521,10 +534,7 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
                 else sqrt((1f - v[0] * v[0] - v[1] * v[1] - v[2] * v[2]).coerceAtLeast(0f))
                 gameRotVec = floatArrayOf(v[0], v[1], v[2], w)
                 gameRotVecBuf.add(floatArrayOf(elapsed.toFloat(), v[0], v[1], v[2], w))
-                if (initialGameRotVecYawRad == null) {
-                    initialGameRotVecYawRad = quatToYawRad(gameRotVec)
-                    Log.i("PdrTracker", "Initial GameRotVec yaw: ${"%.1f".format(Math.toDegrees(initialGameRotVecYawRad!!))}°")
-                }
+                hasGameRotVec = true
             }
 
             Sensor.TYPE_STEP_DETECTOR -> {

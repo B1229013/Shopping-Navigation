@@ -35,6 +35,21 @@ data class PlaceInfo(
 
 data class PlacesResponse(val places: List<PlaceInfo> = emptyList())
 
+/**
+ * Where a walk may begin on the store's map (set in the map builder): stand at (x, y),
+ * face the view in [photo_url], and that facing is map heading [heading_deg] (0° = +y, clockwise).
+ */
+data class StartPoint(
+    val id: String,
+    val name: String,
+    val x: Double,
+    val y: Double,
+    val heading_deg: Double,
+    val photo_url: String? = null,
+)
+
+data class StartsResponse(val place: String? = null, val starts: List<StartPoint> = emptyList())
+
 data class TurnResponse(
     val action: String,   // "ARRIVED", "MOVE", "ASK"
     val guidance: String,
@@ -140,6 +155,9 @@ interface NavigationApiService {
 
     @POST("session")
     suspend fun startSession(@Body req: StartSessionRequest): StartSessionResponse
+
+    @GET("starts")
+    suspend fun getStarts(@Query("place") place: String): StartsResponse
 
     /**
      * Optional fields are omitted when null. `heading` / `map_*` / `dist_since_fix` /

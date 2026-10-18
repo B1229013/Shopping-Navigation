@@ -5,8 +5,12 @@ import android.hardware.SensorManager
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
+import android.util.Size
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -23,6 +27,7 @@ import com.example.shopping.network.AnswerRequest
 import com.example.shopping.network.ConfirmArrivalRequest
 import com.example.shopping.network.NavigationApi
 import com.example.shopping.network.PathResponse
+import com.example.shopping.network.StartPoint
 import com.example.shopping.network.TurnResponse
 import com.example.shopping.sensor.PdrTracker
 import kotlinx.coroutines.Dispatchers
@@ -71,12 +76,10 @@ class NavigationViewModel : ViewModel() {
     /** User heading in the map frame (0° = +y), from the matched directional photo. */
     var headingDeg: Double? by mutableStateOf(null)
     var headingConfidence: Double? by mutableStateOf(null)
-    /** Photo unusable (blurred / dark / blocked) — ask for a retake. */
+    /** Photo unusable (blurred / dark / blocked) or not placed on the map — ask for a retake. */
     var retakeHint: String? by mutableStateOf(null)
     /** Several places look alike — turn ~90° on the spot and take one more photo. */
     var secondPhotoHint: String? by mutableStateOf(null)
-    /** The map's own verdict for the last photo (distance / "at the target" / "not localized"). */
-    var mapInstruction: String? by mutableStateOf(null)
 
     // ── PDR position on the map (MapPositionEstimator) ──
     /** True while the step / heading sensors are running for this screen. */
@@ -93,6 +96,9 @@ class NavigationViewModel : ViewModel() {
     var followState: FollowState? by mutableStateOf(null); private set
 
     val isOnMap: Boolean get() = mapPosition != null
+
+    /** The store's start points (map builder): 「我在起點」 offers them; empty → wait for a photo fix. */
+    var startPoints: List<StartPoint> by mutableStateOf(emptyList()); private set
 
     // ── Route (GET /session/{id}/path, planned on the Neo4j map) ──
     var route: PathResponse? by mutableStateOf(null)
@@ -119,7 +125,19 @@ class NavigationViewModel : ViewModel() {
     var goalItems: List<GoalItem> by mutableStateOf(emptyList())
     var currentTarget: String? by mutableStateOf(null)
 
-    val imageCapture = ImageCapture.Builder().build()
+    // The backend shrinks every photo to 1600 px on the long side (JPEG 85) before using it,
+    // so capture about that size: a full-resolution JPEG is several MB and timed out on store Wi-Fi.
+    val imageCapture = ImageCapture.Builder()
+        .setResolutionSelector(
+            ResolutionSelector.Builder()
+                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                .setResolutionStrategy(
+                    ResolutionStrategy(Size(1600, 1200), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
+                )
+                .build()
+        )
+        .setJpegQuality(85)
+        .build()
     val captureExecutor = Executors.newSingleThreadExecutor()!!
 
     private val estimator = MapPositionEstimator()
@@ -137,13 +155,16 @@ class NavigationViewModel : ViewModel() {
     /** Node coordinates (map frame) from the last route payload. */
     private var nodeCoords: Map<Int, Vec2> = emptyMap()
 
-    fun init(sessionId: String?, goal: String, initialGuidance: String) {
+    fun init(sessionId: String?, goal: String, initialGuidance: String, place: String? = null) {
         val isNewSession = sessionId != null && sessionId != this.sessionId
         this.sessionId = sessionId
         this.goal = goal
         this.guidance = initialGuidance
         // As on iOS: show the route from the entrance before the first photo.
-        if (isNewSession) loadRoute()
+        if (isNewSession) {
+            loadRoute()
+            if (place != null) loadStarts(place)
+        }
     }
 
     // ── Sensors ──
@@ -154,6 +175,15 @@ class NavigationViewModel : ViewModel() {
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager ?: return
         tracker = PdrTracker(sm).also { t ->
             t.onStep = { x, y, _ -> onStep(Vec2(x.toDouble(), y.toDouble())) }
+            // Finding north rotates the raw heading (and later PDR steps) at once; keep the
+            // map heading where it was, e.g. the "facing into the store" alignment.
+            t.onNorthCalibrated = {
+                t.northCorrectionDeg?.let { jump ->
+                    estimator.absorbRawHeadingJump(jump)
+                    rawHeadingDeg = normalize360(t.getCalibratedYawDeg().toDouble())
+                    publishEstimate()
+                }
+            }
             t.start()
         }
         sensorsRunning = true
@@ -171,6 +201,7 @@ class NavigationViewModel : ViewModel() {
         headingJob?.cancel()
         headingJob = null
         tracker?.onStep = null
+        tracker?.onNorthCalibrated = null
         tracker?.stop()
         tracker = null
         sensorsRunning = false
@@ -208,15 +239,34 @@ class NavigationViewModel : ViewModel() {
         mapHeadingDeg = estimator.mapHeading(rawHeadingDeg)
     }
 
-    /** "I'm at the entrance": put the user on the map at the origin before any photo. */
-    fun startAtEntrance() {
-        if (tracker == null) return
-        estimator.applyFix(Vec2(0.0, 0.0), 1.0, rawPdr)
-        // the reference node nearest the entrance (the server's reachability starts there)
-        lastFixNodeId = nodeCoords.filterKeys { it >= 0 }.minByOrNull { it.value.length }?.key
+    /**
+     * "I'm at this start, facing the view in its photo": put the user on the map there and
+     * take the way they face as the start's map heading. The compass's own north was off
+     * by 90° for a whole walk in the 2026-10-17 store test.
+     */
+    fun startAt(start: StartPoint) {
+        val t = tracker ?: return
+        val at = Vec2(start.x, start.y)
+        val r = estimator.applyFix(at, 1.0, rawPdr)
+        rawHeadingDeg = normalize360(t.getCalibratedYawDeg().toDouble())
+        estimator.alignHeading(rawHeadingDeg, start.heading_deg)
+        Log.i("NavStart", "${start.name}: fix=$r raw heading=${"%.1f".format(rawHeadingDeg)}° → map ${start.heading_deg}°")
+        // the reference node nearest the start (the server's reachability starts there)
+        lastFixNodeId = nodeCoords.filterKeys { it >= 0 }.minByOrNull { (it.value - at).length }?.key
         publishEstimate()
         mapPosition?.let { followMapPosition(it) }
-        currentLocation = "入口"
+        currentLocation = start.name
+    }
+
+    private fun loadStarts(place: String) {
+        viewModelScope.launch {
+            startPoints = try {
+                withContext(Dispatchers.IO) { NavigationApi.service.getStarts(place).starts }
+            } catch (e: Exception) {
+                Log.w("NavStart", "No start points for $place", e)
+                emptyList()
+            }
+        }
     }
 
     // ── Route following (port of the iOS RouteFollowerModel) ──
@@ -256,10 +306,12 @@ class NavigationViewModel : ViewModel() {
         guidance = response.guidance
         currentAction = response.action
         annotatedPhotoUrl = response.annotated_photo_url
+        // next_instruction usually repeats the guidance; when the photo was not placed on
+        // the map it says so instead ("這張照片對不到地圖上的位置…") — show that as a retake hint.
         retakeHint = response.retake_hint
+            ?: response.next_instruction?.takeIf { response.corrected_node_id == null && it != response.guidance }
         secondPhotoHint = response.second_photo_hint
         secondPhotoAtRaw = if (response.second_photo_hint != null) rawAtCapture else null
-        mapInstruction = response.next_instruction
 
         val phaseChanged = response.phase != null && response.phase != phase
         response.phase?.let { phase = it }
@@ -299,9 +351,11 @@ class NavigationViewModel : ViewModel() {
             }
         }
         if (response.action != "ARRIVED") {
-            // Only a fix the phone applied re-anchors the route at the server's node;
-            // otherwise re-plan from where the phone thinks it is.
-            if (nid != null) loadRoute(fromPhone = !fixAccepted)
+            // A fix the phone applied re-anchors the route at the server's node. A photo the
+            // phone did not apply re-plans from the phone's own position once it is on the map;
+            // before that, the phone's position is only "route start + steps", so plan from the
+            // photo's node like the server's guidance does.
+            if (nid != null) loadRoute(fromPhone = !fixAccepted && isOnMap)
             else if (phaseChanged) loadRoute(fromPhone = true)
         }
 

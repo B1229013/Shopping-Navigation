@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,6 +37,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -43,7 +45,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.shopping.navigation.Vec2
+import coil.compose.AsyncImage
 import com.example.shopping.network.PathResponse
+import com.example.shopping.network.StartPoint
 import com.example.shopping.viewmodel.GoalItem
 import kotlin.math.acos
 import kotlin.math.cos
@@ -416,6 +420,52 @@ fun PhotoGuideDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },
+    )
+}
+
+/**
+ * Pick where the walk begins: each start shows the view to face. Tapping one tells the
+ * app "I stand here facing this", which fixes both position and heading at once.
+ */
+@Composable
+fun StartPointDialog(
+    starts: List<StartPoint>,
+    photoBaseUrl: String,
+    onPick: (StartPoint) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (starts.size == 1) "從「${starts[0].name}」開始" else "從哪裡開始？") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text("站到起點，轉身讓眼前的景象和照片一樣，再按下面的按鈕。App 會把你面對的方向當成照片的方向。",
+                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                starts.forEach { s ->
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        s.photo_url?.let { url ->
+                            AsyncImage(
+                                model = photoBaseUrl.trimEnd('/') + url,
+                                contentDescription = "${s.name}：要面向的畫面",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(3f / 4f)
+                                    .clip(RoundedCornerShape(10.dp)),
+                            )
+                        }
+                        Button(onClick = { onPick(s) }, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (starts.size == 1) "我站好了，面向照片的方向" else "我在「${s.name}」，面向照片的方向")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
 

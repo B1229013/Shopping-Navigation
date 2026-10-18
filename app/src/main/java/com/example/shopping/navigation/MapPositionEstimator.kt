@@ -27,7 +27,10 @@ data class Vec2(val x: Double, val y: Double) {
  * - **position** — snapped to the localized node (cancels accumulated drift);
  * - **heading offset** — over a straight stretch ≥ [Config.minCalibrationDistanceM] between
  *   fixes A and B, the direction actually walked (node A → node B) vs the direction PDR
- *   thought it walked; fixes closer together extend the stretch instead;
+ *   thought it walked; fixes closer together extend the stretch instead. Within
+ *   [Config.maxHeadingCorrectionDeg] it is smoothed in; beyond it, two stretches in a row
+ *   must agree before the offset is replaced. [alignHeading] sets it from the user
+ *   ("facing into the store");
  * - **step scale** — map distance A→B vs PDR distance over the same stretch, clamped.
  * Both are smoothed with [Config.learningRate] and reset only with the session.
  *
@@ -46,6 +49,9 @@ class MapPositionEstimator(val config: Config = Config()) {
         val minCalibrationDistanceM: Double = 8.0,
         val learningRate: Double = 0.3,
         val maxHeadingCorrectionDeg: Double = 45.0,
+        /** Two straight stretches in a row that both disagree by more than [maxHeadingCorrectionDeg]
+         *  and agree with each other within this replace the offset outright. */
+        val largeCorrectionAgreementDeg: Double = 30.0,
         val stepScaleMin: Double = 0.7,
         val stepScaleMax: Double = 1.3,
     )
@@ -69,6 +75,8 @@ class MapPositionEstimator(val config: Config = Config()) {
     private var baseMap: Vec2? = null
     private var baseRaw: Vec2? = null
     private var rawPathSinceBase = 0.0
+    /** A heading offset observed far from the current one, waiting for a second stretch to confirm it. */
+    private var pendingLargeOffsetDeg: Double? = null
 
     val isCalibrated: Boolean get() = mapPosition != null
 
@@ -82,6 +90,23 @@ class MapPositionEstimator(val config: Config = Config()) {
         baseMap = null
         baseRaw = null
         rawPathSinceBase = 0.0
+        pendingLargeOffsetDeg = null
+    }
+
+    /**
+     * The user says which way they face on the map ("I'm at the entrance, facing into the
+     * store" = 0°): set the offset so [rawHeadingDeg] maps to [mapHeadingDeg]. Replaces any
+     * learned offset — the compass's own north can be off by any amount.
+     */
+    fun alignHeading(rawHeadingDeg: Double, mapHeadingDeg: Double) {
+        headingOffsetDeg = wrap(mapHeadingDeg - rawHeadingDeg)
+        pendingLargeOffsetDeg = null
+    }
+
+    /** The raw heading itself jumped by [rawJumpDeg] (the phone found north): keep the map heading. */
+    fun absorbRawHeadingJump(rawJumpDeg: Double) {
+        headingOffsetDeg = wrap(headingOffsetDeg - rawJumpDeg)
+        pendingLargeOffsetDeg = pendingLargeOffsetDeg?.let { wrap(it - rawJumpDeg) }
     }
 
     /** A new raw PDR sample. Moves the map position by the corrected step. */
@@ -139,6 +164,17 @@ class MapPositionEstimator(val config: Config = Config()) {
                 val observed = wrap(bearing(mapVec) - bearing(rawVec))
                 if (abs(wrap(observed - headingOffsetDeg)) <= config.maxHeadingCorrectionDeg) {
                     headingOffsetDeg = wrap(headingOffsetDeg + config.learningRate * wrap(observed - headingOffsetDeg))
+                    pendingLargeOffsetDeg = null
+                } else {
+                    // One stretch far off may be a wrong fix; two that agree mean the
+                    // compass is off (90° in the 2026-10-17 store test): take their mean.
+                    val prev = pendingLargeOffsetDeg
+                    if (prev != null && abs(wrap(observed - prev)) <= config.largeCorrectionAgreementDeg) {
+                        headingOffsetDeg = wrap(prev + wrap(observed - prev) / 2)
+                        pendingLargeOffsetDeg = null
+                    } else {
+                        pendingLargeOffsetDeg = observed
+                    }
                 }
                 val ratio = (mapDist / rawDist).coerceIn(config.stepScaleMin, config.stepScaleMax)
                 stepScale = (stepScale + config.learningRate * (ratio - stepScale))

@@ -52,6 +52,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.example.shopping.model.ShoppingItem
+import com.example.shopping.network.BackendConfig
 import com.example.shopping.network.NavigationApi
 import com.example.shopping.network.PlaceInfo
 import com.example.shopping.network.StartSessionRequest
@@ -160,6 +161,7 @@ fun TeammateHomeScreen(navController: NavController) {
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_session_id", response.session_id)
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_goal", goalText)
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_guidance", response.guidance)
+                navController.currentBackStackEntry?.savedStateHandle?.set("nav_place", response.place ?: selectedPlace)
                 navController.navigate("ar_navigation")
             } catch (e: Exception) {
                 Log.e("NavSession", "Failed to create session", e)
@@ -413,9 +415,10 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
     val navSessionId = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_session_id")
     val navGoal = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_goal") ?: ""
     val navGuidance = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_guidance") ?: ""
+    val navPlace = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_place")
 
     LaunchedEffect(navSessionId) {
-        vm.init(navSessionId, navGoal, navGuidance)
+        vm.init(navSessionId, navGoal, navGuidance, navPlace)
     }
 
     var currentLocation by remember { mutableStateOf<Location?>(null) }
@@ -479,6 +482,7 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
     val torchAvailable = boundCamera?.cameraInfo?.hasFlashUnit() == true
     // First-use photo guide; reopen with the "?" button
     var showPhotoGuide by remember { mutableStateOf(false) }
+    var showStartPicker by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { if (consumeFirstPhotoGuide(context)) showPhotoGuide = true }
     val isPhoneUpright by rememberPhoneUpright()
     // Step / heading tracking only while this screen is shown
@@ -570,8 +574,8 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
             when {
                 vm.retakeHint != null -> NavHintBanner("📷 ${vm.retakeHint}", Color(0xFFFF9800).copy(alpha = 0.9f))
                 vm.secondPhotoHint != null -> NavHintBanner("📷 ${vm.secondPhotoHint}", Color(0xFF2196F3).copy(alpha = 0.85f))
-                idle && vm.sensorsRunning && !vm.isOnMap ->
-                    NavHintButton("📍 我在入口，從這裡開始", Color.Black.copy(alpha = 0.6f), onClick = { vm.startAtEntrance() })
+                idle && vm.sensorsRunning && !vm.isOnMap && vm.startPoints.isNotEmpty() ->
+                    NavHintButton("📍 我在起點，從這裡開始", Color.Black.copy(alpha = 0.6f), onClick = { showStartPicker = true })
                 idle && vm.isOnMap && vm.distanceSinceFix >= NavigationViewModel.PHOTO_REMINDER_M ->
                     NavHintBanner("📍 已走 ${vm.distanceSinceFix.toInt()} m，拍一張照片校正位置", Color.Black.copy(alpha = 0.55f))
                 idle && !isPhoneUpright -> NavHintBanner("📱 手機請拿直、對準走道前方", Color.Black.copy(alpha = 0.55f))
@@ -599,9 +603,6 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
             ) {
                 Text("導航指引", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.7f))
                 Text(vm.guidance, fontSize = 14.sp, color = Color.White, lineHeight = 20.sp)
-                vm.mapInstruction?.let { m ->
-                    Text("🗺 $m", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFF00BCD4))
-                }
 
                 // ASK flow
                 if (vm.pendingQuestion != null && !vm.hasArrived) {
@@ -749,6 +750,14 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
 
         if (showPhotoGuide) {
             PhotoGuideDialog(onDismiss = { showPhotoGuide = false })
+        }
+        if (showStartPicker && vm.startPoints.isNotEmpty()) {
+            StartPointDialog(
+                starts = vm.startPoints,
+                photoBaseUrl = BackendConfig.currentUrl,
+                onPick = { vm.startAt(it); showStartPicker = false },
+                onDismiss = { showStartPicker = false },
+            )
         }
     }
 }

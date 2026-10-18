@@ -90,6 +90,63 @@ class MapPositionEstimatorTest {
     }
 
     @Test
+    fun alignHeadingMakesTheCurrentRawHeadingTheGivenMapHeading() {
+        val e = MapPositionEstimator()
+        e.alignHeading(rawHeadingDeg = 93.7, mapHeadingDeg = 0.0)   // compass said east, user faces into the store
+        assertEquals(0.0, e.mapHeading(93.7), 1e-9)
+        assertEquals(90.0, e.mapHeading(183.7), 1e-9)
+    }
+
+    @Test
+    fun alignHeadingAlsoTurnsLaterSteps() {
+        val e = MapPositionEstimator()
+        e.ingest(Vec2(0.0, 0.0))
+        e.applyFix(Vec2(0.0, 0.0), 1.0, Vec2(0.0, 0.0))
+        e.alignHeading(rawHeadingDeg = 90.0, mapHeadingDeg = 0.0)
+        e.ingest(Vec2(5.0, 0.0))                                     // raw "east" = map +y
+        assertEquals(0.0, e.mapPosition!!.x, 1e-9)
+        assertEquals(5.0, e.mapPosition!!.y, 1e-9)
+    }
+
+    @Test
+    fun rawHeadingJumpKeepsTheMapHeading() {
+        val e = MapPositionEstimator()
+        e.alignHeading(rawHeadingDeg = 10.0, mapHeadingDeg = 0.0)
+        e.absorbRawHeadingJump(75.0)                                 // phone found north: raw 10° → 85°
+        assertEquals(0.0, e.mapHeading(85.0), 1e-9)
+    }
+
+    /** Fix at the origin, then two 10 m stretches PDR calls north that the map says go east. */
+    private fun twoStretchesOff(e: MapPositionEstimator) {
+        e.ingest(Vec2(0.0, 0.0))
+        e.applyFix(Vec2(0.0, 0.0), 1.0, Vec2(0.0, 0.0))
+        walk(e, Vec2(0.0, 0.0), Vec2(0.0, 10.0))
+        assertEquals(FixResult.Accepted, e.applyFix(Vec2(10.0, 0.0), 0.9, Vec2(0.0, 10.0)))
+        assertEquals(0.0, e.headingOffsetDeg, 1e-9)                  // one stretch 90° off: could be a wrong fix
+        walk(e, Vec2(0.0, 10.0), Vec2(0.0, 20.0))
+        assertEquals(FixResult.Accepted, e.applyFix(Vec2(20.0, 0.0), 0.9, Vec2(0.0, 20.0)))
+    }
+
+    @Test
+    fun twoAgreeingStretchesFarOffReplaceTheOffset() {
+        val e = MapPositionEstimator()
+        twoStretchesOff(e)
+        assertEquals(90.0, e.headingOffsetDeg, 1e-6)
+    }
+
+    @Test
+    fun twoDisagreeingStretchesFarOffChangeNothing() {
+        val e = MapPositionEstimator()
+        e.ingest(Vec2(0.0, 0.0))
+        e.applyFix(Vec2(0.0, 0.0), 1.0, Vec2(0.0, 0.0))
+        walk(e, Vec2(0.0, 0.0), Vec2(0.0, 10.0))
+        e.applyFix(Vec2(10.0, 0.0), 0.9, Vec2(0.0, 10.0))             // 90° off
+        walk(e, Vec2(0.0, 10.0), Vec2(0.0, 20.0))
+        e.applyFix(Vec2(0.0, -10.0), 0.9, Vec2(0.0, 20.0))            // then 180°-ish off: no agreement
+        assertEquals(0.0, e.headingOffsetDeg, 1e-6)
+    }
+
+    @Test
     fun mapHeadingAddsOffsetAndWraps() {
         val e = MapPositionEstimator()
         assertEquals(350.0, e.mapHeading(-10.0), 1e-9)

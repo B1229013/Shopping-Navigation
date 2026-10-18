@@ -1,12 +1,14 @@
 """FastAPI app — endpoints for in-store navigation sessions."""
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -56,6 +58,21 @@ from server.perception import Detection as PerceptionDetection, Perception, veri
 from server.ocr import OCRResult
 from server.session import SessionStore
 import re as _re
+
+
+# Debug images (the map PNG and the scene graph) are drawn after the reply instead of
+# before it — the scene graph alone grew to ~9 s per photo during a walk. One at a time:
+# matplotlib is not thread-safe.
+_RENDER_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
+
+
+def _render_later(fn, *args) -> None:
+    def run():
+        try:
+            fn(*args)
+        except Exception as e:
+            log.warning("background render failed: %s", e)
+    _RENDER_POOL.submit(run)
 
 
 def _has_cjk(text: str) -> bool:
@@ -2149,8 +2166,8 @@ async def _handle_photo(
     map_dir.mkdir(parents=True, exist_ok=True)
     map_json = s.topomap.to_dict(current_node=nid, goal_node=s.goal_node)
     (map_dir / f"map_{nid}.json").write_text(json.dumps(map_json, ensure_ascii=False, indent=2), encoding="utf-8")
-    map_png = s.topomap.render_png(current_id=nid)
-    (map_dir / f"map_{nid}.png").write_bytes(map_png)
+    topo_now = copy.deepcopy(s.topomap)      # the next photo changes s.topomap
+    _render_later(lambda: (map_dir / f"map_{nid}.png").write_bytes(topo_now.render_png(current_id=nid)))
 
     _loc_for_hist = _early_loc
     s.history.append({
@@ -2173,8 +2190,8 @@ async def _handle_photo(
     observations = _build_observations(s)
     graph_dir = out_dir / "graph"
     graph_dir.mkdir(parents=True, exist_ok=True)
-    render_scene_graph(observations, s.goal, s.goal_objects,
-                       str(graph_dir / f"scene_graph_{nid}.png"))
+    _render_later(render_scene_graph, observations, s.goal, list(s.goal_objects),
+                  str(graph_dir / f"scene_graph_{nid}.png"))
 
     # Save detection + OCR results as JSON
     det_json = {
@@ -2772,6 +2789,12 @@ def _check_vlm_and_warm():
 
     if not os.environ.get("UNIGOAL_TEST_MODE"):
         _vlm_warm_up()
+        # DINOv2 for photo localization: load it now, in the background, instead of on
+        # the first photo (~9 s on this CPU-only torch).
+        if _config.LOC_SERVER_DINO:
+            import threading
+            from server import dino_embed
+            threading.Thread(target=dino_embed.available, name="dino-preload", daemon=True).start()
 
     # Neo4j: connect and pre-load reference map
     neo4j = get_neo4j()

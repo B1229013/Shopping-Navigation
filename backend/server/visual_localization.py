@@ -19,6 +19,7 @@ Three matching strategies:
 from __future__ import annotations
 
 import base64
+import functools
 import io
 import json
 import logging
@@ -437,27 +438,41 @@ def _strip_direction(s: str) -> str:
     return s if s else orig
 
 
+_CHAR_IGNORE = frozenset({' ', '/', '／', '（', '）', '「', '」'})
+
+
+@functools.lru_cache(maxsize=1 << 16)
+def _label_features(label: str):
+    """Everything _semantic_similarity derives from one label, computed once per label.
+
+    The reference map's labels are fixed and every photo compares against all of them
+    (~600k pairs per photo), so redoing the regexes per pair cost ~15 s per photo.
+    """
+    low = label.lower()
+    n = _strip_direction(low)
+    return (low, n, frozenset(n.split()),
+            frozenset(cw for cw in _CATEGORY_SIGNS if cw in low),
+            frozenset(_extract_numbers(label)),
+            frozenset(set(n) - _CHAR_IGNORE))
+
+
+@functools.lru_cache(maxsize=1 << 20)
 def _semantic_similarity(ql: str, rl: str) -> float:
-    ql_low, rl_low = ql.lower(), rl.lower()
+    ql_low, ql_n, ql_words, q_cats, q_nums, ql_chars = _label_features(ql)
+    rl_low, rl_n, rl_words, r_cats, r_nums, rl_chars = _label_features(rl)
     if ql_low == rl_low:
         return 1.0
 
-    ql_n = _strip_direction(ql_low)
-    rl_n = _strip_direction(rl_low)
     if ql_n == rl_n:
         return 0.95
 
     scores: list[float] = []
 
-    ql_words = set(ql_n.split())
-    rl_words = set(rl_n.split())
     if ql_words and rl_words:
         common = ql_words & rl_words
         if common:
             scores.append(len(common) / max(len(ql_words), len(rl_words)))
 
-    q_cats = {cw for cw in _CATEGORY_SIGNS if cw in ql_low}
-    r_cats = {cw for cw in _CATEGORY_SIGNS if cw in rl_low}
     if q_cats or r_cats:
         if q_cats and r_cats and q_cats == r_cats:
             scores.append(0.4)
@@ -466,8 +481,6 @@ def _semantic_similarity(ql: str, rl: str) -> float:
         elif q_cats != r_cats and q_cats and r_cats:
             return max(scores) if scores else 0.0
 
-    q_nums = _extract_numbers(ql)
-    r_nums = _extract_numbers(rl)
     if q_nums and r_nums:
         if q_nums & r_nums:
             scores.append(0.9)
@@ -478,8 +491,6 @@ def _semantic_similarity(ql: str, rl: str) -> float:
         ratio = min(len(ql_n), len(rl_n)) / max(len(ql_n), len(rl_n))
         scores.append(ratio if ratio > 0.4 else ratio * 0.5)
 
-    ql_chars = set(ql_n) - {' ', '/', '／', '（', '）', '「', '」'}
-    rl_chars = set(rl_n) - {' ', '/', '／', '（', '）', '「', '」'}
     if ql_chars and rl_chars:
         char_common = ql_chars & rl_chars
         jaccard = len(char_common) / len(ql_chars | rl_chars)

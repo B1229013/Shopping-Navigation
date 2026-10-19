@@ -32,10 +32,10 @@ internal val CLASSIFIER_SYSTEM_PROMPT = """
     Put every product into exactly ONE of these categories, using the category name exactly as written:
     - 蔬果: vegetables, fruits, mushrooms, tofu, fresh herbs
     - 肉品海鮮: meat, poultry, fish, seafood, processed meat (ham, bacon, sausage)
-    - 蛋奶: eggs and egg products, cheese, yogurt, butter, cream (NOT drinking milk)
+    - 蛋奶: eggs and egg products, cheese, spoonable yogurt (優格), butter, cream (NOT drinking milk or drinkable yogurt)
     - 主食: rice, noodles, bread, dumplings, oats and cereal
     - 零食: snacks, sweets, cookies, chips, candy, jelly, desserts, ice cream
-    - 飲品: anything you drink, including milk, soy milk, tea, coffee, juice, soda, water, alcohol
+    - 飲品: anything you drink, including milk, drinkable yogurt (優酪乳), soy milk, tea, coffee, juice, soda, water, alcohol
     - 調味料: salt, sugar, sauces, oils, vinegar, spices, flour, honey, jam
     - 清潔用品: tissue and toilet paper, laundry and dish detergent, cleaning agents, shampoo, body wash, soap, toothpaste, toothbrush
     - 廚房用品: plastic wrap, foil, food containers, zip bags, kitchen paper, cookware, utensils, tableware
@@ -69,7 +69,7 @@ internal fun parseClassifierResponse(content: String, expectedCount: Int): List<
     return out
 }
 
-private suspend fun requestBatch(names: List<String>, apiKey: String): List<String?> {
+internal suspend fun requestBatch(names: List<String>, apiKey: String): List<String?> {
     val response = withContext(Dispatchers.IO) {
         groqApi.getCompletion(
             "Bearer $apiKey",

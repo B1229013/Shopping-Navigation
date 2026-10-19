@@ -36,6 +36,7 @@ class CategoryClassifierTest {
         assertEquals(HOME_SNACKS, resolveHomeCategory("可樂果", HOME_BEVERAGES))
         assertEquals(HOME_EGG_DAIRY, resolveHomeCategory("茶葉蛋", HOME_BEVERAGES))
         assertEquals(HOME_SNACKS, resolveHomeCategory("蒟蒻果凍", HOME_PRODUCE))
+        assertEquals(HOME_SEASONING, resolveHomeCategory("料理米酒", HOME_BEVERAGES))
     }
 
     @Test
@@ -107,7 +108,7 @@ class CategoryClassifierTest {
             "雞蛋" to HOME_EGG_DAIRY, "起司" to HOME_EGG_DAIRY, "鮮奶油" to HOME_EGG_DAIRY,
             "白米" to HOME_STAPLES, "吐司" to HOME_STAPLES, "烏龍麵" to HOME_STAPLES,
             "洋芋片" to HOME_SNACKS, "蛋糕" to HOME_SNACKS,
-            "鮮奶" to HOME_BEVERAGES, "珍珠奶茶" to HOME_BEVERAGES,
+            "鮮奶" to HOME_BEVERAGES, "優酪乳" to HOME_BEVERAGES, "珍珠奶茶" to HOME_BEVERAGES,
             "醬油" to HOME_SEASONING, "番茄醬" to HOME_SEASONING, "奶油" to HOME_EGG_DAIRY,
             "衛生紙" to HOME_CLEANING, "洗碗精" to HOME_CLEANING, "菜瓜布" to HOME_CLEANING,
             "保鮮膜" to HOME_KITCHEN, "鋁箔紙" to HOME_KITCHEN,

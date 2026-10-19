@@ -88,7 +88,11 @@ def test_sim_phone_is_reproducible_and_shared_by_a_point():
 def test_variant_restores_weights():
     from server import config as C
     from server import locate_fusion as LF
-    before = (LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES)
+    before = (LF.W_V, LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES)
     with io.variant("dino_only"):
-        assert LF.W_N == LF.W_O == 0 and not C.AISLE_SIGN_PLACES
-    assert (LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES) == before
+        assert LF.W_N == LF.W_O == 0 and LF.W_V == before[0] and not C.AISLE_SIGN_PLACES
+    with io.variant("objects_only"):
+        assert LF.W_V == LF.W_O == 0 and LF.W_N == before[1] and not C.AISLE_SIGN_PLACES
+    with io.variant("text_only"):
+        assert LF.W_V == LF.W_N == 0 and LF.W_O == before[2] and C.AISLE_SIGN_PLACES == before[3]
+    assert (LF.W_V, LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES) == before

@@ -24,6 +24,9 @@ Variants (same detections, same DINOv2 embedding):
   dino_only  — locate_fusion W_N = W_O = 0 and no aisle signs: DINOv2 alone
   no_objects — W_N = 0 (OCR and aisle signs kept)
   no_text    — W_O = 0 and no aisle signs (objects kept)
+  objects_only — W_V = W_O = 0, no aisle signs: the object score alone
+  text_only  — W_V = W_N = 0: OCR and aisle signs alone
+  (with no signal at all every node scores 0 and the pick is just the first node)
 
 With sensors (prod and dino_only again, same photos):
   +replay    — Sensor Lab sets: the phone inputs eval/sensorlab.replay derives from the
@@ -83,7 +86,8 @@ LAB_SETS = {   # Sensor Lab test walks: labels CSV, photo folders under --data-r
 }
 SETS = ("0916", "field1017", "route1") + tuple(LAB_SETS)
 VARIANTS = ("prod", "dino_only")
-ABLATIONS = ("no_objects", "no_text")    # one of the two extras switched off
+# one of the two extras switched off, or DINOv2 switched off and one extra left on
+ABLATIONS = ("no_objects", "no_text", "objects_only", "text_only")
 SIM_SIGMAS = (1.0, 2.0, 4.0, 8.0)        # simulated phone position error (m)
 SIM_DRAWS = 3
 CONF_LEVELS = (0.3, 0.6)
@@ -480,18 +484,20 @@ class EmbedCache:
 def variant(name):
     from server import config as C
     from server import locate_fusion as LF
-    saved = (LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES)
+    saved = (LF.W_V, LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES)
     try:
-        if name in ("dino_only", "no_objects"):
+        if name in ("objects_only", "text_only"):
+            LF.W_V = 0.0
+        if name in ("dino_only", "no_objects", "text_only"):
             LF.W_N = 0.0
-        if name in ("dino_only", "no_text"):
+        if name in ("dino_only", "no_text", "objects_only"):
             LF.W_O = 0.0
             C.AISLE_SIGN_PLACES = set()
         if name not in VARIANTS + ABLATIONS:
             raise ValueError(name)
         yield
     finally:
-        LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES = saved
+        LF.W_V, LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES = saved
 
 
 def text_coverage(perc_all, ref_map, place):
@@ -754,6 +760,8 @@ def summarize(recs):
         "within_1_hop": _pct([r["within1"] for r in recs]),
         "error_m": _stats([r["err_m"] for r in recs]),
         "estimated_xy_error_m": _stats([r["est_err_m"] for r in recs]),
+        # photos where the image evidence separates nodes at all (all-zero = no signal)
+        "photos_with_signal": _pct([(r.get("evidence_max") or 0.0) > 1e-9 for r in recs]),
     }
     cal = {}
     for t in CONF_LEVELS:
@@ -891,13 +899,14 @@ def markdown(rep):
          f"- 地圖 `{rep['map']['place']}`：{rep['map']['nodes']} 節點，來源 {rep['map']['source']}，指紋 {rep['map']['fingerprint']}",
          f"- 產生時間 {rep['generated']}；commit {rep['commit'] or '?'}", ""]
     L += ["## 主要指標", "",
-          "| 版本 | Top-1 | Top-5 | 1 hop 內 | 誤差 平均/中位 (m) | 內插位置誤差 平均/中位 (m) |",
-          "|---|---|---|---|---|---|"]
+          "| 版本 | Top-1 | Top-5 | 1 hop 內 | 誤差 平均/中位 (m) | 內插位置誤差 平均/中位 (m) | 影像證據有訊號的照片 |",
+          "|---|---|---|---|---|---|---|"]
     for v, s in rep["variants"].items():
         m = s["metrics"]
         L.append(f"| {v} | {_fmt(m['top1'], '%')} | {_fmt(m['top5'], '%')} | {_fmt(m['within_1_hop'], '%')} | "
                  f"{_fmt(m['error_m']['mean'])} / {_fmt(m['error_m']['median'])} | "
-                 f"{_fmt(m['estimated_xy_error_m']['mean'])} / {_fmt(m['estimated_xy_error_m']['median'])} |")
+                 f"{_fmt(m['estimated_xy_error_m']['mean'])} / {_fmt(m['estimated_xy_error_m']['median'])} | "
+                 f"{_fmt(m.get('photos_with_signal'), '%')} |")
     if len(modes) > 1:
         L += ["", "## 照片類型 × 感測器（Top-1 ／ 1 hop 內 ／ 內插位置誤差中位數）", ""]
         for v, by_cond in rep["grid"].items():
@@ -1097,6 +1106,7 @@ def main(argv=None):
                 t_fusion = time.perf_counter() - t0 - embed.spent
                 rec = score_record(it, loc, ref_map, hops)
                 rec.update(base, mode=m, draw=draw, phone=phone,
+                           evidence_max=max((loc.image_evidence or {}).values(), default=0.0),
                            sensor_sigma=(loc_log or {}).get("sensor_sigma_m"),
                            reachable_n=len((loc_log or {}).get("reachable_nodes") or []) or None)
                 per_variant[run_key(v, m)].append(rec)

@@ -1,0 +1,5717 @@
+{
+ "set": "lab1019",
+ "n_photos": 376,
+ "generated": "2026-10-20 03:34",
+ "commit": "2326300",
+ "machine": "yixianlin / Intel64 Family 6 Model 154 Stepping 4, GenuineIntel / GPU no CUDA",
+ "map": {
+  "place": "A7家樂福（9/16)",
+  "nodes": 59,
+  "source": "neo4j",
+  "fingerprint": "05c705d52272",
+  "sidecar_sha1": "a81ca3312c9c"
+ },
+ "config": {
+  "locate_fusion_weights": [
+   5.0,
+   0.5,
+   0.5
+  ],
+  "server_image_k": "32,64,8",
+  "confident_threshold": 0.15,
+  "dino_model": "facebook/dinov2-base",
+  "perception": {
+   "model": "gpt-5.4-mini",
+   "base_url": "https://api.openai.com/v1",
+   "rounds": 1,
+   "pass3": true,
+   "goal": "定位",
+   "goal_objects": [],
+   "prompts_sha1": "9bb095df3ecc"
+  }
+ },
+ "perception": "vlm",
+ "vlm_calls": {
+  "total": 1128,
+  "by_kind": {
+   "pass1": 376,
+   "pass2": 376,
+   "pass3": 376
+  },
+  "errors": 0,
+  "pass3_useful_photos": 0
+ },
+ "live_comparison": null,
+ "timing_s": {
+  "quality": {
+   "mean": 0.02,
+   "median": 0.02
+  },
+  "vlm": {
+   "mean": 14.02,
+   "median": 14.06
+  },
+  "dino": {
+   "mean": 0.27,
+   "median": 0.26
+  },
+  "fusion": {
+   "mean": 1.06,
+   "median": 1.08
+  },
+  "total": {
+   "mean": 15.38,
+   "median": 15.41
+  }
+ },
+ "text_coverage": {
+  "photos": 376,
+  "with_ocr_text_in_map": 324,
+  "with_aisle_sign_evidence": 75
+ },
+ "sensor_modes": [
+  "none",
+  "replay",
+  "sim1",
+  "sim2",
+  "sim4",
+  "sim8"
+ ],
+ "variants": {
+  "prod": {
+   "metrics": {
+    "n": 376,
+    "top1": 36.7,
+    "top5": 66.0,
+    "within_1_hop": 64.6,
+    "error_m": {
+     "mean": 5.87,
+     "median": 3.7
+    },
+    "estimated_xy_error_m": {
+     "mean": 5.68,
+     "median": 3.76
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 87.0,
+      "n": 327,
+      "top1_when_confident": 37.9,
+      "within_1_hop_when_confident": 65.1
+     },
+     ">=0.6": {
+      "coverage": 48.4,
+      "n": 182,
+      "top1_when_confident": 48.4,
+      "within_1_hop_when_confident": 70.3
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 11,
+     "answered": 361,
+     "coverage": 96.0,
+     "top1_of_answered": 38.0
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 365,
+     "within_45deg": 38.6,
+     "n_correct_node": 137,
+     "within_45deg_on_correct_node": 42.3
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 41.2,
+      "within_1_hop": 71.5
+     },
+     "between": {
+      "n": 116,
+      "top1": 26.7,
+      "within_1_hop": 49.1
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 36.7,
+      "any_top1": 81.9,
+      "most_confident_top1": 44.7,
+      "most_confident_within_1_hop": 67.0
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 41.2,
+      "any_top1": 84.6,
+      "most_confident_top1": 53.8,
+      "most_confident_within_1_hop": 76.9
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 26.7,
+      "any_top1": 75.9,
+      "most_confident_top1": 24.1,
+      "most_confident_within_1_hop": 44.8
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 238,
+    "kind": {
+     "neighbour (1 hop)": 105,
+     "far (≥3 hops)": 87,
+     "2 hops": 46
+    },
+    "truth_in_top5": 110,
+    "between_nodes": 85,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 5,
+      "directions": {
+       "27->41": 1,
+       "41->27": 4
+      }
+     },
+     {
+      "nodes": [
+       38,
+       49
+      ],
+      "count": 5,
+      "directions": {
+       "38->49": 5
+      }
+     },
+     {
+      "nodes": [
+       5,
+       23
+      ],
+      "count": 5,
+      "directions": {
+       "23->5": 5
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 5,
+      "directions": {
+       "57->61": 2,
+       "61->57": 3
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 4,
+      "directions": {
+       "38->42": 1,
+       "42->38": 3
+      }
+     },
+     {
+      "nodes": [
+       43,
+       50
+      ],
+      "count": 4,
+      "directions": {
+       "43->50": 2,
+       "50->43": 2
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 4,
+      "directions": {
+       "1->4": 4
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 4,
+      "directions": {
+       "21->30": 2,
+       "30->21": 2
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 4,
+      "directions": {
+       "21->4": 4
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 3,
+      "directions": {
+       "26->6": 3
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 0.73,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.95,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 0.89,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.74,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp53_back",
+      "truth": 63,
+      "pred": 18,
+      "hop": 8,
+      "err_m": 27.6,
+      "conf": 0.34,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 44,
+      "pred": 60,
+      "hop": 8,
+      "err_m": 27.5,
+      "conf": 0.41,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_left",
+      "truth": 42,
+      "pred": 13,
+      "hop": 9,
+      "err_m": 26.6,
+      "conf": 0.54,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.53,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.66,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 0.51,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp73_left",
+      "truth": 21,
+      "pred": 14,
+      "hop": 8,
+      "err_m": 24.7,
+      "conf": 0.38,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp45_left",
+      "truth": 17,
+      "pred": 29,
+      "hop": 10,
+      "err_m": 24.1,
+      "conf": 0.86,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp15_right",
+      "truth": 52,
+      "pred": 30,
+      "hop": 8,
+      "err_m": 23.9,
+      "conf": 0.94,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp9_left",
+      "truth": 26,
+      "pred": 4,
+      "hop": 9,
+      "err_m": 23.8,
+      "conf": 0.56,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "dino_only": {
+   "metrics": {
+    "n": 376,
+    "top1": 34.3,
+    "top5": 63.0,
+    "within_1_hop": 60.1,
+    "error_m": {
+     "mean": 6.43,
+     "median": 4.11
+    },
+    "estimated_xy_error_m": {
+     "mean": 6.06,
+     "median": 4.13
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 71.3,
+      "n": 268,
+      "top1_when_confident": 38.1,
+      "within_1_hop_when_confident": 65.3
+     },
+     ">=0.6": {
+      "coverage": 33.5,
+      "n": 126,
+      "top1_when_confident": 50.0,
+      "within_1_hop_when_confident": 69.0
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 33,
+     "answered": 339,
+     "coverage": 90.2,
+     "top1_of_answered": 37.5
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 342,
+     "within_45deg": 36.0,
+     "n_correct_node": 127,
+     "within_45deg_on_correct_node": 43.3
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 38.5,
+      "within_1_hop": 66.5
+     },
+     "between": {
+      "n": 116,
+      "top1": 25.0,
+      "within_1_hop": 45.7
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 34.3,
+      "any_top1": 73.4,
+      "most_confident_top1": 40.4,
+      "most_confident_within_1_hop": 66.0
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 38.5,
+      "any_top1": 75.4,
+      "most_confident_top1": 50.8,
+      "most_confident_within_1_hop": 78.5
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 25.0,
+      "any_top1": 69.0,
+      "most_confident_top1": 17.2,
+      "most_confident_within_1_hop": 37.9
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 247,
+    "kind": {
+     "far (≥3 hops)": 106,
+     "neighbour (1 hop)": 97,
+     "2 hops": 44
+    },
+    "truth_in_top5": 108,
+    "between_nodes": 87,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 5,
+      "directions": {
+       "38->42": 1,
+       "42->38": 4
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 5,
+      "directions": {
+       "21->30": 2,
+       "30->21": 3
+      }
+     },
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 4,
+      "directions": {
+       "27->41": 1,
+       "41->27": 3
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 4,
+      "directions": {
+       "44->50": 2,
+       "50->44": 2
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 4,
+      "directions": {
+       "1->4": 4
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 4,
+      "directions": {
+       "21->4": 4
+      }
+     },
+     {
+      "nodes": [
+       25,
+       37
+      ],
+      "count": 3,
+      "directions": {
+       "25->37": 3
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 3,
+      "directions": {
+       "26->6": 3
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 3,
+      "directions": {
+       "64->65": 3
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 3,
+      "directions": {
+       "56->58": 2,
+       "58->56": 1
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 16,
+      "hop": 12,
+      "err_m": 38.7,
+      "conf": 0.41,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp60_left",
+      "truth": 32,
+      "pred": 60,
+      "hop": 12,
+      "err_m": 36.5,
+      "conf": 0.47,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.94,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 0.89,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.74,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 44,
+      "pred": 60,
+      "hop": 8,
+      "err_m": 27.5,
+      "conf": 0.44,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_left",
+      "truth": 42,
+      "pred": 13,
+      "hop": 9,
+      "err_m": 26.6,
+      "conf": 0.57,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.53,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.66,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp6_front",
+      "truth": 41,
+      "pred": 30,
+      "hop": 10,
+      "err_m": 25.5,
+      "conf": 0.2,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 0.51,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp48_left",
+      "truth": 30,
+      "pred": 47,
+      "hop": 9,
+      "err_m": 25.2,
+      "conf": 0.18,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp73_left",
+      "truth": 21,
+      "pred": 14,
+      "hop": 8,
+      "err_m": 24.7,
+      "conf": 0.38,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp45_left",
+      "truth": 17,
+      "pred": 29,
+      "hop": 10,
+      "err_m": 24.1,
+      "conf": 0.86,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp9_left",
+      "truth": 26,
+      "pred": 4,
+      "hop": 9,
+      "err_m": 23.8,
+      "conf": 0.56,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "no_objects": {
+   "metrics": {
+    "n": 376,
+    "top1": 36.4,
+    "top5": 66.0,
+    "within_1_hop": 64.9,
+    "error_m": {
+     "mean": 5.84,
+     "median": 3.7
+    },
+    "estimated_xy_error_m": {
+     "mean": 5.64,
+     "median": 3.75
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 87.0,
+      "n": 327,
+      "top1_when_confident": 37.6,
+      "within_1_hop_when_confident": 65.4
+     },
+     ">=0.6": {
+      "coverage": 48.1,
+      "n": 181,
+      "top1_when_confident": 48.6,
+      "within_1_hop_when_confident": 71.3
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 11,
+     "answered": 361,
+     "coverage": 96.0,
+     "top1_of_answered": 37.7
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 365,
+     "within_45deg": 38.9,
+     "n_correct_node": 136,
+     "within_45deg_on_correct_node": 42.6
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 40.8,
+      "within_1_hop": 71.9
+     },
+     "between": {
+      "n": 116,
+      "top1": 26.7,
+      "within_1_hop": 49.1
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 36.4,
+      "any_top1": 81.9,
+      "most_confident_top1": 45.7,
+      "most_confident_within_1_hop": 68.1
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 40.8,
+      "any_top1": 84.6,
+      "most_confident_top1": 53.8,
+      "most_confident_within_1_hop": 76.9
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 26.7,
+      "any_top1": 75.9,
+      "most_confident_top1": 27.6,
+      "most_confident_within_1_hop": 48.3
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 239,
+    "kind": {
+     "neighbour (1 hop)": 107,
+     "far (≥3 hops)": 86,
+     "2 hops": 46
+    },
+    "truth_in_top5": 111,
+    "between_nodes": 85,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 5,
+      "directions": {
+       "27->41": 1,
+       "41->27": 4
+      }
+     },
+     {
+      "nodes": [
+       38,
+       49
+      ],
+      "count": 5,
+      "directions": {
+       "38->49": 5
+      }
+     },
+     {
+      "nodes": [
+       5,
+       23
+      ],
+      "count": 5,
+      "directions": {
+       "23->5": 5
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 5,
+      "directions": {
+       "57->61": 2,
+       "61->57": 3
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 4,
+      "directions": {
+       "38->42": 1,
+       "42->38": 3
+      }
+     },
+     {
+      "nodes": [
+       43,
+       50
+      ],
+      "count": 4,
+      "directions": {
+       "43->50": 2,
+       "50->43": 2
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 4,
+      "directions": {
+       "1->4": 4
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 4,
+      "directions": {
+       "21->30": 2,
+       "30->21": 2
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 4,
+      "directions": {
+       "21->4": 4
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 3,
+      "directions": {
+       "26->6": 3
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 0.73,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.95,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 0.89,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.74,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp53_back",
+      "truth": 63,
+      "pred": 18,
+      "hop": 8,
+      "err_m": 27.6,
+      "conf": 0.34,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 44,
+      "pred": 60,
+      "hop": 8,
+      "err_m": 27.5,
+      "conf": 0.41,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_left",
+      "truth": 42,
+      "pred": 13,
+      "hop": 9,
+      "err_m": 26.6,
+      "conf": 0.54,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.53,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.66,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 0.51,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp73_left",
+      "truth": 21,
+      "pred": 14,
+      "hop": 8,
+      "err_m": 24.7,
+      "conf": 0.38,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp45_left",
+      "truth": 17,
+      "pred": 29,
+      "hop": 10,
+      "err_m": 24.1,
+      "conf": 0.86,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp15_right",
+      "truth": 52,
+      "pred": 30,
+      "hop": 8,
+      "err_m": 23.9,
+      "conf": 0.94,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp9_left",
+      "truth": 26,
+      "pred": 4,
+      "hop": 9,
+      "err_m": 23.8,
+      "conf": 0.56,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "no_text": {
+   "metrics": {
+    "n": 376,
+    "top1": 33.8,
+    "top5": 62.8,
+    "within_1_hop": 58.5,
+    "error_m": {
+     "mean": 6.8,
+     "median": 4.22
+    },
+    "estimated_xy_error_m": {
+     "mean": 6.37,
+     "median": 4.2
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 73.1,
+      "n": 275,
+      "top1_when_confident": 37.1,
+      "within_1_hop_when_confident": 62.9
+     },
+     ">=0.6": {
+      "coverage": 34.8,
+      "n": 131,
+      "top1_when_confident": 48.9,
+      "within_1_hop_when_confident": 66.4
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 28,
+     "answered": 344,
+     "coverage": 91.5,
+     "top1_of_answered": 36.6
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 347,
+     "within_45deg": 34.6,
+     "n_correct_node": 126,
+     "within_45deg_on_correct_node": 42.1
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 38.1,
+      "within_1_hop": 64.6
+     },
+     "between": {
+      "n": 116,
+      "top1": 24.1,
+      "within_1_hop": 44.8
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 33.8,
+      "any_top1": 72.3,
+      "most_confident_top1": 39.4,
+      "most_confident_within_1_hop": 60.6
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 38.1,
+      "any_top1": 75.4,
+      "most_confident_top1": 49.2,
+      "most_confident_within_1_hop": 70.8
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 24.1,
+      "any_top1": 65.5,
+      "most_confident_top1": 17.2,
+      "most_confident_within_1_hop": 37.9
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 249,
+    "kind": {
+     "far (≥3 hops)": 113,
+     "neighbour (1 hop)": 93,
+     "2 hops": 43
+    },
+    "truth_in_top5": 109,
+    "between_nodes": 88,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 5,
+      "directions": {
+       "38->42": 1,
+       "42->38": 4
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 5,
+      "directions": {
+       "21->30": 2,
+       "30->21": 3
+      }
+     },
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 4,
+      "directions": {
+       "27->41": 1,
+       "41->27": 3
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 4,
+      "directions": {
+       "44->50": 2,
+       "50->44": 2
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 4,
+      "directions": {
+       "1->4": 4
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 4,
+      "directions": {
+       "21->4": 4
+      }
+     },
+     {
+      "nodes": [
+       25,
+       37
+      ],
+      "count": 3,
+      "directions": {
+       "25->37": 3
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 3,
+      "directions": {
+       "26->6": 3
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 3,
+      "directions": {
+       "64->65": 3
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 3,
+      "directions": {
+       "56->58": 2,
+       "58->56": 1
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 16,
+      "hop": 12,
+      "err_m": 38.7,
+      "conf": 0.41,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp60_left",
+      "truth": 32,
+      "pred": 60,
+      "hop": 12,
+      "err_m": 36.5,
+      "conf": 0.47,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp48_left",
+      "truth": 30,
+      "pred": 8,
+      "hop": 10,
+      "err_m": 34.1,
+      "conf": 0.23,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp59_back",
+      "truth": 40,
+      "pred": 8,
+      "hop": 9,
+      "err_m": 30.6,
+      "conf": 0.46,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.94,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 0.89,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.74,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 44,
+      "pred": 60,
+      "hop": 8,
+      "err_m": 27.5,
+      "conf": 0.44,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_left",
+      "truth": 42,
+      "pred": 13,
+      "hop": 9,
+      "err_m": 26.6,
+      "conf": 0.57,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.53,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.66,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp6_front",
+      "truth": 41,
+      "pred": 30,
+      "hop": 10,
+      "err_m": 25.5,
+      "conf": 0.2,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 0.51,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp73_left",
+      "truth": 21,
+      "pred": 14,
+      "hop": 8,
+      "err_m": 24.7,
+      "conf": 0.38,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp45_left",
+      "truth": 17,
+      "pred": 29,
+      "hop": 10,
+      "err_m": 24.1,
+      "conf": 0.86,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "objects_only": {
+   "metrics": {
+    "n": 376,
+    "top1": 2.1,
+    "top5": 6.6,
+    "within_1_hop": 6.9,
+    "error_m": {
+     "mean": 15.21,
+     "median": 14.55
+    },
+    "estimated_xy_error_m": {
+     "mean": 15.14,
+     "median": 14.52
+    },
+    "photos_with_signal": 17.8,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 16.0,
+      "n": 60,
+      "top1_when_confident": 1.7,
+      "within_1_hop_when_confident": 6.7
+     },
+     ">=0.6": {
+      "coverage": 12.8,
+      "n": 48,
+      "top1_when_confident": 2.1,
+      "within_1_hop_when_confident": 6.2
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 305,
+     "answered": 67,
+     "coverage": 17.8,
+     "top1_of_answered": 1.5
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 67,
+     "within_45deg": 28.4,
+     "n_correct_node": 1,
+     "within_45deg_on_correct_node": 0.0
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 1.9,
+      "within_1_hop": 5.4
+     },
+     "between": {
+      "n": 116,
+      "top1": 2.6,
+      "within_1_hop": 10.3
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 2.1,
+      "any_top1": 3.2,
+      "most_confident_top1": 1.1,
+      "most_confident_within_1_hop": 7.4
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 1.9,
+      "any_top1": 3.1,
+      "most_confident_top1": 1.5,
+      "most_confident_within_1_hop": 6.2
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 2.6,
+      "any_top1": 3.4,
+      "most_confident_top1": 0.0,
+      "most_confident_within_1_hop": 10.3
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 368,
+    "kind": {
+     "far (≥3 hops)": 316,
+     "neighbour (1 hop)": 18,
+     "2 hops": 34
+    },
+    "truth_in_top5": 17,
+    "between_nodes": 113,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       1,
+       21
+      ],
+      "count": 15,
+      "directions": {
+       "21->1": 15
+      }
+     },
+     {
+      "nodes": [
+       1,
+       42
+      ],
+      "count": 11,
+      "directions": {
+       "42->1": 11
+      }
+     },
+     {
+      "nodes": [
+       1,
+       25
+      ],
+      "count": 10,
+      "directions": {
+       "25->1": 10
+      }
+     },
+     {
+      "nodes": [
+       1,
+       38
+      ],
+      "count": 10,
+      "directions": {
+       "38->1": 10
+      }
+     },
+     {
+      "nodes": [
+       1,
+       50
+      ],
+      "count": 9,
+      "directions": {
+       "50->1": 9
+      }
+     },
+     {
+      "nodes": [
+       1,
+       44
+      ],
+      "count": 9,
+      "directions": {
+       "44->1": 9
+      }
+     },
+     {
+      "nodes": [
+       1,
+       26
+      ],
+      "count": 8,
+      "directions": {
+       "26->1": 8
+      }
+     },
+     {
+      "nodes": [
+       1,
+       51
+      ],
+      "count": 8,
+      "directions": {
+       "51->1": 8
+      }
+     },
+     {
+      "nodes": [
+       1,
+       43
+      ],
+      "count": 8,
+      "directions": {
+       "43->1": 8
+      }
+     },
+     {
+      "nodes": [
+       1,
+       22
+      ],
+      "count": 8,
+      "directions": {
+       "22->1": 8
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "2/wp56_right",
+      "truth": 16,
+      "pred": 8,
+      "hop": 12,
+      "err_m": 37.8,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 8,
+      "hop": 10,
+      "err_m": 36.2,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp65_back",
+      "truth": 20,
+      "pred": 8,
+      "hop": 11,
+      "err_m": 35.5,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 4,
+      "hop": 11,
+      "err_m": 35.5,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_front",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_right",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_left",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp63_left",
+      "truth": 45,
+      "pred": 8,
+      "hop": 10,
+      "err_m": 32.2,
+      "conf": 0.5,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp25_front",
+      "truth": 18,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 32.1,
+      "conf": 0.02,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 32.1,
+      "conf": 0.02,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 32.1,
+      "conf": 0.02,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp21_front",
+      "truth": 60,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 31.3,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp21_back",
+      "truth": 60,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 31.3,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp21_left",
+      "truth": 60,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 31.3,
+      "conf": 0.02,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "text_only": {
+   "metrics": {
+    "n": 376,
+    "top1": 19.7,
+    "top5": 44.7,
+    "within_1_hop": 42.0,
+    "error_m": {
+     "mean": 10.4,
+     "median": 7.32
+    },
+    "estimated_xy_error_m": {
+     "mean": 9.94,
+     "median": 7.42
+    },
+    "photos_with_signal": 87.2,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 72.1,
+      "n": 271,
+      "top1_when_confident": 25.1,
+      "within_1_hop_when_confident": 49.4
+     },
+     ">=0.6": {
+      "coverage": 47.3,
+      "n": 178,
+      "top1_when_confident": 32.0,
+      "within_1_hop_when_confident": 55.6
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 65,
+     "answered": 307,
+     "coverage": 81.6,
+     "top1_of_answered": 23.8
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 311,
+     "within_45deg": 29.3,
+     "n_correct_node": 73,
+     "within_45deg_on_correct_node": 41.1
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 20.0,
+      "within_1_hop": 42.3
+     },
+     "between": {
+      "n": 116,
+      "top1": 19.0,
+      "within_1_hop": 41.4
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 19.7,
+      "any_top1": 57.4,
+      "most_confident_top1": 39.4,
+      "most_confident_within_1_hop": 57.4
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 20.0,
+      "any_top1": 58.5,
+      "most_confident_top1": 41.5,
+      "most_confident_within_1_hop": 58.5
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 19.0,
+      "any_top1": 55.2,
+      "most_confident_top1": 34.5,
+      "most_confident_within_1_hop": 55.2
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 302,
+    "kind": {
+     "far (≥3 hops)": 175,
+     "neighbour (1 hop)": 84,
+     "2 hops": 43
+    },
+    "truth_in_top5": 94,
+    "between_nodes": 94,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       5,
+       23
+      ],
+      "count": 4,
+      "directions": {
+       "23->5": 4
+      }
+     },
+     {
+      "nodes": [
+       43,
+       50
+      ],
+      "count": 4,
+      "directions": {
+       "43->50": 4
+      }
+     },
+     {
+      "nodes": [
+       5,
+       7
+      ],
+      "count": 4,
+      "directions": {
+       "5->7": 2,
+       "7->5": 2
+      }
+     },
+     {
+      "nodes": [
+       3,
+       7
+      ],
+      "count": 4,
+      "directions": {
+       "7->3": 4
+      }
+     },
+     {
+      "nodes": [
+       30,
+       44
+      ],
+      "count": 4,
+      "directions": {
+       "44->30": 4
+      }
+     },
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 4,
+      "directions": {
+       "30->40": 2,
+       "40->30": 2
+      }
+     },
+     {
+      "nodes": [
+       1,
+       16
+      ],
+      "count": 4,
+      "directions": {
+       "16->1": 4
+      }
+     },
+     {
+      "nodes": [
+       15,
+       59
+      ],
+      "count": 3,
+      "directions": {
+       "15->59": 2,
+       "59->15": 1
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 3,
+      "directions": {
+       "42->38": 3
+      }
+     },
+     {
+      "nodes": [
+       1,
+       43
+      ],
+      "count": 3,
+      "directions": {
+       "43->1": 3
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "1/wp47_left",
+      "truth": 59,
+      "pred": 18,
+      "hop": 12,
+      "err_m": 42.6,
+      "conf": 0.91,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp49_front",
+      "truth": 59,
+      "pred": 60,
+      "hop": 11,
+      "err_m": 41.5,
+      "conf": 0.52,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp79_left",
+      "truth": 22,
+      "pred": 8,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 0.36,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp49_back",
+      "truth": 59,
+      "pred": 9,
+      "hop": 10,
+      "err_m": 37.2,
+      "conf": 0.1,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp79_back",
+      "truth": 22,
+      "pred": 9,
+      "hop": 11,
+      "err_m": 35.5,
+      "conf": 0.5,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp60_front",
+      "truth": 32,
+      "pred": 9,
+      "hop": 11,
+      "err_m": 35.1,
+      "conf": 0.1,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp77_right",
+      "truth": 22,
+      "pred": 60,
+      "hop": 11,
+      "err_m": 35.1,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 30,
+      "hop": 10,
+      "err_m": 34.5,
+      "conf": 0.5,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp3_front",
+      "truth": 25,
+      "pred": 22,
+      "hop": 10,
+      "err_m": 34.1,
+      "conf": 0.12,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_right",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 32.1,
+      "conf": 0.02,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_front",
+      "truth": 18,
+      "pred": 40,
+      "hop": 9,
+      "err_m": 31.0,
+      "conf": 0.31,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp27_right",
+      "truth": 8,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 31.0,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp23_front",
+      "truth": 54,
+      "pred": 31,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 1.0,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "prod+replay": {
+   "metrics": {
+    "n": 376,
+    "top1": 51.6,
+    "top5": 94.9,
+    "within_1_hop": 87.2,
+    "error_m": {
+     "mean": 2.66,
+     "median": 2.48
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.58,
+     "median": 2.4
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 376,
+      "top1_when_confident": 51.6,
+      "within_1_hop_when_confident": 87.2
+     },
+     ">=0.6": {
+      "coverage": 96.0,
+      "n": 361,
+      "top1_when_confident": 51.5,
+      "within_1_hop_when_confident": 86.7
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 0,
+     "answered": 372,
+     "coverage": 98.9,
+     "top1_of_answered": 51.3
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 376,
+     "within_45deg": 39.1,
+     "n_correct_node": 194,
+     "within_45deg_on_correct_node": 41.8
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 52.7,
+      "within_1_hop": 89.2
+     },
+     "between": {
+      "n": 116,
+      "top1": 49.1,
+      "within_1_hop": 82.8
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 51.6,
+      "any_top1": 90.4,
+      "most_confident_top1": 58.5,
+      "most_confident_within_1_hop": 90.4
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 52.7,
+      "any_top1": 90.8,
+      "most_confident_top1": 64.6,
+      "most_confident_within_1_hop": 93.8
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 49.1,
+      "any_top1": 89.7,
+      "most_confident_top1": 44.8,
+      "most_confident_within_1_hop": 82.8
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 182,
+    "kind": {
+     "neighbour (1 hop)": 134,
+     "2 hops": 32,
+     "far (≥3 hops)": 16
+    },
+    "truth_in_top5": 163,
+    "between_nodes": 59,
+    "occluded": 1,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       43,
+       50
+      ],
+      "count": 6,
+      "directions": {
+       "43->50": 3,
+       "50->43": 3
+      }
+     },
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 5,
+      "directions": {
+       "27->41": 1,
+       "41->27": 4
+      }
+     },
+     {
+      "nodes": [
+       38,
+       49
+      ],
+      "count": 5,
+      "directions": {
+       "38->49": 5
+      }
+     },
+     {
+      "nodes": [
+       7,
+       43
+      ],
+      "count": 5,
+      "directions": {
+       "7->43": 2,
+       "43->7": 3
+      }
+     },
+     {
+      "nodes": [
+       5,
+       7
+      ],
+      "count": 5,
+      "directions": {
+       "5->7": 3,
+       "7->5": 2
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 5,
+      "directions": {
+       "44->50": 2,
+       "50->44": 3
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 5,
+      "directions": {
+       "21->30": 3,
+       "30->21": 2
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 5,
+      "directions": {
+       "57->61": 2,
+       "61->57": 3
+      }
+     },
+     {
+      "nodes": [
+       19,
+       27
+      ],
+      "count": 4,
+      "directions": {
+       "27->19": 4
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 4,
+      "directions": {
+       "38->42": 1,
+       "42->38": 3
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp61_left",
+      "truth": 40,
+      "pred": 7,
+      "hop": 3,
+      "err_m": 12.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp37_right",
+      "truth": 15,
+      "pred": 13,
+      "hop": 4,
+      "err_m": 10.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp55_left",
+      "truth": 63,
+      "pred": 31,
+      "hop": 3,
+      "err_m": 9.8,
+      "conf": 0.73,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp57_right",
+      "truth": 44,
+      "pred": 21,
+      "hop": 3,
+      "err_m": 8.5,
+      "conf": 0.99,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp5_front",
+      "truth": 42,
+      "pred": 43,
+      "hop": 3,
+      "err_m": 8.3,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp2_right",
+      "truth": 25,
+      "pred": 46,
+      "hop": 3,
+      "err_m": 5.2,
+      "conf": 0.98,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp6_front",
+      "truth": 41,
+      "pred": 27,
+      "hop": 4,
+      "err_m": 2.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp6_right",
+      "truth": 41,
+      "pred": 27,
+      "hop": 4,
+      "err_m": 2.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp6_back",
+      "truth": 41,
+      "pred": 27,
+      "hop": 4,
+      "err_m": 2.2,
+      "conf": 0.94,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp6_left",
+      "truth": 41,
+      "pred": 27,
+      "hop": 4,
+      "err_m": 2.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp8_right",
+      "truth": 27,
+      "pred": 41,
+      "hop": 4,
+      "err_m": 2.2,
+      "conf": 0.8,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp4_right",
+      "truth": 37,
+      "pred": 41,
+      "hop": 5,
+      "err_m": 0.5,
+      "conf": 1.0,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "dino_only+replay": {
+   "metrics": {
+    "n": 376,
+    "top1": 51.3,
+    "top5": 94.9,
+    "within_1_hop": 87.5,
+    "error_m": {
+     "mean": 2.63,
+     "median": 2.4
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.54,
+     "median": 2.27
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 376,
+      "top1_when_confident": 51.3,
+      "within_1_hop_when_confident": 87.5
+     },
+     ">=0.6": {
+      "coverage": 94.9,
+      "n": 357,
+      "top1_when_confident": 52.4,
+      "within_1_hop_when_confident": 87.4
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 0,
+     "answered": 372,
+     "coverage": 98.9,
+     "top1_of_answered": 51.3
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 376,
+     "within_45deg": 37.5,
+     "n_correct_node": 193,
+     "within_45deg_on_correct_node": 42.5
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 52.3,
+      "within_1_hop": 90.0
+     },
+     "between": {
+      "n": 116,
+      "top1": 49.1,
+      "within_1_hop": 81.9
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 51.3,
+      "any_top1": 83.0,
+      "most_confident_top1": 57.4,
+      "most_confident_within_1_hop": 90.4
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 52.3,
+      "any_top1": 83.1,
+      "most_confident_top1": 64.6,
+      "most_confident_within_1_hop": 93.8
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 49.1,
+      "any_top1": 82.8,
+      "most_confident_top1": 41.4,
+      "most_confident_within_1_hop": 82.8
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 183,
+    "kind": {
+     "neighbour (1 hop)": 136,
+     "2 hops": 27,
+     "far (≥3 hops)": 20
+    },
+    "truth_in_top5": 164,
+    "between_nodes": 59,
+    "occluded": 2,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 6,
+      "directions": {
+       "38->42": 2,
+       "42->38": 4
+      }
+     },
+     {
+      "nodes": [
+       43,
+       50
+      ],
+      "count": 6,
+      "directions": {
+       "43->50": 4,
+       "50->43": 2
+      }
+     },
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 5,
+      "directions": {
+       "27->41": 1,
+       "41->27": 4
+      }
+     },
+     {
+      "nodes": [
+       19,
+       27
+      ],
+      "count": 5,
+      "directions": {
+       "27->19": 5
+      }
+     },
+     {
+      "nodes": [
+       7,
+       43
+      ],
+      "count": 5,
+      "directions": {
+       "7->43": 3,
+       "43->7": 2
+      }
+     },
+     {
+      "nodes": [
+       5,
+       7
+      ],
+      "count": 5,
+      "directions": {
+       "5->7": 3,
+       "7->5": 2
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 5,
+      "directions": {
+       "21->30": 2,
+       "30->21": 3
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 5,
+      "directions": {
+       "57->61": 2,
+       "61->57": 3
+      }
+     },
+     {
+      "nodes": [
+       38,
+       49
+      ],
+      "count": 4,
+      "directions": {
+       "38->49": 4
+      }
+     },
+     {
+      "nodes": [
+       19,
+       23
+      ],
+      "count": 4,
+      "directions": {
+       "19->23": 2,
+       "23->19": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp61_left",
+      "truth": 40,
+      "pred": 7,
+      "hop": 3,
+      "err_m": 12.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp37_right",
+      "truth": 15,
+      "pred": 13,
+      "hop": 4,
+      "err_m": 10.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp73_back",
+      "truth": 21,
+      "pred": 44,
+      "hop": 3,
+      "err_m": 9.9,
+      "conf": 0.75,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp55_left",
+      "truth": 63,
+      "pred": 31,
+      "hop": 3,
+      "err_m": 9.8,
+      "conf": 0.85,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp40_back",
+      "truth": 44,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 8.9,
+      "conf": 0.93,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp42_left",
+      "truth": 3,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 8.6,
+      "conf": 0.78,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp57_right",
+      "truth": 44,
+      "pred": 21,
+      "hop": 3,
+      "err_m": 8.5,
+      "conf": 0.99,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp57_left",
+      "truth": 44,
+      "pred": 21,
+      "hop": 3,
+      "err_m": 8.5,
+      "conf": 0.93,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp21_front",
+      "truth": 55,
+      "pred": 58,
+      "hop": 3,
+      "err_m": 7.1,
+      "conf": 0.73,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp2_right",
+      "truth": 25,
+      "pred": 46,
+      "hop": 3,
+      "err_m": 5.2,
+      "conf": 0.96,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp6_front",
+      "truth": 41,
+      "pred": 27,
+      "hop": 4,
+      "err_m": 2.2,
+      "conf": 0.94,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp6_right",
+      "truth": 41,
+      "pred": 27,
+      "hop": 4,
+      "err_m": 2.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "prod+sim1": {
+   "metrics": {
+    "n": 1128,
+    "top1": 60.5,
+    "top5": 98.7,
+    "within_1_hop": 91.8,
+    "error_m": {
+     "mean": 2.16,
+     "median": 2.0
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.09,
+     "median": 1.8
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 60.5,
+      "within_1_hop_when_confident": 91.8
+     },
+     ">=0.6": {
+      "coverage": 96.1,
+      "n": 1084,
+      "top1_when_confident": 61.0,
+      "within_1_hop_when_confident": 91.9
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 60.3
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 39.5,
+     "n_correct_node": 682,
+     "within_45deg_on_correct_node": 40.0
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 63.1,
+      "within_1_hop": 92.8
+     },
+     "between": {
+      "n": 348,
+      "top1": 54.6,
+      "within_1_hop": 89.7
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 60.5,
+      "any_top1": 95.7,
+      "most_confident_top1": 63.8,
+      "most_confident_within_1_hop": 93.6
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 63.1,
+      "any_top1": 95.9,
+      "most_confident_top1": 70.8,
+      "most_confident_within_1_hop": 96.4
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 54.6,
+      "any_top1": 95.4,
+      "most_confident_top1": 48.3,
+      "most_confident_within_1_hop": 87.4
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 446,
+    "kind": {
+     "neighbour (1 hop)": 354,
+     "far (≥3 hops)": 34,
+     "2 hops": 58
+    },
+    "truth_in_top5": 431,
+    "between_nodes": 158,
+    "occluded": 3,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 18,
+      "directions": {
+       "57->61": 6,
+       "61->57": 12
+      }
+     },
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 14,
+      "directions": {
+       "27->41": 2,
+       "41->27": 12
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 14,
+      "directions": {
+       "38->42": 5,
+       "42->38": 9
+      }
+     },
+     {
+      "nodes": [
+       43,
+       50
+      ],
+      "count": 14,
+      "directions": {
+       "43->50": 7,
+       "50->43": 7
+      }
+     },
+     {
+      "nodes": [
+       5,
+       7
+      ],
+      "count": 14,
+      "directions": {
+       "5->7": 9,
+       "7->5": 5
+      }
+     },
+     {
+      "nodes": [
+       19,
+       27
+      ],
+      "count": 13,
+      "directions": {
+       "27->19": 13
+      }
+     },
+     {
+      "nodes": [
+       38,
+       49
+      ],
+      "count": 13,
+      "directions": {
+       "38->49": 13
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 13,
+      "directions": {
+       "44->50": 6,
+       "50->44": 7
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 12,
+      "directions": {
+       "1->4": 12
+      }
+     },
+     {
+      "nodes": [
+       43,
+       49
+      ],
+      "count": 11,
+      "directions": {
+       "43->49": 4,
+       "49->43": 7
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp43_left",
+      "truth": 29,
+      "pred": 61,
+      "hop": 4,
+      "err_m": 10.7,
+      "conf": 0.89,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.9,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.94,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp26_right",
+      "truth": 43,
+      "pred": 42,
+      "hop": 3,
+      "err_m": 8.3,
+      "conf": 0.63,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp31_right",
+      "truth": 51,
+      "pred": 3,
+      "hop": 8,
+      "err_m": 7.2,
+      "conf": 0.78,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp2_right",
+      "truth": 25,
+      "pred": 46,
+      "hop": 3,
+      "err_m": 5.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp2_right",
+      "truth": 25,
+      "pred": 46,
+      "hop": 3,
+      "err_m": 5.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp3_left",
+      "truth": 25,
+      "pred": 37,
+      "hop": 6,
+      "err_m": 4.1,
+      "conf": 0.69,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "dino_only+sim1": {
+   "metrics": {
+    "n": 1128,
+    "top1": 64.7,
+    "top5": 99.0,
+    "within_1_hop": 92.4,
+    "error_m": {
+     "mean": 1.99,
+     "median": 1.7
+    },
+    "estimated_xy_error_m": {
+     "mean": 1.91,
+     "median": 1.27
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 64.7,
+      "within_1_hop_when_confident": 92.4
+     },
+     ">=0.6": {
+      "coverage": 96.0,
+      "n": 1083,
+      "top1_when_confident": 65.5,
+      "within_1_hop_when_confident": 92.4
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 64.8
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 38.6,
+     "n_correct_node": 730,
+     "within_45deg_on_correct_node": 38.8
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 67.2,
+      "within_1_hop": 93.5
+     },
+     "between": {
+      "n": 348,
+      "top1": 59.2,
+      "within_1_hop": 89.9
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 64.7,
+      "any_top1": 96.5,
+      "most_confident_top1": 63.1,
+      "most_confident_within_1_hop": 92.6
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 67.2,
+      "any_top1": 95.4,
+      "most_confident_top1": 69.2,
+      "most_confident_within_1_hop": 94.9
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 59.2,
+      "any_top1": 98.9,
+      "most_confident_top1": 49.4,
+      "most_confident_within_1_hop": 87.4
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 398,
+    "kind": {
+     "far (≥3 hops)": 38,
+     "neighbour (1 hop)": 312,
+     "2 hops": 48
+    },
+    "truth_in_top5": 387,
+    "between_nodes": 142,
+    "occluded": 5,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 18,
+      "directions": {
+       "57->61": 6,
+       "61->57": 12
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 17,
+      "directions": {
+       "38->42": 5,
+       "42->38": 12
+      }
+     },
+     {
+      "nodes": [
+       19,
+       27
+      ],
+      "count": 15,
+      "directions": {
+       "27->19": 15
+      }
+     },
+     {
+      "nodes": [
+       5,
+       7
+      ],
+      "count": 14,
+      "directions": {
+       "5->7": 9,
+       "7->5": 5
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 14,
+      "directions": {
+       "21->30": 2,
+       "30->21": 12
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 12,
+      "directions": {
+       "1->4": 12
+      }
+     },
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 11,
+      "directions": {
+       "27->41": 2,
+       "41->27": 9
+      }
+     },
+     {
+      "nodes": [
+       40,
+       44
+      ],
+      "count": 10,
+      "directions": {
+       "40->44": 1,
+       "44->40": 9
+      }
+     },
+     {
+      "nodes": [
+       43,
+       49
+      ],
+      "count": 9,
+      "directions": {
+       "43->49": 4,
+       "49->43": 5
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 9,
+      "directions": {
+       "44->50": 5,
+       "50->44": 4
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp55_left",
+      "truth": 63,
+      "pred": 53,
+      "hop": 3,
+      "err_m": 11.8,
+      "conf": 0.93,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp43_left",
+      "truth": 29,
+      "pred": 61,
+      "hop": 4,
+      "err_m": 10.7,
+      "conf": 0.89,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.9,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.94,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp31_right",
+      "truth": 51,
+      "pred": 3,
+      "hop": 8,
+      "err_m": 7.2,
+      "conf": 0.78,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp8_left",
+      "truth": 27,
+      "pred": 47,
+      "hop": 3,
+      "err_m": 5.5,
+      "conf": 0.76,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp3_left",
+      "truth": 25,
+      "pred": 27,
+      "hop": 5,
+      "err_m": 5.3,
+      "conf": 0.44,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp3_left",
+      "truth": 25,
+      "pred": 27,
+      "hop": 5,
+      "err_m": 5.3,
+      "conf": 0.52,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "prod+sim2": {
+   "metrics": {
+    "n": 1128,
+    "top1": 47.8,
+    "top5": 88.7,
+    "within_1_hop": 81.5,
+    "error_m": {
+     "mean": 3.06,
+     "median": 2.85
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.95,
+     "median": 2.54
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 47.8,
+      "within_1_hop_when_confident": 81.5
+     },
+     ">=0.6": {
+      "coverage": 94.3,
+      "n": 1064,
+      "top1_when_confident": 48.5,
+      "within_1_hop_when_confident": 82.1
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 47.7
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 38.1,
+     "n_correct_node": 539,
+     "within_45deg_on_correct_node": 41.2
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 51.0,
+      "within_1_hop": 85.6
+     },
+     "between": {
+      "n": 348,
+      "top1": 40.5,
+      "within_1_hop": 72.1
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 47.8,
+      "any_top1": 89.0,
+      "most_confident_top1": 52.5,
+      "most_confident_within_1_hop": 84.8
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 51.0,
+      "any_top1": 90.3,
+      "most_confident_top1": 61.5,
+      "most_confident_within_1_hop": 90.3
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 40.5,
+      "any_top1": 86.2,
+      "most_confident_top1": 32.2,
+      "most_confident_within_1_hop": 72.4
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 589,
+    "kind": {
+     "neighbour (1 hop)": 380,
+     "2 hops": 126,
+     "far (≥3 hops)": 83
+    },
+    "truth_in_top5": 461,
+    "between_nodes": 207,
+    "occluded": 5,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 17,
+      "directions": {
+       "57->61": 6,
+       "61->57": 11
+      }
+     },
+     {
+      "nodes": [
+       38,
+       49
+      ],
+      "count": 16,
+      "directions": {
+       "38->49": 14,
+       "49->38": 2
+      }
+     },
+     {
+      "nodes": [
+       43,
+       49
+      ],
+      "count": 15,
+      "directions": {
+       "43->49": 3,
+       "49->43": 12
+      }
+     },
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 14,
+      "directions": {
+       "27->41": 3,
+       "41->27": 11
+      }
+     },
+     {
+      "nodes": [
+       5,
+       23
+      ],
+      "count": 14,
+      "directions": {
+       "23->5": 14
+      }
+     },
+     {
+      "nodes": [
+       43,
+       50
+      ],
+      "count": 14,
+      "directions": {
+       "43->50": 6,
+       "50->43": 8
+      }
+     },
+     {
+      "nodes": [
+       5,
+       7
+      ],
+      "count": 14,
+      "directions": {
+       "5->7": 9,
+       "7->5": 5
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 14,
+      "directions": {
+       "1->4": 14
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 13,
+      "directions": {
+       "38->42": 5,
+       "42->38": 8
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 13,
+      "directions": {
+       "21->30": 7,
+       "30->21": 6
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "2/wp58_right",
+      "truth": 16,
+      "pred": 54,
+      "hop": 6,
+      "err_m": 20.3,
+      "conf": 0.89,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp58_right",
+      "truth": 16,
+      "pred": 54,
+      "hop": 6,
+      "err_m": 20.3,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp49_right",
+      "truth": 50,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.8,
+      "conf": 0.97,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_right",
+      "truth": 43,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_right",
+      "truth": 43,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.6,
+      "conf": 0.66,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp26_right",
+      "truth": 43,
+      "pred": 25,
+      "hop": 7,
+      "err_m": 13.7,
+      "conf": 0.97,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp26_right",
+      "truth": 43,
+      "pred": 25,
+      "hop": 7,
+      "err_m": 13.7,
+      "conf": 0.97,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 55,
+      "hop": 4,
+      "err_m": 13.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp31_right",
+      "truth": 51,
+      "pred": 41,
+      "hop": 5,
+      "err_m": 13.2,
+      "conf": 0.57,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp36_front",
+      "truth": 50,
+      "pred": 21,
+      "hop": 4,
+      "err_m": 13.1,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp26_right",
+      "truth": 43,
+      "pred": 57,
+      "hop": 4,
+      "err_m": 13.0,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp28_left",
+      "truth": 43,
+      "pred": 64,
+      "hop": 11,
+      "err_m": 12.9,
+      "conf": 0.97,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_left",
+      "truth": 43,
+      "pred": 64,
+      "hop": 11,
+      "err_m": 12.9,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_left",
+      "truth": 43,
+      "pred": 64,
+      "hop": 11,
+      "err_m": 12.9,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp16_left",
+      "truth": 38,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 12.8,
+      "conf": 0.99,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "dino_only+sim2": {
+   "metrics": {
+    "n": 1128,
+    "top1": 49.4,
+    "top5": 89.2,
+    "within_1_hop": 82.2,
+    "error_m": {
+     "mean": 2.93,
+     "median": 2.8
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.82,
+     "median": 2.38
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 49.4,
+      "within_1_hop_when_confident": 82.2
+     },
+     ">=0.6": {
+      "coverage": 91.7,
+      "n": 1034,
+      "top1_when_confident": 49.8,
+      "within_1_hop_when_confident": 82.8
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 49.4
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 37.6,
+     "n_correct_node": 557,
+     "within_45deg_on_correct_node": 41.1
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 52.8,
+      "within_1_hop": 86.9
+     },
+     "between": {
+      "n": 348,
+      "top1": 41.7,
+      "within_1_hop": 71.6
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 49.4,
+      "any_top1": 88.3,
+      "most_confident_top1": 50.7,
+      "most_confident_within_1_hop": 82.6
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 52.8,
+      "any_top1": 86.7,
+      "most_confident_top1": 63.6,
+      "most_confident_within_1_hop": 92.3
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 41.7,
+      "any_top1": 92.0,
+      "most_confident_top1": 21.8,
+      "most_confident_within_1_hop": 60.9
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 571,
+    "kind": {
+     "neighbour (1 hop)": 370,
+     "far (≥3 hops)": 84,
+     "2 hops": 117
+    },
+    "truth_in_top5": 449,
+    "between_nodes": 203,
+    "occluded": 6,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       43,
+       49
+      ],
+      "count": 16,
+      "directions": {
+       "43->49": 1,
+       "49->43": 15
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 16,
+      "directions": {
+       "21->30": 5,
+       "30->21": 11
+      }
+     },
+     {
+      "nodes": [
+       5,
+       7
+      ],
+      "count": 15,
+      "directions": {
+       "5->7": 9,
+       "7->5": 6
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 15,
+      "directions": {
+       "1->4": 15
+      }
+     },
+     {
+      "nodes": [
+       19,
+       27
+      ],
+      "count": 13,
+      "directions": {
+       "27->19": 13
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 13,
+      "directions": {
+       "38->42": 3,
+       "42->38": 10
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 13,
+      "directions": {
+       "57->61": 6,
+       "61->57": 7
+      }
+     },
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 12,
+      "directions": {
+       "27->41": 3,
+       "41->27": 9
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 12,
+      "directions": {
+       "21->4": 12
+      }
+     },
+     {
+      "nodes": [
+       38,
+       49
+      ],
+      "count": 11,
+      "directions": {
+       "38->49": 9,
+       "49->38": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "2/wp58_right",
+      "truth": 16,
+      "pred": 54,
+      "hop": 6,
+      "err_m": 20.3,
+      "conf": 0.89,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp58_right",
+      "truth": 16,
+      "pred": 54,
+      "hop": 6,
+      "err_m": 20.3,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp49_right",
+      "truth": 50,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.8,
+      "conf": 0.97,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_right",
+      "truth": 43,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_right",
+      "truth": 43,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.6,
+      "conf": 0.73,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_left",
+      "truth": 43,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 55,
+      "hop": 4,
+      "err_m": 13.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp31_right",
+      "truth": 51,
+      "pred": 41,
+      "hop": 5,
+      "err_m": 13.2,
+      "conf": 0.57,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp28_left",
+      "truth": 43,
+      "pred": 14,
+      "hop": 11,
+      "err_m": 12.9,
+      "conf": 0.98,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_left",
+      "truth": 43,
+      "pred": 14,
+      "hop": 11,
+      "err_m": 12.9,
+      "conf": 0.52,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp16_left",
+      "truth": 38,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 12.8,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp16_left",
+      "truth": 38,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 12.8,
+      "conf": 0.62,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp16_left",
+      "truth": 38,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 12.8,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp34_right",
+      "truth": 7,
+      "pred": 14,
+      "hop": 11,
+      "err_m": 12.7,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 57,
+      "hop": 3,
+      "err_m": 12.5,
+      "conf": 1.0,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "prod+sim4": {
+   "metrics": {
+    "n": 1128,
+    "top1": 38.3,
+    "top5": 73.4,
+    "within_1_hop": 68.5,
+    "error_m": {
+     "mean": 4.96,
+     "median": 3.5
+    },
+    "estimated_xy_error_m": {
+     "mean": 4.8,
+     "median": 3.47
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 38.3,
+      "within_1_hop_when_confident": 68.5
+     },
+     ">=0.6": {
+      "coverage": 95.7,
+      "n": 1080,
+      "top1_when_confident": 39.1,
+      "within_1_hop_when_confident": 69.3
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 38.4
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 38.9,
+     "n_correct_node": 432,
+     "within_45deg_on_correct_node": 42.1
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 42.2,
+      "within_1_hop": 74.9
+     },
+     "between": {
+      "n": 348,
+      "top1": 29.6,
+      "within_1_hop": 54.3
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 38.3,
+      "any_top1": 82.3,
+      "most_confident_top1": 43.3,
+      "most_confident_within_1_hop": 72.0
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 42.2,
+      "any_top1": 84.1,
+      "most_confident_top1": 53.3,
+      "most_confident_within_1_hop": 80.5
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 29.6,
+      "any_top1": 78.2,
+      "most_confident_top1": 20.7,
+      "most_confident_within_1_hop": 52.9
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 696,
+    "kind": {
+     "neighbour (1 hop)": 341,
+     "far (≥3 hops)": 200,
+     "2 hops": 155
+    },
+    "truth_in_top5": 396,
+    "between_nodes": 245,
+    "occluded": 9,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 15,
+      "directions": {
+       "27->41": 3,
+       "41->27": 12
+      }
+     },
+     {
+      "nodes": [
+       38,
+       49
+      ],
+      "count": 15,
+      "directions": {
+       "38->49": 15
+      }
+     },
+     {
+      "nodes": [
+       5,
+       23
+      ],
+      "count": 15,
+      "directions": {
+       "23->5": 15
+      }
+     },
+     {
+      "nodes": [
+       43,
+       50
+      ],
+      "count": 15,
+      "directions": {
+       "43->50": 9,
+       "50->43": 6
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 15,
+      "directions": {
+       "57->61": 6,
+       "61->57": 9
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 13,
+      "directions": {
+       "1->4": 13
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 13,
+      "directions": {
+       "21->4": 13
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 12,
+      "directions": {
+       "38->42": 3,
+       "42->38": 9
+      }
+     },
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 12,
+      "directions": {
+       "30->40": 6,
+       "40->30": 6
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 12,
+      "directions": {
+       "21->30": 6,
+       "30->21": 6
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.97,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.56,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.92,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 1.0,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "dino_only+sim4": {
+   "metrics": {
+    "n": 1128,
+    "top1": 37.4,
+    "top5": 73.2,
+    "within_1_hop": 66.6,
+    "error_m": {
+     "mean": 4.91,
+     "median": 3.5
+    },
+    "estimated_xy_error_m": {
+     "mean": 4.66,
+     "median": 3.27
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 37.4,
+      "within_1_hop_when_confident": 66.6
+     },
+     ">=0.6": {
+      "coverage": 93.6,
+      "n": 1056,
+      "top1_when_confident": 38.4,
+      "within_1_hop_when_confident": 67.2
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 37.5
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 36.5,
+     "n_correct_node": 422,
+     "within_45deg_on_correct_node": 42.2
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 40.8,
+      "within_1_hop": 72.7
+     },
+     "between": {
+      "n": 348,
+      "top1": 29.9,
+      "within_1_hop": 52.9
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 37.4,
+      "any_top1": 77.3,
+      "most_confident_top1": 44.7,
+      "most_confident_within_1_hop": 71.6
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 40.8,
+      "any_top1": 76.9,
+      "most_confident_top1": 55.4,
+      "most_confident_within_1_hop": 82.1
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 29.9,
+      "any_top1": 78.2,
+      "most_confident_top1": 20.7,
+      "most_confident_within_1_hop": 48.3
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 706,
+    "kind": {
+     "far (≥3 hops)": 216,
+     "neighbour (1 hop)": 329,
+     "2 hops": 161
+    },
+    "truth_in_top5": 404,
+    "between_nodes": 244,
+    "occluded": 9,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 18,
+      "directions": {
+       "21->30": 6,
+       "30->21": 12
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 15,
+      "directions": {
+       "38->42": 3,
+       "42->38": 12
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 13,
+      "directions": {
+       "1->4": 13
+      }
+     },
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 12,
+      "directions": {
+       "27->41": 3,
+       "41->27": 9
+      }
+     },
+     {
+      "nodes": [
+       43,
+       49
+      ],
+      "count": 12,
+      "directions": {
+       "49->43": 12
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 12,
+      "directions": {
+       "44->50": 4,
+       "50->44": 8
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 12,
+      "directions": {
+       "57->61": 6,
+       "61->57": 6
+      }
+     },
+     {
+      "nodes": [
+       19,
+       27
+      ],
+      "count": 11,
+      "directions": {
+       "27->19": 11
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 10,
+      "directions": {
+       "21->4": 10
+      }
+     },
+     {
+      "nodes": [
+       25,
+       37
+      ],
+      "count": 9,
+      "directions": {
+       "25->37": 9
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.92,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.56,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.92,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.98,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 0.91,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 1.0,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "prod+sim8": {
+   "metrics": {
+    "n": 1128,
+    "top1": 36.8,
+    "top5": 68.4,
+    "within_1_hop": 65.2,
+    "error_m": {
+     "mean": 5.65,
+     "median": 3.69
+    },
+    "estimated_xy_error_m": {
+     "mean": 5.54,
+     "median": 3.64
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 36.8,
+      "within_1_hop_when_confident": 65.2
+     },
+     ">=0.6": {
+      "coverage": 96.2,
+      "n": 1085,
+      "top1_when_confident": 37.5,
+      "within_1_hop_when_confident": 65.3
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 37.0
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 38.1,
+     "n_correct_node": 415,
+     "within_45deg_on_correct_node": 41.7
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 40.9,
+      "within_1_hop": 71.9
+     },
+     "between": {
+      "n": 348,
+      "top1": 27.6,
+      "within_1_hop": 50.0
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 36.8,
+      "any_top1": 80.9,
+      "most_confident_top1": 43.6,
+      "most_confident_within_1_hop": 68.4
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 40.9,
+      "any_top1": 83.6,
+      "most_confident_top1": 51.8,
+      "most_confident_within_1_hop": 77.9
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 27.6,
+      "any_top1": 74.7,
+      "most_confident_top1": 25.3,
+      "most_confident_within_1_hop": 47.1
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 713,
+    "kind": {
+     "neighbour (1 hop)": 320,
+     "far (≥3 hops)": 243,
+     "2 hops": 150
+    },
+    "truth_in_top5": 356,
+    "between_nodes": 252,
+    "occluded": 10,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 15,
+      "directions": {
+       "27->41": 3,
+       "41->27": 12
+      }
+     },
+     {
+      "nodes": [
+       38,
+       49
+      ],
+      "count": 15,
+      "directions": {
+       "38->49": 15
+      }
+     },
+     {
+      "nodes": [
+       5,
+       23
+      ],
+      "count": 15,
+      "directions": {
+       "23->5": 15
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 15,
+      "directions": {
+       "57->61": 6,
+       "61->57": 9
+      }
+     },
+     {
+      "nodes": [
+       43,
+       50
+      ],
+      "count": 13,
+      "directions": {
+       "43->50": 7,
+       "50->43": 6
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 13,
+      "directions": {
+       "1->4": 13
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 12,
+      "directions": {
+       "38->42": 3,
+       "42->38": 9
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 12,
+      "directions": {
+       "21->30": 6,
+       "30->21": 6
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 12,
+      "directions": {
+       "21->4": 12
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 9,
+      "directions": {
+       "64->65": 9
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "dino_only+sim8": {
+   "metrics": {
+    "n": 1128,
+    "top1": 35.3,
+    "top5": 66.8,
+    "within_1_hop": 62.0,
+    "error_m": {
+     "mean": 5.97,
+     "median": 4.0
+    },
+    "estimated_xy_error_m": {
+     "mean": 5.75,
+     "median": 3.85
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 35.3,
+      "within_1_hop_when_confident": 62.0
+     },
+     ">=0.6": {
+      "coverage": 94.6,
+      "n": 1067,
+      "top1_when_confident": 36.5,
+      "within_1_hop_when_confident": 63.1
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 35.5
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 36.1,
+     "n_correct_node": 398,
+     "within_45deg_on_correct_node": 43.2
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 39.0,
+      "within_1_hop": 68.5
+     },
+     "between": {
+      "n": 348,
+      "top1": 27.0,
+      "within_1_hop": 47.4
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 35.3,
+      "any_top1": 73.8,
+      "most_confident_top1": 42.9,
+      "most_confident_within_1_hop": 67.7
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 39.0,
+      "any_top1": 75.4,
+      "most_confident_top1": 53.3,
+      "most_confident_within_1_hop": 79.0
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 27.0,
+      "any_top1": 70.1,
+      "most_confident_top1": 19.5,
+      "most_confident_within_1_hop": 42.5
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 730,
+    "kind": {
+     "far (≥3 hops)": 287,
+     "neighbour (1 hop)": 301,
+     "2 hops": 142
+    },
+    "truth_in_top5": 355,
+    "between_nodes": 254,
+    "occluded": 10,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 16,
+      "directions": {
+       "21->30": 6,
+       "30->21": 10
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 15,
+      "directions": {
+       "38->42": 3,
+       "42->38": 12
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 13,
+      "directions": {
+       "44->50": 6,
+       "50->44": 7
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 13,
+      "directions": {
+       "1->4": 13
+      }
+     },
+     {
+      "nodes": [
+       27,
+       41
+      ],
+      "count": 12,
+      "directions": {
+       "27->41": 3,
+       "41->27": 9
+      }
+     },
+     {
+      "nodes": [
+       43,
+       49
+      ],
+      "count": 11,
+      "directions": {
+       "49->43": 11
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 10,
+      "directions": {
+       "21->4": 10
+      }
+     },
+     {
+      "nodes": [
+       25,
+       37
+      ],
+      "count": 9,
+      "directions": {
+       "25->37": 9
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 9,
+      "directions": {
+       "64->65": 9
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 9,
+      "directions": {
+       "56->58": 6,
+       "58->56": 3
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 16,
+      "hop": 12,
+      "err_m": 38.7,
+      "conf": 0.92,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 16,
+      "hop": 12,
+      "err_m": 38.7,
+      "conf": 0.9,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 16,
+      "hop": 12,
+      "err_m": 38.7,
+      "conf": 0.97,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp60_left",
+      "truth": 32,
+      "pred": 60,
+      "hop": 12,
+      "err_m": 36.5,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp60_left",
+      "truth": 32,
+      "pred": 60,
+      "hop": 12,
+      "err_m": 36.5,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 1,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 44,
+      "pred": 60,
+      "hop": 8,
+      "err_m": 27.5,
+      "conf": 0.82,
+      "condition": "between"
+     }
+    ]
+   }
+  }
+ },
+ "grid": {
+  "prod": {
+   "at_node": {
+    "none": {
+     "n": 260,
+     "top1": 41.2,
+     "within_1_hop": 71.5,
+     "error_m_median": 2.01,
+     "estimated_xy_error_m_median": 2.6
+    },
+    "replay": {
+     "n": 260,
+     "top1": 52.7,
+     "within_1_hop": 89.2,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.54
+    },
+    "sim1": {
+     "n": 780,
+     "top1": 63.1,
+     "within_1_hop": 92.8,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.07
+    },
+    "sim2": {
+     "n": 780,
+     "top1": 51.0,
+     "within_1_hop": 85.6,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.91
+    },
+    "sim4": {
+     "n": 780,
+     "top1": 42.2,
+     "within_1_hop": 74.9,
+     "error_m_median": 2.0,
+     "estimated_xy_error_m_median": 2.0
+    },
+    "sim8": {
+     "n": 780,
+     "top1": 40.9,
+     "within_1_hop": 71.9,
+     "error_m_median": 2.01,
+     "estimated_xy_error_m_median": 2.01
+    }
+   },
+   "between": {
+    "none": {
+     "n": 116,
+     "top1": 26.7,
+     "within_1_hop": 49.1,
+     "error_m_median": 6.31,
+     "estimated_xy_error_m_median": 5.91
+    },
+    "replay": {
+     "n": 116,
+     "top1": 49.1,
+     "within_1_hop": 82.8,
+     "error_m_median": 4.95,
+     "estimated_xy_error_m_median": 4.55
+    },
+    "sim1": {
+     "n": 348,
+     "top1": 54.6,
+     "within_1_hop": 89.7,
+     "error_m_median": 4.9,
+     "estimated_xy_error_m_median": 4.41
+    },
+    "sim2": {
+     "n": 348,
+     "top1": 40.5,
+     "within_1_hop": 72.1,
+     "error_m_median": 5.0,
+     "estimated_xy_error_m_median": 4.95
+    },
+    "sim4": {
+     "n": 348,
+     "top1": 29.6,
+     "within_1_hop": 54.3,
+     "error_m_median": 5.3,
+     "estimated_xy_error_m_median": 5.31
+    },
+    "sim8": {
+     "n": 348,
+     "top1": 27.6,
+     "within_1_hop": 50.0,
+     "error_m_median": 5.81,
+     "estimated_xy_error_m_median": 6.32
+    }
+   }
+  },
+  "dino_only": {
+   "at_node": {
+    "none": {
+     "n": 260,
+     "top1": 38.5,
+     "within_1_hop": 66.5,
+     "error_m_median": 2.25,
+     "estimated_xy_error_m_median": 2.95
+    },
+    "replay": {
+     "n": 260,
+     "top1": 52.3,
+     "within_1_hop": 90.0,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.82
+    },
+    "sim1": {
+     "n": 780,
+     "top1": 67.2,
+     "within_1_hop": 93.5,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.03
+    },
+    "sim2": {
+     "n": 780,
+     "top1": 52.8,
+     "within_1_hop": 86.9,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.96
+    },
+    "sim4": {
+     "n": 780,
+     "top1": 40.8,
+     "within_1_hop": 72.7,
+     "error_m_median": 2.0,
+     "estimated_xy_error_m_median": 2.0
+    },
+    "sim8": {
+     "n": 780,
+     "top1": 39.0,
+     "within_1_hop": 68.5,
+     "error_m_median": 2.17,
+     "estimated_xy_error_m_median": 2.22
+    }
+   },
+   "between": {
+    "none": {
+     "n": 116,
+     "top1": 25.0,
+     "within_1_hop": 45.7,
+     "error_m_median": 7.81,
+     "estimated_xy_error_m_median": 7.1
+    },
+    "replay": {
+     "n": 116,
+     "top1": 49.1,
+     "within_1_hop": 81.9,
+     "error_m_median": 4.95,
+     "estimated_xy_error_m_median": 4.41
+    },
+    "sim1": {
+     "n": 348,
+     "top1": 59.2,
+     "within_1_hop": 89.9,
+     "error_m_median": 4.82,
+     "estimated_xy_error_m_median": 4.24
+    },
+    "sim2": {
+     "n": 348,
+     "top1": 41.7,
+     "within_1_hop": 71.6,
+     "error_m_median": 5.0,
+     "estimated_xy_error_m_median": 4.95
+    },
+    "sim4": {
+     "n": 348,
+     "top1": 29.9,
+     "within_1_hop": 52.9,
+     "error_m_median": 5.59,
+     "estimated_xy_error_m_median": 5.59
+    },
+    "sim8": {
+     "n": 348,
+     "top1": 27.0,
+     "within_1_hop": 47.4,
+     "error_m_median": 6.98,
+     "estimated_xy_error_m_median": 6.98
+    }
+   }
+  }
+ },
+ "paired": {
+  "prod vs prod+replay": {
+   "all": {
+    "both": 129,
+    "only_first": 9,
+    "only_second": 65,
+    "neither": 173
+   },
+   "at_node": {
+    "both": 100,
+    "only_first": 7,
+    "only_second": 37,
+    "neither": 116
+   },
+   "between": {
+    "both": 29,
+    "only_first": 2,
+    "only_second": 28,
+    "neither": 57
+   }
+  },
+  "dino_only vs dino_only+replay": {
+   "all": {
+    "both": 118,
+    "only_first": 11,
+    "only_second": 75,
+    "neither": 172
+   },
+   "at_node": {
+    "both": 91,
+    "only_first": 9,
+    "only_second": 45,
+    "neither": 115
+   },
+   "between": {
+    "both": 27,
+    "only_first": 2,
+    "only_second": 30,
+    "neither": 57
+   }
+  }
+ },
+ "notes": [
+  "感知＝伺服器模式 B（部署中的 .env：PERCEPTION_ENABLED=0、OCR_ENABLED=0）：三階段 VLM（gpt-5.4-mini），目標用中性的「定位」；每張照片只問一次並快取",
+  "答案＝拍照前設的點位標記（eval/data/lab1019_labels.csv）；中點在兩端任一節點都算對，誤差量到中點本身",
+  "+replay：手機 MapPositionEstimator 的 Python 版重播 Sensor Lab 的原始 PDR（入口對齊、每點拍完後用「正確位置」修正一次＝oracle），送出的 map_x/y、dist_since_fix、fix_node 和導航模式相同",
+  "朝向標註＝拍照當下 cal_yaw 經同一個估計器轉成地圖方向（入口面向賣場＝0°），是推算值",
+  "+simσ：手機位置＝真實位置＋σ 公尺的高斯誤差（每點 3 次平均），dist_since_fix 設成讓伺服器的 σ 等於該值，不給 fix_node",
+  "位置相同的兩個節點（9 和 24）互相算對"
+ ],
+ "detail_file": "image_only_lab1019_vlm_photos.jsonl"
+}

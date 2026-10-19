@@ -269,7 +269,15 @@ def _load_json(path):
 def _save_json(path, data):
     tmp = Path(str(path) + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            # Windows: the target is briefly open in another process (a reader, antivirus)
+            if attempt == 19:
+                raise
+            time.sleep(0.25)
 
 
 def preprocess(item, img_dir):

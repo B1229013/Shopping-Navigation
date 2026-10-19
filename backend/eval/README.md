@@ -65,6 +65,23 @@ python -m eval.image_only --set route1 --photos <測試路線1>  # 走道中間�
   換 DINOv2 → `--reembed`；改偵測 → `--redetect`；離線 → `--map snapshot`。
 - 偵測分兩輪跑（先全部 OCR、再全部 GroundingDINO），8 GB 筆電同時載兩個模型會換頁、耗時加倍。
 
+### 帶感測器、Sensor Lab 測試資料
+
+```
+python -m eval.image_only --set lab1019 --data-root <主 checkout>/backend --sim
+```
+
+- `lab1019`：2026-10-19 三趟 Sensor Lab 測試（`output/eval_photos/1019_A7/1,2,3`），94 點（節點 65、中點 29），
+  每點四方向，答案在 `eval/data/lab1019_labels.csv`（拍照前設的點位標記，更正寫在 note 欄）。
+- 同一批照片跑「不帶感測器」與「帶感測器」：
+  - `+replay`：`eval/sensorlab.py` 把手機的 `MapPositionEstimator`（Kotlin 版的單元測試已移植成
+    `eval/tests/test_sensorlab.py`）套在這趟的原始 PDR 上：入口對齊、每點拍完後用正確位置修正一次（oracle），
+    送出的 `map_x/y`、`dist_since_fix`、`fix_node` 和導航模式相同。
+  - `+simσ`（`--sim`）：手機位置 = 真實位置 + σ = 1、2、4、8 m 的高斯誤差。
+- 報表多了「照片類型 × 感測器」表、同一張照片帶／不帶感測器的配對比較、逐點計分（同一點四張只算一個樣本）。
+- `eval/results/image_only_<set>_photos.jsonl`：每張照片一行，含所有偵測物件、OCR 文字、每個參考節點的
+  DINOv2 cosine／物件／OCR／融合分數、走道號碼、伺服器影像證據、重播的手機輸入，以及每個版本的前五名與誤差。
+
 ## Before / after
 
 Keep a table in `docs/superpowers/specs/2026-05-25-navigation-accuracy-design.md`

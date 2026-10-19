@@ -1,11 +1,13 @@
-"""Single-photo localization with NO phone sensors, through the production server path.
+"""Single-photo localization through the production server path, without and with the
+phone's sensors.
 
-  python -m eval.image_only --set 0916|field1017|route1 [--photos DIR] [--data-root DIR]
+  python -m eval.image_only --set 0916|field1017|route1|lab1019 [--photos DIR] [--data-root DIR]
                             [--out DIR] [--cache DIR] [--map neo4j|snapshot] [--limit N]
-                            [--redetect] [--reembed]
+                            [--redetect] [--reembed] [--sim]
 
-Each photo goes through what POST /photo does for localization, minus everything the
-phone adds (no map_x/y, dist_since_fix, fix_node, dino_topk, previous fix, goal):
+Each photo goes through what POST /photo does for localization. Without sensors that is
+everything minus what the phone adds (no map_x/y, dist_since_fix, fix_node, dino_topk,
+previous fix, goal):
 
   resize (exif, ≤1600 px, JPEG 85) → photo_quality.assess_image → EasyOCR →
   GroundingDINO (GENERIC_INDOOR_OBJECTS + OCCLUDER_PROMPTS) → assess_occlusion →
@@ -22,6 +24,11 @@ Variants (same detections, same DINOv2 embedding):
   dino_only  — locate_fusion W_N = W_O = 0 and no aisle signs: DINOv2 alone
   no_objects — W_N = 0 (OCR and aisle signs kept)
   no_text    — W_O = 0 and no aisle signs (objects kept)
+
+With sensors (prod and dino_only again, same photos):
+  +replay    — Sensor Lab sets: the phone inputs eval/sensorlab.replay derives from the
+               walk's own PDR (the app's MapPositionEstimator, oracle fix after each point)
+  +simσ      — --sim: phone position = truth + N(0, σ²), σ = 1, 2, 4, 8 m (any set)
 
 Caches (under --cache, default backend/output/eval/image_only/<set>/): the resized
 photos, perception.json (quality, OCR, GroundingDINO, occlusion, stage times) and
@@ -40,7 +47,15 @@ Data sets (labels in eval/data/, photos under --data-root, default this backend/
   route1     eval/data/route1_labels.csv (between-node photos; estimated labels);
              needs --photos <測試路線1 folder>.
 
-Output: <out>/image_only_<set>.json and .md (default eval/results/).
+  lab1019    376 photos of three Sensor Lab test walks on 2026-10-19 (output/eval_photos/
+             1019_A7/<1,2,3>): 65 node points + 29 midpoints, four directions each;
+             answers in eval/data/lab1019_labels.csv (the marker set before each group).
+
+Output (default eval/results/): image_only_<set>.json and .md (summary), and
+image_only_<set>_photos.jsonl — one line per photo with everything behind its result:
+quality, occlusion, every detection and OCR text, DINOv2 cosine / object / OCR / fused
+score per reference node, aisle-sign numbers, the server's image evidence, the Sensor Lab
+replay inputs, and every variant's posterior top-10, pick, heading and errors.
 """
 from __future__ import annotations
 
@@ -63,9 +78,14 @@ import numpy as np
 
 BACKEND = Path(__file__).resolve().parents[1]
 DATA = Path(__file__).resolve().parent / "data"
-SETS = ("0916", "field1017", "route1")
+LAB_SETS = {   # Sensor Lab test walks: labels CSV, photo folders under --data-root
+    "lab1019": ("lab1019_labels.csv", "output/eval_photos/1019_A7"),
+}
+SETS = ("0916", "field1017", "route1") + tuple(LAB_SETS)
 VARIANTS = ("prod", "dino_only")
 ABLATIONS = ("no_objects", "no_text")    # one of the two extras switched off
+SIM_SIGMAS = (1.0, 2.0, 4.0, 8.0)        # simulated phone position error (m)
+SIM_DRAWS = 3
 CONF_LEVELS = (0.3, 0.6)
 STAGES = ("quality", "ocr", "gdino", "dino", "fusion")
 AT_NODE_M = 1.0          # 0916: test waypoint within this of its node counts as "at node"
@@ -116,11 +136,49 @@ def load_items(name, ref_map, data_root, photos_dir=None):
                               truth=b if (b and f > 0.5) else a, truth_xy=list(t),
                               condition=r.get("condition") or ("between" if b else "at_node"),
                               heading=None, stored=False, meta={"fraction": f}))
+    elif name in LAB_SETS:
+        items = _lab_items(name, ref_map, data_root, xy)
     else:
         raise ValueError(name)
     missing = [it["path"] for it in items if not Path(it["path"]).is_file()]
     if missing:
         sys.exit(f"{len(missing)} photos missing, e.g. {missing[0]} — pass --data-root / --photos")
+    # nodes stored twice at the same spot (9 / 24): either one is the right place
+    for it in items:
+        it["ok"] = sorted({n for n in xy for o in it["ok"] if math.dist(xy[n], xy[o]) < 0.05})
+    return items
+
+
+def _lab_items(name, ref_map, data_root, xy):
+    """Sensor Lab test walks: one item per photo, with what the phone would have sent
+    (eval/sensorlab.replay) under item["sensor"]."""
+    from eval import sensorlab
+    labels_csv, photo_root = LAB_SETS[name]
+    rows = _read_csv(labels_csv)
+    start_node = min(xy, key=lambda n: math.dist(xy[n], sensorlab.START_XY))
+    items = []
+    for folder in sorted({r["folder"] for r in rows}, key=lambda f: (len(f), f)):
+        sess = sensorlab.read_session(data_root / photo_root / folder)
+        pts = []
+        for r in (r for r in rows if r["folder"] == folder):
+            a = int(r["node_a"])
+            b = int(r["node_b"]) if r["node_b"] else None
+            f = float(r["fraction"] or 0) if b else 0.0
+            t = xy[a] if b is None else (xy[a][0] + f * (xy[b][0] - xy[a][0]), xy[a][1] + f * (xy[b][1] - xy[a][1]))
+            truth = b if (b and f > 0.5) else a
+            pts.append((int(r["group"]), list(t), truth, a, b, f, r))
+        phone, info = sensorlab.replay(sess, [(g, t, n) for g, t, n, *_ in pts], start_node)
+        if not info["start_found"]:
+            sys.exit(f"{folder}: no 「入口」 marker — the replay needs the start")
+        for g, t, truth, a, b, f, r in pts:
+            for d, (ms, path) in sorted(sess.photos[g].items(), key=lambda kv: kv[1][0]):
+                ph = phone[(g, d)]
+                items.append(dict(id=f"{folder}/wp{g}_{d}", path=path, ok=[a] + ([b] if b else []), truth=truth,
+                                  truth_xy=t, condition="between" if b else "at_node",
+                                  heading=ph["map_heading"], stored=False, sensor=ph,
+                                  meta={"point": f"{folder}/{g}", "label": r["label"], "direction": d,
+                                        "fraction": f, "note": r.get("note") or "",
+                                        "north_jumps_in_walk": info["north_jumps"]}))
     return items
 
 
@@ -349,8 +407,63 @@ def text_coverage(perc_all, ref_map, place):
     return {"photos": len(perc_all), "with_ocr_text_in_map": tok, "with_aisle_sign_evidence": sign}
 
 
-def localize(srv, place, perc, img_path):
-    """server._run_early_localization with no phone inputs and a fresh session."""
+def evidence_detail(ref_map, perc, q_emb, place):
+    """Every signal behind one photo's image evidence, per reference node: DINOv2 cosine
+    (best directional photo), object score, OCR score, and the prod fused score — the
+    same terms locate_fusion.best_photo_per_node adds up — plus aisle-sign numbers."""
+    from server import aisle_signs, config as C
+    from server import locate_fusion as LF
+    from server.ocr import OCRResult
+    from server.perception import Detection
+    embs = LF._reference_embeddings(ref_map, LF._load_sidecar(C.DINO_SIDECAR_PATH))
+    index = LF._index_for(ref_map, embs)
+    E = index["entries"]
+    labels = [d["label"] for d in perc["detections"]]
+    q_ocr = {LF._norm_ocr(o["text"]) for o in perc["ocr"]} - {""}
+    vis = np.array([float(np.dot(q_emb, e["emb"])) if (q_emb is not None and e["emb"] is not None) else 0.0
+                    for e in E])
+    nod = np.array([LF._node_score(labels, e["labels"]) for e in E])
+    ocr = np.zeros(len(E))
+    for k, e in enumerate(E):
+        shared = q_ocr & e["ocrset"]
+        if shared:
+            ocr[k] = (sum(index["idf"].get(t, index["def_idf"]) for t in shared)
+                      / sum(index["idf"].get(t, index["def_idf"]) for t in q_ocr))
+    mm = lambda a: (a - a.min()) / (a.max() - a.min()) if a.max() > a.min() else a * 0
+    fused = LF.W_V * mm(vis) + LF.W_N * mm(nod) + LF.W_O * ocr
+    per_node = {}
+    for k, e in enumerate(E):
+        n = per_node.setdefault(e["nid"], {"dino": -9.0, "dino_slot": None, "obj": 0.0, "ocr": 0.0,
+                                           "fused": -9.0, "fused_slot": None, "ocr_shared": []})
+        if vis[k] > n["dino"]:
+            n["dino"], n["dino_slot"] = float(vis[k]), e["slot"]
+        if fused[k] > n["fused"]:
+            n["fused"], n["fused_slot"] = float(fused[k]), e["slot"]
+        n["obj"] = max(n["obj"], float(nod[k]))
+        if ocr[k] > n["ocr"]:
+            n["ocr"], n["ocr_shared"] = float(ocr[k]), sorted(q_ocr & e["ocrset"])
+    w, h = perc["size"]
+    dets = [Detection(label=d["label"], box=d["box"], score=d["score"]) for d in perc["detections"]]
+    items = [{"label": d.label, "box": [d.box[0] / w, d.box[1] / h, d.box[2] / w, d.box[3] / h]} for d in dets]
+    numbers = dict(aisle_signs.numbers_in_items(items))
+    for n_, a in aisle_signs.numbers_from_ocr([OCRResult(o["text"], o["confidence"], o["bbox"]) for o in perc["ocr"]],
+                                              w, h).items():
+        numbers[n_] = max(numbers.get(n_, 0.0), a)
+    aisle = aisle_signs.sign_evidence(numbers, ref_map, place) if numbers else {}
+    r4 = lambda v: round(v, 4) if isinstance(v, float) else v
+    return {
+        "per_node": {str(nid): {k: r4(v) for k, v in d.items()} for nid, d in sorted(per_node.items())},
+        "dino_top10": [[nid, round(d["dino"], 4), d["dino_slot"]]
+                       for nid, d in sorted(per_node.items(), key=lambda kv: -kv[1]["dino"])[:10]],
+        "aisle_numbers": {str(k): round(v, 4) for k, v in numbers.items()},
+        "aisle_evidence": {str(k): round(v, 4) for k, v in (aisle or {}).items() if v},
+    }
+
+
+def localize(srv, place, perc, img_path, phone=None):
+    """server._run_early_localization with a fresh session. phone = {map_xy, dist_since_fix,
+    fix_node} as the app would send them (None → no sensor input at all); they go through
+    the server's own _phone_localization_inputs, like the /photo form fields."""
     from server import aisle_signs
     from server.ocr import OCRResult
     from server.perception import Detection
@@ -359,13 +472,58 @@ def localize(srv, place, perc, img_path):
     w, h = perc["size"]
     s = SimpleNamespace(place=place, last_corrected_nid=None, last_loc_log=None,
                         user_heading=None, heading_slot=None, heading_confidence=0.0)
-    return srv._run_early_localization(
+    xy = (phone or {}).get("map_xy") or (None, None)
+    inputs = srv._phone_localization_inputs(None, None, xy[0], xy[1], (phone or {}).get("dist_since_fix"),
+                                            (phone or {}).get("fix_node"))
+    loc = srv._run_early_localization(
         s, "image_only", [d.label for d in dets], [o.text for o in ocr],
         detected_items=srv._build_localization_items(dets, ocr, w, h),
         image_path=str(img_path),
         ocr_items=srv._build_ocr_items(ocr, w, h),
         sign_numbers=aisle_signs.numbers_from_ocr(ocr, w, h),
-        dino_sims=None, sensor_pos=None, dist_since_fix=None, fix_node=None, extra_evidence=None)
+        extra_evidence=None, **inputs)
+    return loc, s.last_loc_log
+
+
+def _rounded(x, nd=3):
+    if isinstance(x, float):
+        return round(x, nd)
+    if isinstance(x, dict):
+        return {k: _rounded(v, nd) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_rounded(v, nd) for v in x]
+    return x
+
+
+def sim_phone(item, sigma, draw):
+    """Phone position = truth + N(0, σ²) per axis, one draw per test point (all photos of a
+    point share it); dist_since_fix chosen so the server's sensor_sigma() equals σ; no
+    fix_node (no reachability limit) so only the position error is tested."""
+    from server import config as C
+    key = f"{item['meta'].get('point', item['id'])}|{sigma}|{draw}"
+    rng = np.random.default_rng(int(hashlib.sha1(key.encode()).hexdigest()[:8], 16))
+    dx, dy = rng.normal(0.0, sigma, 2)
+    return {"map_xy": [item["truth_xy"][0] + dx, item["truth_xy"][1] + dy],
+            "dist_since_fix": max(0.0, (sigma - C.LOC_SENSOR_SIGMA0) / C.LOC_DRIFT_RATE), "fix_node": None}
+
+
+class EvidenceMemo:
+    """The server's image evidence depends only on the photo and the fusion weights, not on
+    the phone inputs: compute it once per (photo, weights) when the same photo is localized
+    under several sensor modes. Wraps locate_fusion.server_image_evidence (looked up at
+    call time by server._server_dino_evidence)."""
+
+    def __init__(self, real):
+        self.real, self.memo = real, {}
+
+    def __call__(self, ref_map, image_path, q_labels, q_ocr_tokens, sidecar_path):
+        from server import locate_fusion as LF
+        key = (image_path, LF.W_V, LF.W_N, LF.W_O, tuple(q_labels), tuple(q_ocr_tokens))
+        if key not in self.memo:
+            if len(self.memo) > 64:
+                self.memo.clear()
+            self.memo[key] = self.real(ref_map, image_path, q_labels, q_ocr_tokens, sidecar_path)
+        return self.memo[key]
 
 
 # ── scoring ────────────────────────────────────────────────────────────────
@@ -452,6 +610,64 @@ def summarize(recs):
                                "top1": _pct([r["hit1"] for r in recs if r["condition"] == c]),
                                "within_1_hop": _pct([r["within1"] for r in recs if r["condition"] == c])}
                            for c in conds}
+    out["per_point"] = point_summary(recs)
+    return out
+
+
+def run_key(variant_name, mode):
+    return variant_name if mode == "none" else f"{variant_name}+{mode}"
+
+
+def point_summary(recs):
+    """Several photos per test point (Sensor Lab: four directions) are not independent:
+    score each point once — mean of its photos, any photo right, and the photo the server
+    was most confident about (what a user taking all four would get)."""
+    groups = {}
+    for r in recs:
+        groups.setdefault((r["meta"].get("point", r["id"]), r.get("draw")), []).append(r)
+    if all(len(g) == 1 for g in groups.values()):
+        return None
+    out = {}
+    for cond in [None] + sorted({r["condition"] for r in recs}):
+        gs = [g for g in groups.values() if cond is None or g[0]["condition"] == cond]
+        out[cond or "all"] = {
+            "points": len({k[0] for k, g in groups.items() if cond is None or g[0]["condition"] == cond}),
+            "mean_top1": round(100 * statistics.fmean(sum(r["hit1"] for r in g) / len(g) for g in gs), 1) if gs else None,
+            "any_top1": _pct([any(r["hit1"] for r in g) for g in gs]),
+            "most_confident_top1": _pct([max(g, key=lambda r: r["confidence"])["hit1"] for g in gs]),
+            "most_confident_within_1_hop": _pct([max(g, key=lambda r: r["confidence"])["within1"] for g in gs]),
+        }
+    return out
+
+
+def grid(per_variant, modes):
+    """Photo condition × sensor mode, per image variant (the 2×2 table and its sim columns)."""
+    out = {}
+    for v in VARIANTS:
+        for m in modes:
+            recs = per_variant.get(run_key(v, m))
+            if not recs:
+                continue
+            for cond in sorted({r["condition"] for r in recs}):
+                rs = [r for r in recs if r["condition"] == cond]
+                out.setdefault(v, {}).setdefault(cond, {})[m] = {
+                    "n": len(rs), "top1": _pct([r["hit1"] for r in rs]),
+                    "within_1_hop": _pct([r["within1"] for r in rs]),
+                    "error_m_median": _stats([r["err_m"] for r in rs])["median"],
+                    "estimated_xy_error_m_median": _stats([r["est_err_m"] for r in rs])["median"]}
+    return out
+
+
+def paired(a, b):
+    """Same photos, two settings: how many each gets right that the other does not."""
+    out = {}
+    for cond in [None] + sorted({r["condition"] for r in a}):
+        pairs = [(x, y) for x, y in zip(a, b) if cond is None or x["condition"] == cond]
+        assert all(x["id"] == y["id"] for x, y in pairs)
+        out[cond or "all"] = {"both": sum(x["hit1"] and y["hit1"] for x, y in pairs),
+                              "only_first": sum(x["hit1"] and not y["hit1"] for x, y in pairs),
+                              "only_second": sum(y["hit1"] and not x["hit1"] for x, y in pairs),
+                              "neither": sum(not x["hit1"] and not y["hit1"] for x, y in pairs)}
     return out
 
 
@@ -492,8 +708,10 @@ def _fmt(v, unit=""):
 
 
 def markdown(rep):
-    L = [f"# 單張影像定位基準：{rep['set']}", "",
-         f"- {rep['n_photos']} 張照片，不帶任何感測器（無 map_x/y、dist_since_fix、fix_node、手機 DINOv2、前一次定位）",
+    modes = rep.get("sensor_modes", ["none"])
+    L = [f"# 單張照片定位基準：{rep['set']}", "",
+         f"- {rep['n_photos']} 張照片；版本名稱沒有「+」的不帶任何感測器（無 map_x/y、dist_since_fix、fix_node、"
+         f"手機 DINOv2、前一次定位），「+replay／+simσ」是帶感測器",
          f"- 地圖 `{rep['map']['place']}`：{rep['map']['nodes']} 節點，來源 {rep['map']['source']}，指紋 {rep['map']['fingerprint']}",
          f"- 產生時間 {rep['generated']}；commit {rep['commit'] or '?'}", ""]
     L += ["## 主要指標", "",
@@ -504,6 +722,31 @@ def markdown(rep):
         L.append(f"| {v} | {_fmt(m['top1'], '%')} | {_fmt(m['top5'], '%')} | {_fmt(m['within_1_hop'], '%')} | "
                  f"{_fmt(m['error_m']['mean'])} / {_fmt(m['error_m']['median'])} | "
                  f"{_fmt(m['estimated_xy_error_m']['mean'])} / {_fmt(m['estimated_xy_error_m']['median'])} |")
+    if len(modes) > 1:
+        L += ["", "## 照片類型 × 感測器（Top-1 ／ 1 hop 內 ／ 內插位置誤差中位數）", ""]
+        for v, by_cond in rep["grid"].items():
+            L += [f"**{v}**", "", "| 照片 | " + " | ".join(modes) + " |", "|---|" + "---|" * len(modes)]
+            for cond, cells in by_cond.items():
+                L.append(f"| {cond}（{next(iter(cells.values()))['n']} 張） | " + " | ".join(
+                    (f"{_fmt(c['top1'], '%')} / {_fmt(c['within_1_hop'], '%')} / {_fmt(c['estimated_xy_error_m_median'], ' m')}"
+                     if (c := cells.get(m)) else "–") for m in modes) + " |")
+            L.append("")
+    if rep.get("paired"):
+        L += ["## 同一張照片：不帶 vs 帶感測器（Top-1）", "",
+              "| 比較 | 照片 | 兩者都對 | 只有不帶感測器對 | 只有帶感測器對 | 都錯 |", "|---|---|---|---|---|---|"]
+        for name, by_cond in rep["paired"].items():
+            for cond, c in by_cond.items():
+                L.append(f"| {name} | {cond} | {c['both']} | {c['only_first']} | {c['only_second']} | {c['neither']} |")
+        L.append("")
+    pp = {v: s["metrics"]["per_point"] for v, s in rep["variants"].items() if s["metrics"].get("per_point")}
+    if pp:
+        L += ["## 逐點計分（同一點的照片只算一個樣本）", "",
+              "| 版本 | 照片 | 點數 | 每點平均 Top-1 | 任一張對 | 最有信心那張對 | 最有信心那張 1 hop 內 |", "|---|---|---|---|---|---|---|"]
+        for v, by_cond in pp.items():
+            for cond, c in by_cond.items():
+                L.append(f"| {v} | {cond} | {c['points']} | {_fmt(c['mean_top1'], '%')} | {_fmt(c['any_top1'], '%')} | "
+                         f"{_fmt(c['most_confident_top1'], '%')} | {_fmt(c['most_confident_within_1_hop'], '%')} |")
+        L.append("")
     L += ["", "## 信心校準（信心 = localize 回傳的最佳節點機率）", "",
           "| 版本 | 門檻 | 涵蓋率 | 命中率 (Top-1) | 1 hop 內 |", "|---|---|---|---|---|"]
     for v, s in rep["variants"].items():
@@ -512,12 +755,16 @@ def markdown(rep):
                      f"{_fmt(c['within_1_hop_when_confident'], '%')} |")
     L += ["", "正式伺服器的閘門（品質不佳 / 被遮擋 → 不定位；機率 < CONFIDENT_THRESHOLD → 不給節點）：", ""]
     for v, s in rep["variants"].items():
+        if "+" in v and "replay" not in v:
+            continue
         g = s["metrics"]["production_gate"]
         L.append(f"- {v}：品質退件 {g['rejected_quality']}、遮擋退件 {g['rejected_occlusion']}、低於門檻 "
                  f"{g['below_threshold']}；有回答 {g['answered']} 張（{_fmt(g['coverage'], '%')}），其中正確 "
                  f"{_fmt(g['top1_of_answered'], '%')}")
     L += ["", "## 朝向", ""]
     for v, s in rep["variants"].items():
+        if v not in ("prod", "dino_only", "prod+replay", "dino_only+replay"):
+            continue
         h = s["metrics"]["heading"]
         if not h["labelled"]:
             L.append(f"- {v}：此資料集沒有朝向標註")
@@ -538,6 +785,8 @@ def markdown(rep):
     L += ["", f"文字證據能作用的照片：OCR 字串和地圖完全相同 {tc['with_ocr_text_in_map']}/{tc['photos']}、"
               f"有走道號碼證據 {tc['with_aisle_sign_evidence']}/{tc['photos']}"]
     for v, s in rep["variants"].items():
+        if v not in ("prod", "dino_only", "prod+replay"):
+            continue
         f = s["failures"]
         L += ["", f"## 失敗案例（{v}）", "",
               f"- 錯 {f['n_wrong']} 張：" + "、".join(f"{k} {c}" for k, c in sorted(f["kind"].items())),
@@ -583,6 +832,8 @@ def main(argv=None):
     ap.add_argument("--limit", type=int, help="first N photos only (smoke test)")
     ap.add_argument("--redetect", action="store_true", help="re-run quality / OCR / GroundingDINO")
     ap.add_argument("--reembed", action="store_true", help="re-run DINOv2 on the query photos")
+    ap.add_argument("--sim", action="store_true",
+                    help=f"also localize with a simulated phone position (σ = {', '.join(f'{s:g}' for s in SIM_SIGMAS)} m)")
     args = ap.parse_args(argv)
 
     import logging
@@ -612,40 +863,76 @@ def main(argv=None):
     embed = EmbedCache(cache / "dino.json", dino_embed.embed_image, dino_embed._MODEL_NAME, args.reembed)
     dino_embed.embed_image = embed
 
-    variants = VARIANTS + ABLATIONS
-    per_variant = {v: [] for v in variants}
+    from server import locate_fusion as LF
+    LF.server_image_evidence = EvidenceMemo(LF.server_image_evidence)
+
+    has_pdr = any(it.get("sensor") for it in items)
+    sensor_modes = (["replay"] if has_pdr else []) + ([f"sim{s:g}" for s in SIM_SIGMAS] if args.sim else [])
+    runs = [(v, "none") for v in VARIANTS + ABLATIONS] + [(v, m) for m in sensor_modes for v in VARIANTS]
+    per_variant = {run_key(v, m): [] for v, m in runs}
     times = {k: [] for k in STAGES + ("total",)}
+    detail_path = Path(args.out) / f"image_only_{args.set}{'_limit' + str(args.limit) if args.limit else ''}_photos.jsonl"
+    detail_path.parent.mkdir(parents=True, exist_ok=True)
+    detail_f = open(detail_path, "w", encoding="utf-8")
     t_run = time.perf_counter()
     for i, it in enumerate(items, 1):
         img, p = imgs[it["id"]], perc_all[it["id"]]
         embed.key = it["id"]
-        for v in variants:
-            embed.spent = 0.0
-            t0 = time.perf_counter()
-            with variant(v):
-                loc = localize(srv, C.NEO4J_PLACE, p, img)
-            if loc is None or loc.method != "server_dino+v2":
-                # _run_early_localization logs and swallows its own errors
-                sys.exit(f"{it['id']}: server DINOv2 path not taken "
-                         f"({'failed' if loc is None else loc.method}) — see the log above")
-            t_fusion = time.perf_counter() - t0 - embed.spent
-            rec = score_record(it, loc, ref_map, hops)
-            rec.update(quality_hint=p["quality"]["hint"], occlusion_hint=p["occlusion"]["hint"],
-                       occlusion_fraction=p["occlusion"]["fraction"], n_objects=p["occlusion"]["useful_objects"],
-                       n_ocr=len(p["ocr"]),
-                       rejected="quality" if p["quality"]["hint"] else ("occlusion" if p["occlusion"]["hint"] else None))
-            per_variant[v].append(rec)
-            if v == "prod":
-                tt = dict(p["t"], dino=(embed.data.get(it["id"]) or {}).get("t"), fusion=t_fusion)
-                for k in STAGES:
-                    times[k].append(tt[k])
-                times["total"].append(sum(x for x in tt.values() if x is not None))
-        r = per_variant["prod"][-1]
-        d = per_variant["dino_only"][-1]
-        print(f"[{i:3d}/{len(items)}] {it['id']:<48s} truth {it['truth']:>2} | prod {r['pred']} "
-              f"{'✓' if r['hit1'] else ('~' if r['within1'] else '✗')} {r['confidence']:.2f} | "
-              f"dino {d['pred']} {'✓' if d['hit1'] else ('~' if d['within1'] else '✗')} "
-              f"| {time.perf_counter() - t_run:6.0f}s", file=sys.stderr, flush=True)
+        base = dict(quality_hint=p["quality"]["hint"], occlusion_hint=p["occlusion"]["hint"],
+                    occlusion_fraction=p["occlusion"]["fraction"], n_objects=p["occlusion"]["useful_objects"],
+                    n_ocr=len(p["ocr"]),
+                    rejected="quality" if p["quality"]["hint"] else ("occlusion" if p["occlusion"]["hint"] else None))
+        results = {}
+        for v, m in runs:
+            phones = ([(None, None)] if m == "none" else [(None, it["sensor"])] if m == "replay"
+                      else [(d, sim_phone(it, float(m[3:]), d)) for d in range(SIM_DRAWS)])
+            for draw, phone in phones:
+                embed.spent = 0.0
+                t0 = time.perf_counter()
+                with variant(v):
+                    loc, loc_log = localize(srv, C.NEO4J_PLACE, p, img, phone)
+                if loc is None or loc.method != "server_dino+v2":
+                    # _run_early_localization logs and swallows its own errors
+                    sys.exit(f"{it['id']}: server DINOv2 path not taken "
+                             f"({'failed' if loc is None else loc.method}) — see the log above")
+                t_fusion = time.perf_counter() - t0 - embed.spent
+                rec = score_record(it, loc, ref_map, hops)
+                rec.update(base, mode=m, draw=draw, phone=phone,
+                           sensor_sigma=(loc_log or {}).get("sensor_sigma_m"),
+                           reachable_n=len((loc_log or {}).get("reachable_nodes") or []) or None)
+                per_variant[run_key(v, m)].append(rec)
+                results.setdefault(run_key(v, m), []).append(_rounded(
+                    {k: rec[k] for k in ("pred", "confidence", "answered", "top5", "hit1", "hit5", "hop", "err_m",
+                                         "est_err_m", "slot", "heading_pred", "sensor_sigma", "reachable_n", "draw")}
+                    | {"phone": {k: v_ for k, v_ in (phone or {}).items()
+                                 if k in ("map_xy", "dist_since_fix", "fix_node")} or None,
+                       "estimated_xy": list(loc.estimated_xy) if loc.estimated_xy else None,
+                       "matched_photo": loc.matched_photo}))
+                if (v, m) == ("prod", "none"):
+                    tt = dict(p["t"], dino=(embed.data.get(it["id"]) or {}).get("t"), fusion=t_fusion)
+                    for k in STAGES:
+                        times[k].append(tt[k])
+                    times["total"].append(sum(x for x in tt.values() if x is not None))
+                    image_ev = {str(k): round(float(val), 4) for k, val in (loc.image_evidence or {}).items()}
+        q = embed.data.get(it["id"])
+        detail = evidence_detail(ref_map, p, np.asarray(q["emb"], np.float32) if q else None, C.NEO4J_PLACE)
+        detail_f.write(json.dumps({
+            "id": it["id"], "photo": str(it["path"]), "truth": it["truth"], "ok": it["ok"],
+            "truth_xy": it["truth_xy"], "condition": it["condition"], "heading_label": it["heading"],
+            "meta": it["meta"], "size": p["size"], "quality": p["quality"], "occlusion": p["occlusion"],
+            "detections": p["detections"], "ocr": p["ocr"], "times_s": p["t"] | {"dino": (q or {}).get("t")},
+            "sensor_lab": it.get("sensor"), "server_image_evidence": image_ev, **detail, "results": results,
+        }, ensure_ascii=False) + "\n")
+        r, d = per_variant["prod"][-1], per_variant["dino_only"][-1]
+        mark = lambda x: "✓" if x["hit1"] else ("~" if x["within1"] else "✗")
+        extra = ""
+        if "replay" in sensor_modes:
+            rr = per_variant["prod+replay"][-1]
+            extra = f" | +PDR {rr['pred']} {mark(rr)} {rr['confidence']:.2f}"
+        print(f"[{i:3d}/{len(items)}] {it['id']:<40s} truth {it['truth']:>2} | prod {r['pred']} {mark(r)} "
+              f"{r['confidence']:.2f} | dino {d['pred']} {mark(d)}{extra} | {time.perf_counter() - t_run:6.0f}s",
+              file=sys.stderr, flush=True)
+    detail_f.close()
 
     notes = []
     if args.set == "field1017":
@@ -655,6 +942,14 @@ def main(argv=None):
         notes.append(f"0916 測試點離答案節點 ≤{AT_NODE_M:g} m 算 at_node，否則 between；方向（front/right/…）是測試者自己的相對方向，不能當朝向答案")
     if args.set == "route1":
         notes.append("route1 的位置是從走道號碼牌與地標估計的（未人工確認）；在兩節點之間時 node_a、node_b 都算對")
+    if args.set in LAB_SETS:
+        notes.append("答案＝拍照前設的點位標記（eval/data/" + LAB_SETS[args.set][0] + "）；中點在兩端任一節點都算對，誤差量到中點本身")
+        notes.append("+replay：手機 MapPositionEstimator 的 Python 版重播 Sensor Lab 的原始 PDR（入口對齊、每點拍完後用"
+                     "「正確位置」修正一次＝oracle），送出的 map_x/y、dist_since_fix、fix_node 和導航模式相同")
+        notes.append("朝向標註＝拍照當下 cal_yaw 經同一個估計器轉成地圖方向（入口面向賣場＝0°），是推算值")
+    if args.sim:
+        notes.append(f"+simσ：手機位置＝真實位置＋σ 公尺的高斯誤差（每點 {SIM_DRAWS} 次平均），dist_since_fix 設成讓伺服器的 σ 等於該值，不給 fix_node")
+    notes.append("位置相同的兩個節點（9 和 24）互相算對")
 
     rep = {
         "set": args.set, "n_photos": len(items),
@@ -666,9 +961,13 @@ def main(argv=None):
                    "dino_model": dino_embed._MODEL_NAME, "perception": perception_signatures()},
         "timing_s": {k: _stats(v) for k, v in times.items()},
         "text_coverage": text_coverage({it["id"]: perc_all[it["id"]] for it in items}, ref_map, C.NEO4J_PLACE),
+        "sensor_modes": ["none"] + sensor_modes,
         "variants": {v: {"metrics": summarize(rs), "failures": failures(rs)} for v, rs in per_variant.items()},
+        "grid": grid(per_variant, ["none"] + sensor_modes),
+        "paired": {f"{v} vs {v}+replay": paired(per_variant[v], per_variant[run_key(v, "replay")])
+                   for v in VARIANTS if "replay" in sensor_modes},
         "notes": notes,
-        "per_photo": per_variant,
+        "detail_file": detail_path.name,
     }
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

@@ -54,6 +54,37 @@ def test_score_and_summary():
     assert f["confused_pairs"][0]["nodes"] in ([2, 3], [1, 4])
 
 
+def _rec(id_, point, hit, conf, cond="at_node", draw=None):
+    return {"id": id_, "meta": {"point": point}, "hit1": hit, "within1": hit, "confidence": conf,
+            "condition": cond, "draw": draw, "err_m": 0.0 if hit else 5.0, "est_err_m": 1.0}
+
+
+def test_point_summary_scores_each_point_once():
+    recs = [_rec("a1", "A", True, 0.2), _rec("a2", "A", False, 0.9),   # most confident photo is wrong
+            _rec("b1", "B", True, 0.5), _rec("b2", "B", True, 0.6, ), _rec("c1", "C", False, 0.4, "between")]
+    s = io.point_summary(recs)["all"]
+    assert s["points"] == 3 and s["mean_top1"] == 50.0           # (0.5 + 1 + 0) / 3
+    assert s["any_top1"] == 66.7 and s["most_confident_top1"] == 33.3
+    assert io.point_summary([_rec("x", "X", True, 1.0)]) is None   # one photo per point: nothing to add
+
+
+def test_grid_and_paired():
+    none = [_rec("p1", "A", True, 0.5), _rec("p2", "B", False, 0.5, "between")]
+    rep = [_rec("p1", "A", False, 0.9), _rec("p2", "B", True, 0.9, "between")]
+    g = io.grid({"prod": none, "prod+replay": rep}, ["none", "replay"])
+    assert g["prod"]["at_node"]["none"]["top1"] == 100.0 and g["prod"]["between"]["replay"]["top1"] == 100.0
+    p = io.paired(none, rep)["all"]
+    assert (p["both"], p["only_first"], p["only_second"], p["neither"]) == (0, 1, 1, 0)
+
+
+def test_sim_phone_is_reproducible_and_shared_by_a_point():
+    item = {"id": "1/wp3_front", "meta": {"point": "1/3"}, "truth_xy": [1.0, 2.0]}
+    other = dict(item, id="1/wp3_back")
+    a, b = io.sim_phone(item, 2.0, 0), io.sim_phone(other, 2.0, 0)
+    assert a == b and a != io.sim_phone(item, 2.0, 1)
+    assert a["dist_since_fix"] == 20.0 and a["fix_node"] is None   # σ = 1 + 0.05·d → d = 20 m
+
+
 def test_variant_restores_weights():
     from server import config as C
     from server import locate_fusion as LF

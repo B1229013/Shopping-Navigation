@@ -87,7 +87,9 @@ ABLATIONS = ("no_objects", "no_text")    # one of the two extras switched off
 SIM_SIGMAS = (1.0, 2.0, 4.0, 8.0)        # simulated phone position error (m)
 SIM_DRAWS = 3
 CONF_LEVELS = (0.3, 0.6)
-STAGES = ("quality", "ocr", "gdino", "dino", "fusion")
+STAGES_BY_PERCEPTION = {"gdino": ("quality", "ocr", "gdino", "dino", "fusion"),
+                        "vlm": ("quality", "vlm", "dino", "fusion")}
+VLM_GOAL, VLM_GOAL_OBJECTS = "定位", []   # as eval/real_photos.py: no shopping goal
 AT_NODE_M = 1.0          # 0916: test waypoint within this of its node counts as "at node"
 HEADING_OK_DEG = 45.0
 
@@ -348,6 +350,107 @@ def perceive_all(jobs, cache_path, redetect=False):
     return cache
 
 
+def vlm_signature():
+    from server import config as C, prompts as P
+    text = P.PERCEIVE_PROMPT + P.PERCEIVE_REFINE_PROMPT + P.PERCEIVE_DISTINCTIVE_PROMPT
+    return {"model": C.OPENAI_MODEL, "base_url": C.OPENAI_BASE_URL, "rounds": C.VLM_ROUNDS, "pass3": C.VLM_PASS3,
+            "goal": VLM_GOAL, "goal_objects": VLM_GOAL_OBJECTS,
+            "prompts_sha1": hashlib.sha1(text.encode()).hexdigest()[:12]}
+
+
+def _call_kind(prompt):
+    from server import prompts as P
+    for kind, p in (("pass1", P.PERCEIVE_PROMPT), ("pass2", P.PERCEIVE_REFINE_PROMPT),
+                    ("pass3", P.PERCEIVE_DISTINCTIVE_PROMPT)):
+        if prompt[:40] == p[:40]:
+            return kind
+    return "other"
+
+
+def perceive_all_vlm(jobs, cache_path, srv, redetect=False):
+    """The server's mode B (PERCEPTION_ENABLED=0, OCR_ENABLED=0): quality check, then
+    vlm.perceive_three_pass (or two-pass / multi-round, as config says) on the stored
+    photo, the VLM text turned into detections / OCRResults and _clean_vlm_ocr'd exactly
+    as _handle_photo does. Every VLM call's raw reply, kind (pass1/2/3), time and error is
+    kept, and each photo is cached as soon as it is done — the calls are paid."""
+    from server import config as C, photo_quality, vlm
+    from server.ocr import OCRResult
+    from server.perception import Detection
+    sig = vlm_signature()
+    cache = {} if redetect else _load_json(cache_path)
+    todo = [(k, img) for k, img in jobs if (cache.get(k) or {}).get("vlm_sig") != sig]
+    if not todo:
+        return cache
+    if not C.OPENAI_API_KEY:
+        sys.exit("OPENAI_API_KEY is not set — the VLM path needs it")
+    real = vlm._generate
+    calls = []
+
+    def recorder(prompt, image_b64=None, max_tokens=vlm.DECIDE_MAX_TOKENS):
+        t0 = time.perf_counter()
+        try:
+            text = real(prompt, image_b64=image_b64, max_tokens=max_tokens)
+        except Exception as e:
+            calls.append({"kind": _call_kind(prompt), "s": round(time.perf_counter() - t0, 2), "error": repr(e)[:300]})
+            raise
+        calls.append({"kind": _call_kind(prompt), "s": round(time.perf_counter() - t0, 2), "text": text})
+        return text
+
+    vlm._generate = recorder
+    try:
+        for i, (k, img) in enumerate(todo, 1):
+            from PIL import Image
+            with Image.open(img) as im:
+                w, h = im.size
+            calls.clear()
+            t0 = time.perf_counter()
+            q = photo_quality.assess_image(str(img))
+            t1 = time.perf_counter()
+            if C.VLM_ROUNDS > 1:
+                perc, debug = srv._vlm_perceive_multi_round(image_path=str(img), goal=VLM_GOAL,
+                                                            goal_objects=VLM_GOAL_OBJECTS, img_w=w, img_h=h,
+                                                            num_rounds=C.VLM_ROUNDS)
+            elif C.VLM_PASS3:
+                perc, debug = srv._vlm_perceive_three_pass(image_path=str(img), goal=VLM_GOAL,
+                                                           goal_objects=VLM_GOAL_OBJECTS, img_w=w, img_h=h)
+            else:
+                perc, debug = srv._vlm_perceive_two_pass(image_path=str(img), goal=VLM_GOAL,
+                                                         goal_objects=VLM_GOAL_OBJECTS, img_w=w, img_h=h)
+            t2 = time.perf_counter()
+            if calls and all("error" in c for c in calls):
+                sys.exit(f"{k}: every VLM call failed ({calls[-1]['error']}) — stopped, nothing cached for it")
+            dets = [Detection(label=d.label, box=d.bbox, score=d.score, position=d.position) for d in perc.detections]
+            ocr = srv._clean_vlm_ocr([OCRResult(text=t.text, confidence=t.score, bbox=t.bbox) for t in perc.ocr_texts], h)
+            occ = photo_quality.assess_occlusion(dets, w, h, goals=VLM_GOAL_OBJECTS)
+            cache[k] = {
+                "size": [w, h], "vlm_sig": sig,
+                "quality": {"sharpness": q.sharpness, "brightness": q.brightness, "hint": q.hint},
+                "detections": [{"label": d.label, "box": [float(v) for v in d.box], "score": float(d.score),
+                                "position": d.position} for d in dets],
+                "ocr": [{"text": r.text, "confidence": r.confidence, "bbox": r.bbox} for r in ocr],
+                "ocr_before_clean": len(perc.ocr_texts),
+                "store_zone": perc.store_zone or "", "scene": perc.scene_description,
+                "occlusion": {"fraction": occ.fraction, "useful_objects": occ.useful_objects, "hint": occ.hint},
+                "vlm_passes": debug, "vlm_calls": list(calls),
+                "t": {"quality": t1 - t0, "vlm": t2 - t1},
+            }
+            _save_json(cache_path, cache)
+            kinds = Counter(c["kind"] for c in calls)
+            print(f"  VLM {i}/{len(todo)} {k}: {len(dets)} objects, {len(ocr)} texts, "
+                  f"{len(calls)} calls {dict(kinds)}, {t2 - t1:.1f}s", file=sys.stderr, flush=True)
+    finally:
+        vlm._generate = real
+    return cache
+
+
+def _vlm_call_summary(percs):
+    calls = [c for p in percs for c in p.get("vlm_calls") or []]
+    p3 = sum(bool(((p.get("vlm_passes") or {}).get("pass3") or {}).get("detections")
+                  or ((p.get("vlm_passes") or {}).get("pass3") or {}).get("ocr")) for p in percs)
+    return {"total": len(calls), "by_kind": dict(Counter(c["kind"] for c in calls)),
+            "errors": sum("error" in c for c in calls), "pass3_useful_photos": p3}
+
+
 class EmbedCache:
     """Wraps server.dino_embed.embed_image: the query photo's vector comes from dino.json
     when present, so a fusion-only change doesn't re-run DINOv2."""
@@ -405,6 +508,76 @@ def text_coverage(perc_all, ref_map, place):
                                             *p["size"])
         sign += bool(nums and aisle_signs.sign_evidence(nums, ref_map, place))
     return {"photos": len(perc_all), "with_ocr_text_in_map": tok, "with_aisle_sign_evidence": sign}
+
+
+def live_comparison(items, image_ev):
+    """field1017: the live server logged each photo's image evidence (DINOv2 + objects + OCR
+    + aisle signs, 0..2 per node) in turns.jsonl. Compare it with this run's prod evidence
+    for the same photo: the DINOv2 part is identical, objects / OCR come from a new VLM
+    call (temperature 0.2) and a different goal, so they can differ somewhat."""
+    rows = []
+    turns_cache = {}
+    for it in items:
+        sess = Path(it["path"]).parent.parent
+        if sess not in turns_cache:
+            f = sess / "turns.jsonl"
+            turns_cache[sess] = ([json.loads(l) for l in f.open(encoding="utf-8")] if f.is_file() else [])
+        n = int(Path(it["path"]).stem)
+        turn = next((t for t in turns_cache[sess] if t.get("kind") == "photo"
+                     and (t.get("response") or {}).get("node_id") == n), None)
+        live = ((turn or {}).get("localization") or {}).get("image_evidence")
+        ours = image_ev.get(it["id"])
+        if not live or not ours:
+            continue
+        keys = sorted(set(live) & set(ours), key=int)
+        a = np.array([live[k] for k in keys])
+        b = np.array([ours[k] for k in keys])
+        top_live, top_ours = keys[int(np.argmax(a))], keys[int(np.argmax(b))]
+        rows.append({"id": it["id"], "truth": it["truth"], "pearson_r": round(float(np.corrcoef(a, b)[0, 1]), 3),
+                     "max_abs_diff": round(float(np.abs(a - b).max()), 3), "top_live": int(top_live),
+                     "top_ours": int(top_ours), "same_top": top_live == top_ours,
+                     "live_top5": [int(keys[j]) for j in np.argsort(-a)[:5]],
+                     "ours_top5": [int(keys[j]) for j in np.argsort(-b)[:5]]})
+    if not rows:
+        return None
+    return {"photos": len(rows), "same_top1": sum(r["same_top"] for r in rows),
+            "median_pearson_r": round(statistics.median(r["pearson_r"] for r in rows), 3),
+            "live_top1_correct": sum(r["top_live"] == r["truth"] for r in rows),
+            "ours_top1_correct": sum(r["top_ours"] == r["truth"] for r in rows), "per_photo": rows}
+
+
+def draw_annotations(perception, img, perc, out_dir, item_id, banner):
+    """Annotated photos drawn with the server's own annotator, as _handle_photo saves
+    them: VLM pass1 / pass2 (/ pass3) and the merged result; GroundingDINO: merged only.
+    The merged image's banner carries the localization results. Returns {tag: path}."""
+    from server.annotator import annotate
+    from server.ocr import OCRResult
+    from server.perception import Detection
+    stem = item_id.replace("/", "__").rsplit(".", 1)[0]
+    vlm = perception == "vlm"
+    out = {}
+
+    def draw(tag, dets, ocr, text):
+        path = out_dir / f"{stem}_{tag}.jpg"
+        annotate(str(img), str(path),
+                 [Detection(label=d["label"], box=d["box"], score=d["score"], position=d.get("position"))
+                  for d in dets if d.get("box") and len(d["box"]) == 4],
+                 banner_text=text,
+                 ocr_results=[OCRResult(text=o["text"], confidence=o.get("confidence", o.get("score", 0.5)),
+                                        bbox=o["bbox"]) for o in ocr if o.get("bbox")] or None,
+                 goal_objects=[], region_mode=vlm)
+        out[tag] = str(path)
+
+    if vlm:
+        for tag in ("pass1", "pass2", "pass3"):
+            p = (perc.get("vlm_passes") or {}).get(tag)
+            if p and (p.get("detections") or p.get("ocr")) and not (out_dir / f"{stem}_{tag}.jpg").is_file():
+                draw(tag, p["detections"], p["ocr"],
+                     f"{tag}: {len(p['detections'])} detections, {len(p['ocr'])} OCR")
+            elif (out_dir / f"{stem}_{tag}.jpg").is_file():
+                out[tag] = str(out_dir / f"{stem}_{tag}.jpg")
+    draw("merged", perc["detections"], perc["ocr"], banner)
+    return out
 
 
 def evidence_detail(ref_map, perc, q_emb, place):
@@ -481,7 +654,10 @@ def localize(srv, place, perc, img_path, phone=None):
         image_path=str(img_path),
         ocr_items=srv._build_ocr_items(ocr, w, h),
         sign_numbers=aisle_signs.numbers_from_ocr(ocr, w, h),
-        extra_evidence=None, **inputs)
+        extra_evidence=None,
+        # mode B (VLM) passes the VLM's store_zone (always "" today); mode A passes none
+        **({"store_zone": perc["store_zone"]} if "store_zone" in perc else {}),
+        **inputs)
     return loc, s.last_loc_log
 
 
@@ -778,9 +954,18 @@ def markdown(rep):
     t = rep["timing_s"]
     L += ["", "## 各階段耗時（秒／張，本機首次計算）", "",
           "| 階段 | 平均 | 中位數 |", "|---|---|---|"]
-    for k in STAGES + ("total",):
-        L.append(f"| {k} | {_fmt(t[k]['mean'])} | {_fmt(t[k]['median'])} |")
+    for k, s in t.items():
+        L.append(f"| {k} | {_fmt(s['mean'])} | {_fmt(s['median'])} |")
     L.append(f"\n機器：{rep['machine']}")
+    if rep.get("vlm_calls"):
+        c = rep["vlm_calls"]
+        L.append(f"\nVLM 呼叫：共 {c['total']} 次（{c['by_kind']}），失敗 {c['errors']} 次；"
+                 f"第 3 階段有新物件或文字的照片 {c['pass3_useful_photos']}/{rep['n_photos']}")
+    lc = rep.get("live_comparison")
+    if lc:
+        L += ["", "## 和現場伺服器紀錄比對（同一張照片的影像證據）", "",
+              f"- {lc['photos']} 張：影像證據第一名相同 {lc['same_top1']} 張；Pearson r 中位數 {lc['median_pearson_r']}",
+              f"- 影像證據第一名答對：現場 {lc['live_top1_correct']} 張、本次 {lc['ours_top1_correct']} 張"]
     tc = rep["text_coverage"]
     L += ["", f"文字證據能作用的照片：OCR 字串和地圖完全相同 {tc['with_ocr_text_in_map']}/{tc['photos']}、"
               f"有走道號碼證據 {tc['with_aisle_sign_evidence']}/{tc['photos']}"]
@@ -834,6 +1019,10 @@ def main(argv=None):
     ap.add_argument("--reembed", action="store_true", help="re-run DINOv2 on the query photos")
     ap.add_argument("--sim", action="store_true",
                     help=f"also localize with a simulated phone position (σ = {', '.join(f'{s:g}' for s in SIM_SIGMAS)} m)")
+    ap.add_argument("--perception", choices=("gdino", "vlm"), default="gdino",
+                    help="gdino = server mode A (GroundingDINO + EasyOCR); vlm = mode B, what the deployed "
+                         ".env runs (PERCEPTION_ENABLED=0): paid OpenAI calls, cached per photo")
+    ap.add_argument("--no-annotate", action="store_true", help="skip the annotated photos")
     args = ap.parse_args(argv)
 
     import logging
@@ -856,8 +1045,16 @@ def main(argv=None):
     if args.limit:
         items = items[:args.limit]
 
+    vlm_mode = args.perception == "vlm"
+    suffix = ("_vlm" if vlm_mode else "") + (f"_limit{args.limit}" if args.limit else "")
     imgs = {it["id"]: preprocess(it, cache / "img") for it in items}
-    perc_all = perceive_all(list(imgs.items()), cache / "perception.json", args.redetect)
+    if vlm_mode:
+        perc_all = perceive_all_vlm(list(imgs.items()), cache / "perception_vlm.json", srv, args.redetect)
+    else:
+        perc_all = perceive_all(list(imgs.items()), cache / "perception.json", args.redetect)
+    ann_dir = cache / f"annotated_{args.perception}"
+    if not args.no_annotate:
+        ann_dir.mkdir(parents=True, exist_ok=True)
     if not dino_embed.available():      # load the model now so its load time isn't billed to photo 1
         sys.exit("DINOv2 not available — pip install torch transformers")
     embed = EmbedCache(cache / "dino.json", dino_embed.embed_image, dino_embed._MODEL_NAME, args.reembed)
@@ -870,8 +1067,10 @@ def main(argv=None):
     sensor_modes = (["replay"] if has_pdr else []) + ([f"sim{s:g}" for s in SIM_SIGMAS] if args.sim else [])
     runs = [(v, "none") for v in VARIANTS + ABLATIONS] + [(v, m) for m in sensor_modes for v in VARIANTS]
     per_variant = {run_key(v, m): [] for v, m in runs}
+    STAGES = STAGES_BY_PERCEPTION[args.perception]
     times = {k: [] for k in STAGES + ("total",)}
-    detail_path = Path(args.out) / f"image_only_{args.set}{'_limit' + str(args.limit) if args.limit else ''}_photos.jsonl"
+    all_image_ev = {}
+    detail_path = Path(args.out) / f"image_only_{args.set}{suffix}_photos.jsonl"
     detail_path.parent.mkdir(parents=True, exist_ok=True)
     detail_f = open(detail_path, "w", encoding="utf-8")
     t_run = time.perf_counter()
@@ -914,17 +1113,30 @@ def main(argv=None):
                         times[k].append(tt[k])
                     times["total"].append(sum(x for x in tt.values() if x is not None))
                     image_ev = {str(k): round(float(val), 4) for k, val in (loc.image_evidence or {}).items()}
+        all_image_ev[it["id"]] = image_ev
         q = embed.data.get(it["id"])
         detail = evidence_detail(ref_map, p, np.asarray(q["emb"], np.float32) if q else None, C.NEO4J_PLACE)
-        detail_f.write(json.dumps({
-            "id": it["id"], "photo": str(it["path"]), "truth": it["truth"], "ok": it["ok"],
-            "truth_xy": it["truth_xy"], "condition": it["condition"], "heading_label": it["heading"],
-            "meta": it["meta"], "size": p["size"], "quality": p["quality"], "occlusion": p["occlusion"],
-            "detections": p["detections"], "ocr": p["ocr"], "times_s": p["t"] | {"dino": (q or {}).get("t")},
-            "sensor_lab": it.get("sensor"), "server_image_evidence": image_ev, **detail, "results": results,
-        }, ensure_ascii=False) + "\n")
         r, d = per_variant["prod"][-1], per_variant["dino_only"][-1]
         mark = lambda x: "✓" if x["hit1"] else ("~" if x["within1"] else "✗")
+        annotated = {}
+        if not args.no_annotate:
+            word = lambda x: "對" if x["hit1"] else ("鄰" if x["within1"] else "錯")   # the annotator font has no ✓/✗
+            banner = (f"答案 {it['meta'].get('label', it['truth'])} | prod {r['pred']} {word(r)} {r['confidence']:.2f}"
+                      f" | dino_only {d['pred']} {word(d)} {d['confidence']:.2f}")
+            if "replay" in sensor_modes:
+                rr = per_variant["prod+replay"][-1]
+                banner += f" | +PDR {rr['pred']} {word(rr)} {rr['confidence']:.2f}"
+            annotated = draw_annotations(args.perception, img, p, ann_dir, it["id"], banner)
+        detail_f.write(json.dumps({
+            "id": it["id"], "photo": str(it["path"]), "perception": args.perception, "truth": it["truth"],
+            "ok": it["ok"], "truth_xy": it["truth_xy"], "condition": it["condition"], "heading_label": it["heading"],
+            "meta": it["meta"], "size": p["size"], "quality": p["quality"], "occlusion": p["occlusion"],
+            "detections": p["detections"], "ocr": p["ocr"], "times_s": p["t"] | {"dino": (q or {}).get("t")},
+            **({k: p.get(k) for k in ("scene", "store_zone", "ocr_before_clean", "vlm_passes", "vlm_calls")}
+               if vlm_mode else {}),
+            "sensor_lab": it.get("sensor"), "server_image_evidence": image_ev, **detail, "results": results,
+            "annotated": annotated,
+        }, ensure_ascii=False) + "\n")
         extra = ""
         if "replay" in sensor_modes:
             rr = per_variant["prod+replay"][-1]
@@ -935,9 +1147,15 @@ def main(argv=None):
     detail_f.close()
 
     notes = []
+    if vlm_mode:
+        sig = vlm_signature()
+        notes.append(f"感知＝伺服器模式 B（部署中的 .env：PERCEPTION_ENABLED=0、OCR_ENABLED=0）："
+                     f"{'三階段' if sig['pass3'] else '兩階段'} VLM（{sig['model']}），目標用中性的「{VLM_GOAL}」；每張照片只問一次並快取")
+    else:
+        notes.append("感知＝伺服器模式 A（GroundingDINO＋EasyOCR）；部署中的 .env 其實是模式 B（VLM），見 _vlm 報表")
     if args.set == "field1017":
         notes.append("朝向標註＝拍照當下手機羅盤（兩輪 D 測試羅盤 12/12 正常）；地圖方向照片的 heading_deg 與羅盤同一座標才有意義")
-        notes.append("GroundingDINO 用通用物件＋遮擋物提示詞（不含當時購物目標），所以偵測結果和現場紀錄可能略有不同")
+        notes.append("感知不帶當時的購物目標（啤酒），所以物件和文字可能和現場紀錄略有不同")
     if args.set == "0916":
         notes.append(f"0916 測試點離答案節點 ≤{AT_NODE_M:g} m 算 at_node，否則 between；方向（front/right/…）是測試者自己的相對方向，不能當朝向答案")
     if args.set == "route1":
@@ -958,7 +1176,11 @@ def main(argv=None):
                 "fingerprint": map_fingerprint(ref_map), "sidecar_sha1": _file_sha(C.DINO_SIDECAR_PATH)},
         "config": {"locate_fusion_weights": [5.0, 0.5, 0.5], "server_image_k": C.LOC_SERVER_IMAGE_K,
                    "confident_threshold": CONFIDENT_THRESHOLD,
-                   "dino_model": dino_embed._MODEL_NAME, "perception": perception_signatures()},
+                   "dino_model": dino_embed._MODEL_NAME,
+                   "perception": vlm_signature() if vlm_mode else perception_signatures()},
+        "perception": args.perception,
+        "vlm_calls": _vlm_call_summary([perc_all[it["id"]] for it in items]) if vlm_mode else None,
+        "live_comparison": live_comparison(items, all_image_ev) if args.set == "field1017" else None,
         "timing_s": {k: _stats(v) for k, v in times.items()},
         "text_coverage": text_coverage({it["id"]: perc_all[it["id"]] for it in items}, ref_map, C.NEO4J_PLACE),
         "sensor_modes": ["none"] + sensor_modes,
@@ -971,7 +1193,7 @@ def main(argv=None):
     }
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    stem = out / f"image_only_{args.set}{'_limit' + str(args.limit) if args.limit else ''}"
+    stem = out / f"image_only_{args.set}{suffix}"
     Path(f"{stem}.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
     Path(f"{stem}.md").write_text(markdown(rep), encoding="utf-8")
     print(markdown(rep))

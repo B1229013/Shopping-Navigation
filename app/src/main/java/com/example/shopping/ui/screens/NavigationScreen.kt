@@ -521,22 +521,26 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            NavStatusCard(
-                title = statusTitle,
-                phase = vm.phase,
-                goal = vm.goal,
-                currentTarget = vm.currentTarget,
-                currentLocation = vm.currentLocation,
-                torchOn = torchOn,
-                torchAvailable = torchAvailable,
-                onToggleTorch = {
-                    boundCamera?.let { cam ->
-                        torchOn = !torchOn
-                        cam.cameraControl.enableTorch(torchOn)
-                    }
-                },
-                onShowPhotoGuide = { showPhotoGuide = true },
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                vm.lastPhoto?.let { LastPhotoThumbnail(it) }
+                NavStatusCard(
+                    title = statusTitle,
+                    phase = vm.phase,
+                    goal = vm.goal,
+                    currentTarget = vm.currentTarget,
+                    currentLocation = vm.currentLocation,
+                    torchOn = torchOn,
+                    torchAvailable = torchAvailable,
+                    onToggleTorch = {
+                        boundCamera?.let { cam ->
+                            torchOn = !torchOn
+                            cam.cameraControl.enableTorch(torchOn)
+                        }
+                    },
+                    onShowPhotoGuide = { showPhotoGuide = true },
+                    modifier = Modifier.weight(1f),
+                )
+            }
             if (vm.goalItems.isNotEmpty()) {
                 ShoppingChecklist(items = vm.goalItems, currentTarget = vm.currentTarget)
             }
@@ -572,13 +576,13 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
             ) {
             // One hint at a time, most urgent first (as on iOS)
             when {
-                vm.retakeHint != null -> NavHintBanner("📷 ${vm.retakeHint}", Color(0xFFFF9800).copy(alpha = 0.9f))
-                vm.secondPhotoHint != null -> NavHintBanner("📷 ${vm.secondPhotoHint}", Color(0xFF2196F3).copy(alpha = 0.85f))
+                vm.retakeHint != null -> NavHintBanner(vm.retakeHint.orEmpty(), Color(0xFFFF9800).copy(alpha = 0.9f))
+                vm.secondPhotoHint != null -> NavHintBanner(vm.secondPhotoHint.orEmpty(), Color(0xFF2196F3).copy(alpha = 0.85f))
                 idle && vm.sensorsRunning && !vm.isOnMap && vm.startPoints.isNotEmpty() ->
-                    NavHintButton("📍 我在起點，從這裡開始", Color.Black.copy(alpha = 0.6f), onClick = { showStartPicker = true })
+                    NavHintButton("我在起點，從這裡開始", Color.Black.copy(alpha = 0.6f), onClick = { showStartPicker = true })
                 idle && vm.isOnMap && vm.distanceSinceFix >= NavigationViewModel.PHOTO_REMINDER_M ->
-                    NavHintBanner("📍 已走 ${vm.distanceSinceFix.toInt()} m，拍一張照片校正位置", Color.Black.copy(alpha = 0.55f))
-                idle && !isPhoneUpright -> NavHintBanner("📱 手機請拿直、對準走道前方", Color.Black.copy(alpha = 0.55f))
+                    NavHintBanner("已走 ${vm.distanceSinceFix.toInt()} m，拍一張照片校正位置", Color.Black.copy(alpha = 0.55f))
+                idle && !isPhoneUpright -> NavHintBanner("手機請拿直、對準走道前方", Color.Black.copy(alpha = 0.55f))
             }
 
             val follow = vm.followState
@@ -605,7 +609,27 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                 Text(vm.guidance, fontSize = 14.sp, color = Color.White, lineHeight = 20.sp)
 
                 // ASK flow
-                if (vm.pendingQuestion != null && !vm.hasArrived) {
+                if (vm.pendingQuestion != null && !vm.hasArrived && vm.pendingIsConfirm) {
+                    // "Have you arrived?" — a yes/no tap, not free text (free text that was
+                    // neither yes nor no used to count as yes)
+                    Text(vm.pendingQuestion!!, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFF9800))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { vm.answerConfirm(true) },
+                            enabled = !vm.isAnswering,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White),
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.weight(1f).height(44.dp)
+                        ) { Text("是，到了", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                        Button(
+                            onClick = { vm.answerConfirm(false) },
+                            enabled = !vm.isAnswering,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9E9E9E), contentColor = Color.White),
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.weight(1f).height(44.dp)
+                        ) { Text("不是，繼續找", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                    }
+                } else if (vm.pendingQuestion != null && !vm.hasArrived) {
                     Text(vm.pendingQuestion!!, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFF9800))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(

@@ -1,128 +1,140 @@
-# 智慧購物導航 — 後端導航伺服器 (Navigation Backend Server)
+# 共用導航後端（backend）
 
-本目錄為「智慧購物導航」系統的 **Python 後端導航伺服器**，對應設計文件書 §3.2「軟硬體組件設計說明」。負責整個賣場導航的核心運算：**視覺感知 → 拓樸定位 → 多模態語意推論 → 導航決策**。Android App 為前端薄客戶端，僅負責拍照與顯示，所有 AI 運算皆在本伺服器執行。
+iOS（B1222017/APPNAV_ios）與 Android（本倉庫 `app/`）共用的 **Python FastAPI 導航伺服器**。
+使用者每拍一張照片，伺服器就做：**照片品質檢查 → VLM 感知 → 在店家地圖上定位 → 規劃路線 → VLM 決策**，
+回傳 MOVE / ASK / ARRIVED 與中文指引。店家地圖存在 **Neo4j Aura**，VLM 走 **OpenAI 相容 API**
+（`OPENAI_BASE_URL` 可指向 OpenAI 或其他相容閘道）。
 
-> **隱私設計**：視覺語言模型透過本地端 **Ollama** 運行，顧客上傳的照片不送往任何雲端 API，亦無任何雲端金鑰。
+> 照片會送到 `OPENAI_BASE_URL` 指定的 VLM 服務；物件名稱的語意向量也會呼叫同一個服務的 embedding。
 
 ---
 
-## 系統定位（在整體架構中的角色）
+## 架構
 
 ```
-┌─────────────────────────────┐         ┌──────────────────────────────────────────┐
-│  Android App（客戶端）       │  HTTP   │  Python 後端導航伺服器（本目錄）            │
-│  CameraX 擷取 / OpenCV 前處理 │ ──────► │  FastAPI                                    │
-│  AR 箭頭與文字導引顯示        │ ◄────── │  GroundingDINO + EasyOCR + Ollama VLM       │
-│                             │  JSON   │  NetworkX 拓樸地圖 + 目標拆解 + 路徑決策     │
-└─────────────────────────────┘         └──────────────────────────────────────────┘
+手機（iOS / Android）
+  │  POST /session/{id}/photo：照片 ＋ PDR 位置／航向
+  ▼
+server.py ─┬─ photo_quality      模糊／太暗／遮擋 → 請使用者重拍
+           ├─ vlm（感知）          物件、商品名、OCR 文字、店內區域（最多 3 輪，VLM_PASS3）
+           ├─ 定位
+           │   ├─ locate_fusion   伺服器端 DINOv2 ＋ 物件名稱 ＋ OCR（權重 1 : 0.1 : 0.3）
+           │   ├─ visual_localization  物件／OCR 與地圖比對（中英名稱、語意向量、稀有度、九宮格）
+           │   ├─ aisle_signs     走道吊牌號碼縮小範圍
+           │   └─ loc_fusion      影像證據 × 手機感測器位置 → 機率排名
+           ├─ editor_map / path_planner   在 Neo4j 拓樸圖上規劃路線、轉彎清單、小地圖
+           ├─ heading            估計朝向，產生左轉／右轉
+           └─ vlm（決策）          照片 ＋ 路線 → MOVE / ASK / ARRIVED
+  ▲
+  │  Neo4j：Waypoint、DirPhoto（四方向照片、DINOv2 向量）、Object、WALKWAY、ADJACENT
+  │  maps/：每間店的起點與補充走道邊（neo4j_links）、起點照片（starts）
 ```
-
-- **測試階段（每間賣場執行一次）**：以所有賣場環境照片一次性預建拓樸地圖，供後續所有顧客 session 重複使用。
-- **執行階段（每位顧客）**：顧客每步上傳一張照片，伺服器回傳逐步導航指令（MOVE / ASK / ARRIVED）。
-
----
-
-## 核心模組
-
-| 模組 | 說明 | 主要檔案 |
-|------|------|----------|
-| 視覺感知 — 物件偵測 | GroundingDINO SwinT-OGC，零樣本偵測貨架商品、冰箱、門口、走道、標示物等地標 | `server/perception.py` |
-| 視覺感知 — 文字萃取 | EasyOCR 讀取走道招牌、區域名稱與貨架標籤（賣場最強的區域辨識訊號） | `server/ocr.py` |
-| 拓樸地圖與定位 | NetworkX 無向圖，記錄「使用者在哪裡」與「走過哪裡」，動態建立節點與邊 | `server/topomap.py` |
-| 決策與大腦推理 (VLM) | 本地 Ollama 上的 LLaMA 3.2 Vision 11B，整合影像、偵測結果、OCR 與地圖摘要，輸出導航動作 | `server/vlm.py` |
-| 目標拆解 | 將自然語言目標（如「找牛奶」）拆解為可偵測的視覺地標清單（如 `["milk", "dairy", "fridge"]`） | `server/goal_decomposer.py` |
-| 場景整合 / 抵達驗證 | 整理偵測與 OCR 摘要、比對招牌與目標、把關 ARRIVED 防止誤判抵達 | `server/scene.py` |
-| 影像標註 | 在照片上繪製偵測框與 OCR 區域，回傳標註後影像 | `server/annotator.py` |
-| Session 狀態 | 每場導航 session 的目標、歷史、目前節點等狀態 | `server/session.py` |
-| API 服務 | FastAPI REST 介面 | `server/server.py`、`server/run_server.py` |
-
-**決策輸出**（`server/vlm.py`）標準化為三種導航動作之一：
-- **MOVE** — 提供往前或轉彎的具體方向。
-- **ASK** — 遇到岔路或不確定時向使用者提問。
-- **ARRIVED** — 已抵達目標（需通過偵測分數 / OCR 招牌 / 裁切複驗等把關才成立）。
-
----
-
-## API 端點
-
-| 動作 | 端點 |
-|------|------|
-| 建立 session（輸入商品目標） | `POST /session` — body：`{"goal": "find milk"}` → 回傳 `session_id` |
-| 上傳一張照片取得導航 | `POST /session/{id}/photo` — multipart 影像 → 回傳 action + guidance + 標註影像 URL |
-| 回答 ASK 問題 | `POST /session/{id}/answer` — body：`{"answer": "yes"}` |
-| 取得目前拓樸地圖 | `GET /session/{id}/map?format=json\|png` |
-| 取得 session 狀態 | `GET /session/{id}` |
-| 取得標註後影像 | `GET /session/{id}/photo/{node_id}.jpg` |
-| 健康檢查 | `GET /health` |
-
----
-
-## 環境需求
-
-- **Python 3.12**
-- **伺服器硬體**（設計文件書 §3.2）：8 GB VRAM、16+ 執行緒 CPU。
-- **Ollama** 本地服務並已拉取 `llama3.2-vision` 模型。
-- **GroundingDINO 權重**：`models/groundingdino_swint_ogc.pth`（請另行下載，勿入庫）。
 
 ---
 
 ## 安裝與啟動
 
-```bash
-# 1) 安裝伺服器執行階段相依套件
+需求：Python 3.11、Neo4j Aura 帳號、OpenAI 相容 API 金鑰。
+
+```powershell
+cd backend
+python -m venv venv
+.\venv\Scripts\Activate.ps1
 pip install -r requirements-server.txt
-
-# 2) 安裝 Ollama（https://ollama.com）並啟動服務，拉取視覺模型
-ollama pull llama3.2-vision        # 約 7–8 GB，首次拉取較久
-ollama serve                       # 預設監聽 127.0.0.1:11434
-
-# 3) 下載 GroundingDINO 權重（zero-shot 物件偵測模型），放到 models/groundingdino_swint_ogc.pth
-#    權重來源：https://github.com/IDEA-Research/GroundingDINO（檔名 groundingdino_swint_ogc.pth）
-#    並 clone GroundingDINO 以取得設定檔 GroundingDINO_SwinT_OGC.py（路徑由 server/config.py 自動偵測）
-#    EasyOCR 模型會於首次執行時自動下載，無需手動處理
-
-# 4) 啟動伺服器（於本 backend/ 目錄下執行）
-python -m server.run_server
-# 或
-uvicorn server.server:app --host 0.0.0.0 --port 8000
+pip install numpy pillow torch transformers   # 伺服器端 DINOv2（facebook/dinov2-base）
+.\start.ps1                                    # = uvicorn server.server:app --host 0.0.0.0 --port 8000
 ```
 
-> 建圖管線（下節）另需 ML 相依套件：`torch`、`groundingdino`、`matplotlib`、`pyvis`、`pillow`、`pillow-heif` 等；建議於具 GPU 的環境（如 WSL conda 環境）執行。
+環境變數放在專案根目錄的 `.env`：
+
+```env
+OPENAI_API_KEY=...
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o
+NEO4J_URI=neo4j+s://xxxx.databases.neo4j.io
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=...
+```
+
+- `http://localhost:8000/docs`：Swagger UI；`/health`：健康檢查。
+- `/dashboard`：即時監看；`/debug`、`/session/{id}/debug-page`：定位診斷。
+- 沒裝 torch／transformers 或沒有 DINOv2 參考向量時，定位會退回只用物件＋OCR 比對。
+- 本機 GroundingDINO／EasyOCR 預設關閉（`PERCEPTION_ENABLED=0`、`OCR_ENABLED=0`），物件與文字都由 VLM 讀。
 
 ---
 
-## 使用方式 (Usage)
-
-伺服器啟動後，一次顧客導航流程如下（以 `curl` 為例）：
+## 使用方式
 
 ```bash
-# 1) 建立 session，輸入要找的商品
-curl -X POST http://localhost:8000/session \
-  -H "Content-Type: application/json" \
-  -d '{"goal": "find milk"}'
-# → { "session_id": "...", "guidance": "...", "goal_objects": ["milk","dairy",...] }
+# 1) 可用的店與起點
+curl http://localhost:8000/places
+curl "http://localhost:8000/starts?place=系辦"
 
-# 2) 每走一步上傳一張照片，取得導航動作
-curl -X POST http://localhost:8000/session/<session_id>/photo \
-  -F "photo=@step1.jpg"
-# → { "action": "MOVE|ASK|ARRIVED", "guidance": "...", "question": "...",
-#     "annotated_photo_url": "/session/<id>/photo/0.jpg" }
+# 2) 建立 session
+curl -X POST http://localhost:8000/session -H "Content-Type: application/json" \
+  -d '{"goal": "找優格", "place": "A7家樂福（9/16)"}'
 
-# 3) 若 action 為 ASK，回答後繼續
-curl -X POST http://localhost:8000/session/<session_id>/answer \
-  -H "Content-Type: application/json" \
-  -d '{"answer": "yes"}'
+# 3)（可選）從起點出發：x、y 是 /starts 回傳的地圖座標
+curl -X POST http://localhost:8000/session/<id>/start -H "Content-Type: application/json" \
+  -d '{"x": 0.0, "y": 0.0}'
+
+# 4) 每走一段拍一張照片
+curl -X POST http://localhost:8000/session/<id>/photo -F "photo=@step1.jpg"
+
+# 5) 路線（小地圖）、回答提問、確認抵達
+curl http://localhost:8000/session/<id>/path
+curl -X POST http://localhost:8000/session/<id>/answer  -H "Content-Type: application/json" -d '{"answer": "是"}'
+curl -X POST http://localhost:8000/session/<id>/confirm -H "Content-Type: application/json" -d '{"kind": "confirmed"}'
 ```
 
-- `action = MOVE` → 顯示 `guidance` 指引顧客移動，再拍下一張照片。
-- `action = ASK` → 顯示 `question`，由顧客回答（`/answer`）。
-- `action = ARRIVED` → 已抵達目標，session 結束。
+`/confirm` 的 `kind`：`confirmed`（到了）、`false_positive`（不是）、`wrong_instance`（不是這個）、
+`repeated_misidentification`（連續認錯，改用提問）。
 
-> Android App 端由 `NavigationScreen` 對應呼叫上述端點（目前 App 的 `processImageForModel()` 仍為佔位實作，待串接此後端）。
+各端點的完整欄位（照片可附帶的 PDR 位置、航向、DINOv2 top-K 等）以 `/docs` 為準。
+每次導航的紀錄寫在 `output/sessions/<session_id>/`（`server/session_log.py`）。
 
 ---
 
-## 建立新地圖（Neo4j V2 格式）
+## API 端點
+
+| 分類 | 端點 |
+|------|------|
+| 店家與起點 | `GET /places`、`GET /starts`、`GET /starts/photo`、`POST /starts` |
+| 導航 session | `POST /session`、`POST /session/{id}/photo`、`POST /session/{id}/answer`、`POST /session/{id}/confirm`、`POST /session/{id}/start` |
+| 路線與地圖 | `GET /session/{id}/path`、`GET /session/{id}/route`、`GET /session/{id}/map`、`POST /session/{id}/sensor-map`、`GET /reference-map` |
+| 單張定位 | `POST /localize`、`POST /ocr` |
+| 照片 | `GET /session/{id}/photo/{node_id}.jpg`、`GET /session/{id}/photo/{node_id}/{pass}.jpg`、`GET /session/{id}/original/{node_id}.jpg`、`GET /reference-photo/{nid}.jpg`、`GET /test-photo/{set}/{file}` |
+| 建圖工具 | `GET /topomap-builder`、`GET /topomap-places`、`GET /existing-topomap`、`GET /topomap-data`、`GET\|POST /topomap-sources…`、`POST /topomap-walks`、`GET /topomap-suggest`、`GET\|POST\|DELETE /topomap-floorplan`、`POST /topomap-confirm` |
+| 診斷 | `GET /health`、`GET /dashboard`、`GET /debug`、`GET /sessions`、`GET /session/{id}`、`GET /session/{id}/debug`、`GET /session/{id}/debug-page`、`POST /test/config` |
+| 感測器測試 | `POST /sensor-test`、`GET /sensor-test/{id}/plot.png` |
+
+---
+
+## 主要設定（`server/config.py`）
+
+| 變數 | 預設 | 說明 |
+|------|------|------|
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` | — / `https://api.openai.com/v1` / `gpt-4o` | VLM 服務；`OPENAI_BACKUP_KEY` 為備用金鑰 |
+| `VLM_ROUNDS` / `VLM_PASS3` / `VLM_TIMEOUT_S` | `1` / `1` / `120` | 感知輪數、第 3 輪（找特徵）、逾時秒數 |
+| `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | — / `neo4j` / — | 店家地圖資料庫 |
+| `NEO4J_PLACE` | `A7家樂福（9/16)` | 預設店名；Neo4j 連不上時 `/places` 只列這一間 |
+| `ROUTE_MAP_SOURCE` | `neo4j` | 路線用 Neo4j 地圖＋`maps/neo4j_links`；`editor` 改用 `maps/*.json` 手繪路線 |
+| `LOC_SERVER_DINO` | `1` | 伺服器端 DINOv2 影像分數（手機沒送 DINOv2 時） |
+| `DINO_SIDECAR_PATH` | `dino_sidecar.pkl` | 參考照片的 DINOv2 向量（另有一份存在 Neo4j 的 `DirPhoto.dino`） |
+| `LOC_SERVER_IMAGE_K` / `LOC_PHONE_IMAGE_K` | `32,64,8` / `0.25,4,2` | 影像證據在融合裡的權重 k(σ)：σ≤2 m、σ≥5 m、還沒定位過 |
+| `LOC_FUSION_V2` | `1` | 影像 × 感測器的機率融合 |
+| `EMBEDDING_ENABLED` / `EMBEDDING_MODEL` | `1` / `text-embedding-3-small` | 物件名稱語意相似度；每張照片多一次 embedding 請求 |
+| `EMBEDDING_CACHE_PATH` | `output/label_embeddings.npz` | 地圖標籤向量快取 |
+| `AISLE_SIGN_PLACES` | `NEO4J_PLACE` | 哪些店使用走道吊牌號碼（用 `\|` 分隔） |
+| `SECOND_PHOTO_BELOW` | `0.4` | 最佳節點機率低於此值時，請使用者原地轉身再拍一張 |
+| `RERANK_ENABLED` | `0` | VLM 重排序候選節點（每張約多 10 秒） |
+| `GOAL_CROP_VERIFY` / `ARRIVED_MIN_DETECTION_SCORE` | `1` / `0.50` | ARRIVED 前裁切目標交 VLM 複驗、最低偵測佐證分數 |
+| `PERCEPTION_ENABLED` / `OCR_ENABLED` | `0` / `0` | 本機 GroundingDINO / EasyOCR |
+| `MAP_BUILD_ROOT` / `MAP_BUILD_SOURCES` / `MAP_BUILD_REF_PLACE` | `output/mapbuild` / … / — | 建圖工作區、Sensor Lab 來源資料夾、參考底圖 |
+
+---
+
+## 建立新店地圖（Neo4j V2 格式）
 
 和 Neo4j 裡的「A7家樂福（9/16)」相同格式（`Waypoint → DirPhoto → Object`，加上 `WALKWAY`、`ADJACENT`），每間店做一次。共用邏輯與格式說明在 `server/map_v2.py`。
 
@@ -133,9 +145,10 @@ curl -X POST http://localhost:8000/session/<session_id>/answer \
 | 3. 對齊、合併 | 啟動後端，打開 `http://localhost:8000/topomap-builder?place=<店名>`（不給 `place` 會開最近編輯的店）：對齊、合併後按「確認並儲存」 | 該店的 `topomap_confirmed.json` |
 | 4. 上傳 | `python upload_map_v2.py --place "<店名>" --dry-run` 先檢查，沒問題再拿掉 `--dry-run` | `Waypoint`、`HAS_PHOTO`、`DirPhoto`、`WALKWAY` |
 | 5. 產生物件 | `python rebuild_objects_v2.py --place "<店名>" --limit 2 --dry-run` 試跑，再完整執行 | `Object`、`DETECTED`、`ADJACENT` |
-| 6. 設定 | 寫 `maps/neo4j_links/<店名>.json`（入口與補的連線，參考 `a7_carrefour.json`）；App 從 `/places` 選店 | |
+| 6. DINOv2 向量 | `python store_dino_v2.py --place "<店名>" --dry-run`，再拿掉 `--dry-run`（`--no-neo4j` 只寫 sidecar） | `dino_sidecar.pkl`、`DirPhoto.dino` |
+| 7. 起點與補充連線 | 建圖頁設定起點（位置、面向、照片）；Neo4j 缺的走道邊寫進 `maps/neo4j_links/<店名>.json`（參考 `系辦.json`） | `maps/neo4j_links/<店名>.json`、`maps/starts/<店名>/` |
 
-- **每間店一個工作資料夾**：`<MAP_BUILD_ROOT>/<店名>/`（預設 `backend/output/mapbuild/<店名>/`；店名裡 Windows 不允許的字元會換成 `_`，例如「A7家樂福（9/16)」→「A7家樂福（9_16)」）。裡面有 `topomap.json`、`topomap_confirmed.json`、各路線照片、`dino_embeddings.pkl`、`floorplan.*`、`imports/`、`vlm_cache/`。建圖頁用頂端的「店家」選單切換，三支腳本依 `--place` 找資料夾（`--workspace` 可以另外指定）。舊的環境變數 `MAP_BUILD_DIR` 現在代表這個總資料夾。
+- **每間店一個工作資料夾**：`<MAP_BUILD_ROOT>/<店名>/`（預設 `backend/output/mapbuild/<店名>/`；店名裡 Windows 不允許的字元會換成 `_`，例如「A7家樂福（9/16)」→「A7家樂福（9_16)」）。裡面有 `topomap.json`、`topomap_confirmed.json`、各路線照片、`dino_embeddings.pkl`、`floorplan.*`、`imports/`、`vlm_cache/`。建圖頁用頂端的「店家」選單切換，腳本依 `--place` 找資料夾（`--workspace` 可以另外指定）。舊的環境變數 `MAP_BUILD_DIR` 現在代表這個總資料夾。
 - **參考底圖**：設定 `MAP_BUILD_REF_PLACE=<Neo4j place>`，建圖頁就會把那張地圖畫在底下（例如同一間店的舊地圖）。
 - **路線…**（建圖頁頂端）：
   - 列出來源資料夾裡所有 Sensor Lab 匯出，也就是含 `sensor_log.csv` 的資料夾或 zip。來源資料夾預設是 `backend/legacy/testPDR`、`backend/testPDR`，可用 `MAP_BUILD_SOURCES` 設定；也可以直接上傳 zip（存到 `<工作資料夾>/imports/`）。
@@ -156,52 +169,23 @@ curl -X POST http://localhost:8000/session/<session_id>/answer \
   - 編輯進度會自動存在瀏覽器裡，重新整理不會不見；「重設全部」會回到原始資料。
 - **VLM**：使用 `.env` 的 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL`。提示詞與 A7 相同，每張照片預設呼叫 3 次再去重（`--calls`）。結果快取在 `<工作資料夾>/vlm_cache/`，中斷後重跑不會重複付費。
 - **OCR**：使用 EasyOCR，文字會掛到中心點落在其框內的物件上（`ocr_text`）。第一次載入模型較慢，可用 `--no-ocr` 略過。
-- **安全**：本工具建立的 `DirPhoto` / `Object` 帶有 `place` 欄位。`upload_map_v2.py --replace` 與 `rebuild_objects_v2.py` 只會動這種 place，同學建的 A7 一律拒絕寫入。
-- **還沒做**：新店照片的 DINOv2 sidecar（`dino_sidecar.pkl` 目前只有 A7）。少了它，新店定位會退回九宮格比對。
-
-## 舊版建圖管線（legacy）
-
-以賣場照片一次性建立拓樸地圖，依序執行：
-
-| 步驟 | 腳本 | 功能 |
-|------|------|------|
-| OCR | `ocr_dump.py` | 對所有賣場照片跑 EasyOCR，輸出 `store_ocr.json` |
-| 偵測 + 富化 | `build_store_map.py` | 將 OCR 招牌類別併入 GroundingDINO 偵測結果作為標準化標籤 |
-| 建圖（序列） | `generate_topomap.py` | Jaccard 分群成區域、建立節點與邊、輸出拓樸地圖（PNG/HTML） |
-| 建圖（分支樓面） | `build_store_graph.py` | 以主走道 + 分支走道（1–13）+ 周界生鮮區的真實賣場拓樸建模 |
-| 精簡渲染 | `render_clean.py` | 蛇形版面、每區一張卡片的精簡可讀地圖 |
-| 互動式 HTML | `build_html_map.py` | Pyvis 可拖曳節點的互動式 HTML 地圖，便於核對實際樓面 |
-
-```bash
-python generate_topomap.py --sim-threshold 0.40
-```
+- **安全**：本工具建立的 `DirPhoto` / `Object` 帶有 `place` 欄位。`upload_map_v2.py --replace`、`rebuild_objects_v2.py`、`store_dino_v2.py` 只會動這種 place，同學建的 A7 一律拒絕寫入。
+- **沒有 DINOv2 向量的店**：定位會退回只用物件＋OCR（九宮格）比對，所以建完圖記得做第 6 步。
 
 ---
 
-## 測試
+## 測試與評估
 
-```bash
-# 單元測試（離線、不打網路；設定 UNIGOAL_TEST_MODE）
-pytest
-
-# 評估 / 回放 harness
-#   見 eval/ 目錄（runner.py、replay.py、metrics.py）
+```powershell
+.\venv\Scripts\python.exe -m pytest -q     # server/tests、eval/tests（離線，不打 API）
 ```
 
----
+目前 `server/tests/test_vlm.py` 有 2 個檢查感知提示詞文字的測試未通過（整合前就存在）。
 
-## 設定（環境變數，詳見 `server/config.py`）
-
-| 變數 | 預設 | 說明 |
-|------|------|------|
-| `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama 服務位址 |
-| `OLLAMA_MODEL` | `llama3.2-vision` | 視覺語言模型名稱 |
-| `SERVER_HOST` / `SERVER_PORT` | `0.0.0.0` / `8000` | 伺服器位址與埠 |
-| `OCR_ENABLED` | `1` | 是否啟用 EasyOCR |
-| `OCR_LANGUAGES` | `en,ch_tra` | OCR 語言（英文 + 繁體中文） |
-| `GROUNDINGDINO_BOX_THRESHOLD` | `0.40` | 偵測框信心閾值（針對忙碌貨架調高以降低誤判） |
-| `GOAL_CROP_VERIFY` | `1` | ARRIVED 前裁切目標框交由 VLM 複驗 |
-| `ARRIVED_MIN_DETECTION_SCORE` | `0.35` | ARRIVED 成立所需的最低偵測佐證分數 |
+`eval/` 是定位與導航評估：單張影像定位基準（`image_only.py`，可用 VLM 重播模式不呼叫 API）、
+權重掃描（`fusion_sweep.py`）、逐張報告（`photo_report.py`）、Sensor Lab 實測資料（`sensorlab.py`）、
+動作準確率 harness（`runner.py`、`replay.py`、`metrics.py`）。標註在 `eval/data/`，結果在 `eval/results/`，
+說明見 [`eval/README.md`](eval/README.md)。
 
 ---
 
@@ -209,27 +193,40 @@ pytest
 
 ```
 backend/
-├── server/                     # FastAPI 後端核心
-│   ├── server.py               # REST API 端點
-│   ├── run_server.py           # uvicorn 啟動點
-│   ├── perception.py           # GroundingDINO 物件偵測
-│   ├── ocr.py                  # EasyOCR 文字辨識
-│   ├── vlm.py                  # Ollama VLM 導航決策（MOVE/ASK/ARRIVED）
-│   ├── goal_decomposer.py      # 目標 → 視覺地標清單
-│   ├── topomap.py              # NetworkX 拓樸地圖
-│   ├── scene.py                # 場景整合與抵達驗證
-│   ├── annotator.py            # 偵測框 / OCR 標註
-│   ├── session.py              # session 狀態
-│   ├── batch_mapper.py         # 批次照片處理 + Jaccard 分群
-│   ├── config.py               # 閾值與路徑設定
-│   ├── prompts.py / models.py / store_knowledge.py / store_map.py / navigator.py
-│   └── tests/                  # pytest 單元測試
-├── eval/                       # 評估 / 回放 harness
-├── generate_topomap.py         # 拓樸地圖生成（建圖主入口）
-├── build_store_map.py          # OCR 富化 + 建圖
-├── build_store_graph.py        # 分支樓面拓樸建模
-├── build_html_map.py           # Pyvis 互動式 HTML 地圖
-├── render_clean.py             # 精簡地圖渲染
-├── ocr_dump.py                 # 批次 OCR
-└── requirements-server.txt     # 伺服器執行階段相依套件
+├── server/                     FastAPI 後端（正式使用）
+│   ├── server.py               所有端點與拍照導航流程
+│   ├── config.py               環境變數與預設值
+│   ├── vlm.py / prompts.py     VLM 感知、決策與提示詞
+│   ├── goal_decomposer.py      目標 → 要找的物件
+│   ├── visual_localization.py  物件／OCR 與地圖比對
+│   ├── locate_fusion.py        DINOv2 ＋ 物件 ＋ OCR 融合
+│   ├── dino_embed.py           DINOv2 影像向量（lazy 載入）
+│   ├── loc_fusion.py           影像 × 感測器機率融合
+│   ├── aisle_signs.py          走道吊牌
+│   ├── photo_quality.py        照片品質
+│   ├── heading.py              朝向與左右轉
+│   ├── editor_map.py           可走路線圖、轉彎清單、小地圖
+│   ├── path_planner.py         A* 與多目標排序
+│   ├── neo4j_client.py         Neo4j HTTP 客戶端
+│   ├── map_v2.py / map_build.py  新店地圖格式與建圖工作區
+│   ├── start_points.py         起點
+│   ├── session.py / session_log.py  session 狀態與紀錄
+│   ├── scene.py / annotator.py / graph_renderer.py  場景文字、標註圖、場景圖
+│   ├── perception.py / ocr.py  本機 GroundingDINO / EasyOCR（預設關閉）
+│   ├── place_recognizer.py / grid_utils.py / topomap.py / batch_mapper.py / sensor_test_render.py
+│   ├── topomap_builder.html / dashboard.html / debug_page.html
+│   └── tests/                  pytest
+├── eval/                       評估工具、標註、結果、圖表
+├── maps/                       neo4j_links（補充走道邊＋起點）、starts（起點照片）、編輯器路線
+├── legacy/                     舊後端（/snav、topomap_v2、locate_v2）與早期定位研究，只供研究腳本 import
+├── build_map_v2_topomap.py     Sensor Lab → 建圖工作區
+├── upload_map_v2.py            確認後的地圖 → Neo4j
+├── rebuild_objects_v2.py       方向照片物件偵測 → Neo4j
+├── store_dino_v2.py            方向照片 DINOv2 向量 → sidecar／Neo4j
+├── dino_sidecar.pkl            參考照片 DINOv2 向量
+├── build_store_graph.py / build_store_map.py / build_html_map.py / generate_topomap.py / render_clean.py / ocr_dump.py
+│                               早期的拓樸圖產生與繪製工具（GroundingDINO／EasyOCR 建圖）
+├── Dockerfile / requirements-cloud.txt   輕量 Docker 映像（不含 torch，尚未在目前版本驗證）
+├── requirements-server.txt / start.ps1 / pytest.ini / conftest.py
+└── README.md
 ```

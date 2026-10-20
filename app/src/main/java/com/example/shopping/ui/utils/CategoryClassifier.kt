@@ -41,7 +41,8 @@ private val productOverrides = linkedMapOf(
     "茶葉蛋" to HOME_EGG_DAIRY,
     "果凍" to HOME_SNACKS,
     "烏龍麵" to HOME_STAPLES,
-    "鮮奶油" to HOME_EGG_DAIRY
+    "鮮奶油" to HOME_EGG_DAIRY,
+    "米酒" to HOME_SEASONING
 )
 
 internal fun findOverride(name: String): String? {

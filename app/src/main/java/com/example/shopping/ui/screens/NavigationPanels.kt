@@ -6,7 +6,9 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -30,8 +32,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -66,6 +70,22 @@ private fun phaseLabel(phase: String) = when (phase) {
     "exit" -> "前往出口"
     "done" -> "導航完成"
     else -> "找商品中"
+}
+
+/** Last photo taken or picked, left of the status card (iOS lastPhotoThumbnail: 56 pt, no tap). */
+@Composable
+fun LastPhotoThumbnail(photo: ImageBitmap, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(10.dp)
+    Image(
+        bitmap = photo,
+        contentDescription = "上一張照片",
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+            .size(56.dp)
+            .shadow(3.dp, shape)
+            .clip(shape)
+            .border(1.dp, Color.White.copy(alpha = 0.5f), shape),
+    )
 }
 
 /** Status card: title + phase chip, current target, location; flash and "?" buttons. */
@@ -128,7 +148,7 @@ fun NavStatusCard(
                 maxLines = 2,
             )
             currentLocation?.let {
-                Text("📍 $it", color = PanelText.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 2)
+                Text(it, color = PanelText.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 2)
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -282,7 +302,7 @@ fun RoutePanel(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "🧭 ${prompt ?: "定位中…"}",
+                    prompt ?: "定位中…",
                     color = PanelText,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -304,7 +324,7 @@ fun RoutePanel(
         }
     } else if (statusMessage != null) {
         Text(
-            "🗺 $statusMessage",
+            statusMessage,
             color = PanelText.copy(alpha = 0.8f),
             fontSize = 12.sp,
             modifier = modifier.fillMaxWidth(),

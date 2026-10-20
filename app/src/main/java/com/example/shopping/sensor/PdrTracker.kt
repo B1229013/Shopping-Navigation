@@ -4,10 +4,13 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -37,7 +40,16 @@ data class PdrSnapshot(
     val gpsAccuracy: Float?,
 )
 
-class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener {
+/**
+ * [sensorHandler]: the thread sensor events (and every callback below) arrive on. null = the
+ * caller's thread, normally the main thread — fine for navigation, but Sensor Lab records
+ * ~50 Hz of eleven sensors while the camera runs, which kept the main thread busy enough to
+ * trigger "app isn't responding"; it passes a background [android.os.HandlerThread]'s handler.
+ */
+class PdrTracker(
+    private val sensorManager: SensorManager,
+    private val sensorHandler: Handler? = null,
+) : SensorEventListener {
 
     // ── Magnetometer calibration status ──
 
@@ -75,7 +87,8 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
     var totalDistance: Float = 0f; private set
     var lastStride: Float = 0f; private set
 
-    private val _pathPoints = mutableListOf<PdrPoint>()
+    // Copy-on-write: appended once per step on the sensor thread, read by the UI on another
+    private val _pathPoints = CopyOnWriteArrayList<PdrPoint>()
     val pathPoints: List<PdrPoint> get() = _pathPoints
 
     // ── Live sensor values (for SensorLab display) ──
@@ -164,9 +177,14 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
     private var lastGpsAccuracy: Float? = null
 
     // Throttle: don't buffer faster than ~50Hz per sensor
-    private var lastAccelBufTime = 0L
-    private var lastGyroBufTime = 0L
-    private var lastMagBufTime = 0L
+    // Buffers / onSampleReady are throttled on the sensor's own event time (ns): SENSOR_DELAY_GAME
+    // delivers about every 20 ms with jitter, so a 20 ms gate on the callback clock dropped every
+    // other sample (logs came out at 25-36 Hz instead of 50).
+    private var lastAccelBufNs = 0L
+    private var lastGyroBufNs = 0L
+    private var lastMagBufNs = 0L
+    /** Event time (ns, SystemClock.elapsedRealtimeNanos base) of the sample onSampleReady reports. */
+    @Volatile var lastSampleNs: Long = 0L; private set
 
     // ── Software step detection (fallback when hardware counter is silent) ──
     private var filteredMag = 9.81f
@@ -181,6 +199,9 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
         private const val AVG_ALPHA = 0.005f
         private const val PEAK_THRESHOLD = 1.2f
         private const val MIN_STEP_MS = 280L
+        /** Keep at most one sample per 15 ms of event time: every ~20 ms SENSOR_DELAY_GAME event
+         *  passes (≈50 Hz) while a burst of early events is still thinned out. */
+        private const val SAMPLE_PERIOD_NS = 15_000_000L
         private const val MAX_STEP_MS = 2000L
         private const val HW_SILENT_MS = 2500L
         private const val COMP_ALPHA = 0.98f
@@ -216,7 +237,7 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
         sensorTypes.forEach { (type, name) ->
             val sensor = sensorManager.getDefaultSensor(type)
             if (sensor != null) {
-                sensorManager.registerListener(this, sensor, rate)
+                sensorManager.registerListener(this, sensor, rate, sensorHandler)
                 Log.i("PdrTracker", "Registered: $name")
             } else {
                 Log.w("PdrTracker", "NOT AVAILABLE: $name")
@@ -230,7 +251,17 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
         sensorManager.unregisterListener(this)
     }
 
-    fun reset() {
+    /** Runs [block] on the sensor thread — now, if that is the calling thread (always the case
+     *  without a [sensorHandler]) — so state the event handlers use is never changed under them. */
+    private fun onSensorThread(block: () -> Unit) {
+        val h = sensorHandler
+        if (h == null || Looper.myLooper() == h.looper) block() else h.post(block)
+    }
+
+    /** Back to a fresh walk (then [then]), on the sensor thread so no event sees half a reset. */
+    fun reset(then: (() -> Unit)? = null) = onSensorThread { resetNow(); then?.invoke() }
+
+    private fun resetNow() {
         x = 0f; y = 0f
         headingDeg = 0f
         totalSteps = 0; totalDistance = 0f; lastStride = 0f
@@ -263,7 +294,7 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
         if (k > 0) weinbergK = k
     }
 
-    fun startGyroCalibration() {
+    fun startGyroCalibration() = onSensorThread {
         gyroCalState = GyroCalState.CALIBRATING
         gyroCalSamples.clear()
         gyroCalProgress = 0f
@@ -271,14 +302,13 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
         onGyroCalStateChanged?.invoke(gyroCalState)
     }
 
-    fun updateLocation(lat: Double, lng: Double, accuracy: Float, altitude: Double) {
-        if (!running) return
+    fun updateLocation(lat: Double, lng: Double, accuracy: Float, altitude: Double) = onSensorThread {
+        if (!running) return@onSensorThread
         val elapsed = SystemClock.elapsedRealtime() - startTimeMs
         gpsBuf.add(doubleArrayOf(elapsed.toDouble(), lat, lng, accuracy.toDouble(), altitude))
         lastGpsLat = lat
         lastGpsLng = lng
         lastGpsAccuracy = accuracy
-
     }
 
     // Android quaternion yaw follows right-hand rule (CCW positive),
@@ -402,9 +432,10 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
                 }
                 wasAbove = isAbove
 
-                if (elapsed - lastAccelBufTime >= 20) {
+                if (event.timestamp - lastAccelBufNs >= SAMPLE_PERIOD_NS) {
                     accelBuf.add(floatArrayOf(elapsed.toFloat(), event.values[0], event.values[1], event.values[2]))
-                    lastAccelBufTime = elapsed
+                    lastAccelBufNs = event.timestamp
+                    lastSampleNs = event.timestamp
                     onSampleReady?.invoke()
                 }
             }
@@ -473,9 +504,9 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
                 }
                 lastGyroTimeMs = elapsed
 
-                if (elapsed - lastGyroBufTime >= 20) {
+                if (event.timestamp - lastGyroBufNs >= SAMPLE_PERIOD_NS) {
                     gyroBuf.add(floatArrayOf(elapsed.toFloat(), corrX, corrY, corrZ))
-                    lastGyroBufTime = elapsed
+                    lastGyroBufNs = event.timestamp
                 }
             }
 
@@ -502,9 +533,9 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
                     onMagQualityChanged?.invoke(newQuality, magFieldStrength)
                 }
 
-                if (elapsed - lastMagBufTime >= 20) {
+                if (event.timestamp - lastMagBufNs >= SAMPLE_PERIOD_NS) {
                     magBuf.add(floatArrayOf(elapsed.toFloat(), event.values[0], event.values[1], event.values[2]))
-                    lastMagBufTime = elapsed
+                    lastMagBufNs = event.timestamp
                 }
             }
 
@@ -685,8 +716,8 @@ class PdrTracker(private val sensorManager: SensorManager) : SensorEventListener
         swStepEventBuf.clear()
         stepCounterBuf.clear()
         gpsBuf.clear()
-        lastAccelBufTime = 0L
-        lastGyroBufTime = 0L
-        lastMagBufTime = 0L
+        lastAccelBufNs = 0L
+        lastGyroBufNs = 0L
+        lastMagBufNs = 0L
     }
 }

@@ -422,7 +422,7 @@ def suggest_merges(nodes: Sequence[dict], emb: Dict[str, "object"]) -> dict:
 
 # ── 3. VLM perception → Object / ADJACENT rows ─────────────────────────────────────────
 
-# Same instructions as the classmate's A7 rebuild (ios/scripts/vlm_test/enrich_refdb.py).
+# Same instructions as the classmate's A7 rebuild (B1222017/APPNAV_ios: scripts/vlm_test/enrich_refdb.py).
 PERCEIVE_PROMPT = """\
 你正在分析一張超市內部的照片，用來定位使用者的位置。
 

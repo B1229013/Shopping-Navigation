@@ -16,7 +16,7 @@ iOS（B1222017/APPNAV_ios）與 Android（本倉庫 `app/`）共用的 **Python 
   │  POST /session/{id}/photo：照片 ＋ PDR 位置／航向
   ▼
 server.py ─┬─ photo_quality      模糊／太暗／遮擋 → 請使用者重拍
-           ├─ vlm（感知）          物件、商品名、OCR 文字、店內區域（最多 3 輪，VLM_PASS3）
+           ├─ vlm（感知）          物件、商品名、OCR 文字、店內區域（每張 1 輪：2 次呼叫，VLM_PASS3=1 時 3 次）
            ├─ 定位
            │   ├─ locate_fusion   伺服器端 DINOv2 ＋ 物件名稱 ＋ OCR（權重 1 : 0.1 : 0.3）
            │   ├─ visual_localization  物件／OCR 與地圖比對（中英名稱、語意向量、稀有度、九宮格）
@@ -54,7 +54,14 @@ OPENAI_MODEL=gpt-4o
 NEO4J_URI=neo4j+s://xxxx.databases.neo4j.io
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=...
+VLM_PASS3=0          # 關掉 VLM 感知第 3 次呼叫（見下方說明）
 ```
+
+- **請設 `VLM_PASS3=0`**：VLM 感知每張照片第 1 次列物件、第 2 次補漏、第 3 次找獨特特徵。
+  第 3 次的回覆格式和解析不合，2026-10 以前結果全部被丟掉；解析修好後在 lab1019（376 張）重新測，
+  單張不帶感測器 Top-1 **開 47.6%、關 48.1%**，對定位沒有幫助，只多花一次 VLM 呼叫（約 4 秒）。
+  程式預設仍是開（`1`），所以要在 `.env` 關掉；改完要重新啟動伺服器。
+  （`eval/results/image_only_lab1019_vlm_replay*.md`；`python -m eval.image_only --vlm-replay` 可用快取重測，不需重新呼叫 VLM。）
 
 - `http://localhost:8000/docs`：Swagger UI；`/health`：健康檢查。
 - `/dashboard`：即時監看；`/debug`、`/session/{id}/debug-page`：定位診斷。
@@ -115,7 +122,7 @@ curl -X POST http://localhost:8000/session/<id>/confirm -H "Content-Type: applic
 | 變數 | 預設 | 說明 |
 |------|------|------|
 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` | — / `https://api.openai.com/v1` / `gpt-4o` | VLM 服務；`OPENAI_BACKUP_KEY` 為備用金鑰 |
-| `VLM_ROUNDS` / `VLM_PASS3` / `VLM_TIMEOUT_S` | `1` / `1` / `120` | 感知輪數、第 3 輪（找特徵）、逾時秒數 |
+| `VLM_ROUNDS` / `VLM_PASS3` / `VLM_TIMEOUT_S` | `1` / `1` / `120` | 感知輪數、每輪第 3 次呼叫（找特徵；**建議 `0`**，見上方）、逾時秒數 |
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | — / `neo4j` / — | 店家地圖資料庫 |
 | `NEO4J_PLACE` | `A7家樂福（9/16)` | 預設店名；Neo4j 連不上時 `/places` 只列這一間 |
 | `ROUTE_MAP_SOURCE` | `neo4j` | 路線用 Neo4j 地圖＋`maps/neo4j_links`；`editor` 改用 `maps/*.json` 手繪路線 |

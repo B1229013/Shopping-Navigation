@@ -66,7 +66,7 @@ class NavigationViewModel : ViewModel() {
     var guidance: String by mutableStateOf("")
     var currentAction: String by mutableStateOf("TAKE_PHOTO")
     var pendingQuestion: String? by mutableStateOf(null)
-    /** [pendingQuestion] asks whether the user has arrived: answered with 是 / 不是 buttons. */
+    /** [pendingQuestion] asks whether the user has arrived: answered with 有 / 沒有 buttons. */
     var pendingIsConfirm: Boolean by mutableStateOf(false)
     var answerText: String by mutableStateOf("")
     var isUploading: Boolean by mutableStateOf(false)
@@ -561,9 +561,9 @@ class NavigationViewModel : ViewModel() {
         }
     }
 
-    /** Answer an "have you arrived?" question with a button (是 / 不是). */
+    /** Answer the "眼前有沒有看到要找的東西？" question with a button (有 / 沒有). */
     fun answerConfirm(yes: Boolean) {
-        answerText = if (yes) "是" else "不是"
+        answerText = if (yes) "有" else "沒有"
         submitAnswer()
     }
 
@@ -573,6 +573,9 @@ class NavigationViewModel : ViewModel() {
         isAnswering = true
         errorMessage = null
         val answer = answerText
+        // 「有」 to the arrival question is the arrival confirmation itself (the server
+        // finishes it like POST /confirm), so plan to the next item as confirmArrival does.
+        val confirmsArrival = pendingIsConfirm && answer == "有"
 
         viewModelScope.launch {
             try {
@@ -580,6 +583,7 @@ class NavigationViewModel : ViewModel() {
                     NavigationApi.service.postAnswer(sid, AnswerRequest(answer = answer))
                 }
                 handleTurnResponse(response)
+                if (confirmsArrival && response.action == "MOVE") loadRoute(fromPhone = true)
                 answerText = ""
             } catch (e: Exception) {
                 Log.e("NavAnswer", "Answer failed", e)

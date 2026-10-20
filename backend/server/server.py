@@ -2474,7 +2474,7 @@ def _handle_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
             log.info("[session %s] Unclear reply to an arrival question → asking again", session_id)
             vlm_resp = VLMResponse(
                 action=VLMAction.ASK,
-                guidance=f"請回答「是」或「不是」：{prior_question}",
+                guidance=f"請回答「有」或「沒有」：{prior_question}",
                 question=prior_question,
                 vlm_summary="unclear reply to arrival question",
             )
@@ -2490,37 +2490,21 @@ def _handle_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
                 vlm_summary="user denied arrival",
             )
         else:
+            # 「有」 already is the arrival confirmation: finish it exactly like
+            # POST /confirm "confirmed" (one route advance, then checkout / exit /
+            # done), so the app does not ask "確認到達" a second time. This used to
+            # advance the route here and still leave pending_arrival set, so the
+            # next /photo got 409 confirm_pending and /confirm advanced it again.
             log.info("[session %s] User confirmed arrival via answer", session_id)
             s.pending_question = None
             s.pending_is_confirm = False
             s.pending_arrival = True
             s.goal_node = nid
-            _active_goals = _current_goal_objects(s)
-            # Auto-advance the route
-            if s.route_plan and s.target_nodes:
-                current_leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
-                s.mark_target_visited(current_leg.to_node)
-                s.current_leg_index = min(s.current_leg_index + 1, len(s.route_plan.legs) - 1)
-                log.info("[session %s] route advanced: visited node #%d, leg %d/%d",
-                         session_id, current_leg.to_node, s.current_leg_index, len(s.route_plan.legs))
-
-            next_goals = _current_goal_objects(s)
-            remaining = len(s.remaining_targets) if s.target_nodes else 0
-            if remaining > 0:
-                vlm_resp = VLMResponse(
-                    action=VLMAction.MOVE,
-                    guidance=f"已找到「{'、'.join(_active_goals)}」！接下來找「{'、'.join(next_goals)}」，請拍一張照片讓我定位。",
-                    question=None,
-                    vlm_summary=f"confirmed {_active_goals}, moving to next",
-                )
-            else:
-                vlm_resp = VLMResponse(
-                    action=VLMAction.ARRIVED,
-                    guidance=f"已找到「{'、'.join(_active_goals)}」！所有商品都找到了！",
-                    question=None,
-                    vlm_summary="all items found",
-                )
-                s.arrived = True
+            s.history.append({
+                "kind": "answer", "user_answer": req.answer,
+                "vlm_action": "CONFIRM", "vlm_guidance": None,
+            })
+            return _handle_confirm(session_id, ConfirmArrivalRequest(kind="confirmed"))
 
         s.history.append({
             "kind": "answer", "user_answer": req.answer,

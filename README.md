@@ -31,7 +31,7 @@ VLM（GPT-4o / Gemini / CGU gateway）分析環境，並在拓樸地圖上進行
 
 - **感測器實驗室** — 8 種感測器即時錄製、CSV 匯出、歷史瀏覽與分享（開發/驗證用）。
 - **CGU LLM Gateway** — 一把 `CGU_API_KEY` 通吃 chat / vision / OCR / embedding。
-- **雲端部署** — 附 Dockerfile 與 render.yaml，可一鍵部署到 Render。
+- **Docker** — 附 Dockerfile（輕量版，不含 torch/easyocr），可打包後端放到任何雲端主機。
 
 | 功能 | 模組 | 說明 |
 |------|------|------|
@@ -51,7 +51,7 @@ VLM（GPT-4o / Gemini / CGU gateway）分析環境，並在拓樸地圖上進行
 
 **環境準備**
 
-1. 啟動後端：`cd backend` → `.\start.ps1`（本機）或部署到 Render 取得雲端 URL。
+1. 啟動後端：`cd backend` → `.\start.ps1`（本機）或用 Dockerfile 部署到雲端主機取得 URL。
 2. 設定 App 連線：模擬器用預設 `http://10.0.2.2:8000/`；實體手機用
    `adb reverse tcp:8000 tcp:8000` 或在設定頁填入後端 URL。
 3. 開啟 `http://<後端>/health` 回傳 `{"status":"ok"}` 即代表連線正常。
@@ -268,26 +268,23 @@ python -m uvicorn server.server:app --host 0.0.0.0 --port 8000
 
 ---
 
-## 雲端部署（Render）
+## 雲端部署（Docker，選用）
 
-`backend/` 已備妥部署檔：
+`backend/` 附 Docker 打包檔：
 
 ```
 backend/
 ├── Dockerfile              # Python 3.11 slim，只裝核心依賴
 ├── .dockerignore
-├── requirements-cloud.txt  # 無 torch/easyocr（image ~200MB）
-└── render.yaml             # Render 一鍵部署設定
+└── requirements-cloud.txt  # 無 torch/easyocr（image ~200MB）
 ```
 
 步驟：
 
-1. 推到 GitHub
-2. render.com → New Web Service → 連結 repo
-3. Root Directory 設 `backend`
-4. Environment 設 `CGU_API_KEY`（或 `OPENAI_API_KEY`），需要多人共用地圖時再設 `NEO4J_*`
-5. Deploy → 取得 URL
-6. `.env` 或 App 設定頁把 `BACKEND_URL` 指向 `https://你的app.onrender.com/`
+1. `cd backend` → `docker build -t shopping-nav-backend .`
+2. 在雲端主機執行，環境變數設 `CGU_API_KEY`（或 `OPENAI_API_KEY`），需要多人共用地圖時再設 `NEO4J_*`，
+   並設 `PERCEPTION_ENABLED=0`、`OCR_ENABLED=0`、`VLM_BACKEND=openai`
+3. `.env` 或 App 設定頁把 `BACKEND_URL` 指向主機的網址
 
 雲端版停用 GroundingDINO + EasyOCR（`PERCEPTION_ENABLED=0`, `OCR_ENABLED=0`），
 完全走 VLM 路線，免費方案即可運行。
@@ -370,7 +367,7 @@ output/maps/
 | `app/src/main/res/xml/file_paths.xml` | FileProvider path |
 | `backend/requirements-server.txt` | 本機完整版 Python 套件清單 |
 | `backend/requirements-cloud.txt` | 雲端輕量版（無 torch/easyocr） |
-| `backend/Dockerfile` / `render.yaml` | 雲端部署設定 |
+| `backend/Dockerfile` | 雲端部署（Docker）設定 |
 
 ---
 

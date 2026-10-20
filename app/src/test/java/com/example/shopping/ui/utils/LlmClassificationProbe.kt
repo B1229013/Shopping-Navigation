@@ -36,7 +36,7 @@ class LlmClassificationProbe {
     fun probe() = runBlocking {
         assumeTrue("set RUN_LLM_PROBE=1 to run", System.getenv("RUN_LLM_PROBE") == "1")
 
-        val llm = products.chunked(50).flatMap { requestBatch(it, BuildConfig.OPENAI_API_KEY) }
+        val llm = products.chunked(50).flatMap { requestBatch(it, BuildConfig.CGU_API_KEY) }
         println("name\tllm_raw\tfinal\tbudget\tkeyword_only\toverride")
         products.forEachIndexed { i, name ->
             val final = resolveHomeCategory(name, llm[i])

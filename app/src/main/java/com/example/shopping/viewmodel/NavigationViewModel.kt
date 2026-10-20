@@ -1,7 +1,11 @@
 package com.example.shopping.viewmodel
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.hardware.SensorManager
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
@@ -16,6 +20,8 @@ import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.shopping.navigation.FollowState
@@ -71,6 +77,8 @@ class NavigationViewModel : ViewModel() {
     var annotatedPhotoUrl: String? by mutableStateOf(null)
     var errorMessage: String? by mutableStateOf(null)
     var photoCount: Int by mutableIntStateOf(0)
+    /** Last photo taken or picked, shown beside the status card (iOS lastCapturedImage). */
+    var lastPhoto: ImageBitmap? by mutableStateOf(null); private set
 
     // ── Localization (shared backend: Neo4j reference map, node ids = Neo4j nid) ──
     var correctedNodeId: Int? by mutableStateOf(null)
@@ -491,6 +499,32 @@ class NavigationViewModel : ViewModel() {
     private fun photoPart(file: File): MultipartBody.Part =
         MultipartBody.Part.createFormData("photo", file.name, file.asRequestBody("image/jpeg".toMediaType()))
 
+    /**
+     * Small upright copy of a photo for the thumbnail: the file itself is deleted after upload,
+     * and BitmapFactory ignores the EXIF orientation CameraX / gallery JPEGs carry.
+     */
+    private fun decodeThumbnail(file: File, maxPx: Int = THUMBNAIL_MAX_PX): ImageBitmap? = try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.path, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
+        BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })?.let { bmp ->
+            val degrees = when (ExifInterface(file.path).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                else -> 0f
+            }
+            val upright = if (degrees == 0f) bmp else
+                Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(degrees) }, true)
+            upright.asImageBitmap()
+        }
+    } catch (e: Exception) {
+        Log.w("NavThumb", "Thumbnail decode failed", e)
+        null
+    }
+
     private fun text(v: String) = v.toRequestBody("text/plain".toMediaType())
 
     private fun num(v: Double): RequestBody = text(String.format(Locale.US, "%.3f", v))
@@ -503,11 +537,14 @@ class NavigationViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                val response = withContext(Dispatchers.IO) {
-                    val photoFile = File(context.cacheDir, "gallery_${System.currentTimeMillis()}.jpg")
+                val photoFile = File(context.cacheDir, "gallery_${System.currentTimeMillis()}.jpg")
+                withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         FileOutputStream(photoFile).use { output -> input.copyTo(output) }
                     } ?: throw Exception("無法讀取照片")
+                    decodeThumbnail(photoFile)
+                }?.let { lastPhoto = it }
+                val response = withContext(Dispatchers.IO) {
                     // Not taken here and now: the server ignores sensor data for it
                     val resp = NavigationApi.service.uploadPhoto(sid, photoPart(photoFile), source = text("gallery"))
                     photoFile.delete()
@@ -574,6 +611,7 @@ class NavigationViewModel : ViewModel() {
             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                 viewModelScope.launch {
                     try {
+                        withContext(Dispatchers.IO) { decodeThumbnail(photoFile) }?.let { lastPhoto = it }
                         val response = withContext(Dispatchers.IO) {
                             NavigationApi.service.uploadPhoto(
                                 sid, photoPart(photoFile),
@@ -651,6 +689,8 @@ class NavigationViewModel : ViewModel() {
         const val MIN_HEADING_CONFIDENCE = 0.5
         /** Ask for a photo to re-fix the position after walking this far (iOS photoReminderM). */
         const val PHOTO_REMINDER_M = 12.0
+        /** Long side of the last-photo thumbnail (shown at 56 dp, ~170 px on a 3x screen). */
+        private const val THUMBNAIL_MAX_PX = 256
         /** Backend SECOND_PHOTO_MAX_MOVE_M: a second photo only counts within this distance. */
         const val SECOND_PHOTO_MAX_MOVE_M = 3.0
         private const val REPLAN_MIN_INTERVAL_MS = 8_000L

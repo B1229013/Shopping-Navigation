@@ -521,22 +521,26 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            NavStatusCard(
-                title = statusTitle,
-                phase = vm.phase,
-                goal = vm.goal,
-                currentTarget = vm.currentTarget,
-                currentLocation = vm.currentLocation,
-                torchOn = torchOn,
-                torchAvailable = torchAvailable,
-                onToggleTorch = {
-                    boundCamera?.let { cam ->
-                        torchOn = !torchOn
-                        cam.cameraControl.enableTorch(torchOn)
-                    }
-                },
-                onShowPhotoGuide = { showPhotoGuide = true },
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                vm.lastPhoto?.let { LastPhotoThumbnail(it) }
+                NavStatusCard(
+                    title = statusTitle,
+                    phase = vm.phase,
+                    goal = vm.goal,
+                    currentTarget = vm.currentTarget,
+                    currentLocation = vm.currentLocation,
+                    torchOn = torchOn,
+                    torchAvailable = torchAvailable,
+                    onToggleTorch = {
+                        boundCamera?.let { cam ->
+                            torchOn = !torchOn
+                            cam.cameraControl.enableTorch(torchOn)
+                        }
+                    },
+                    onShowPhotoGuide = { showPhotoGuide = true },
+                    modifier = Modifier.weight(1f),
+                )
+            }
             if (vm.goalItems.isNotEmpty()) {
                 ShoppingChecklist(items = vm.goalItems, currentTarget = vm.currentTarget)
             }
@@ -572,13 +576,13 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
             ) {
             // One hint at a time, most urgent first (as on iOS)
             when {
-                vm.retakeHint != null -> NavHintBanner("📷 ${vm.retakeHint}", Color(0xFFFF9800).copy(alpha = 0.9f))
-                vm.secondPhotoHint != null -> NavHintBanner("📷 ${vm.secondPhotoHint}", Color(0xFF2196F3).copy(alpha = 0.85f))
+                vm.retakeHint != null -> NavHintBanner(vm.retakeHint.orEmpty(), Color(0xFFFF9800).copy(alpha = 0.9f))
+                vm.secondPhotoHint != null -> NavHintBanner(vm.secondPhotoHint.orEmpty(), Color(0xFF2196F3).copy(alpha = 0.85f))
                 idle && vm.sensorsRunning && !vm.isOnMap && vm.startPoints.isNotEmpty() ->
-                    NavHintButton("📍 我在起點，從這裡開始", Color.Black.copy(alpha = 0.6f), onClick = { showStartPicker = true })
+                    NavHintButton("我在起點，從這裡開始", Color.Black.copy(alpha = 0.6f), onClick = { showStartPicker = true })
                 idle && vm.isOnMap && vm.distanceSinceFix >= NavigationViewModel.PHOTO_REMINDER_M ->
-                    NavHintBanner("📍 已走 ${vm.distanceSinceFix.toInt()} m，拍一張照片校正位置", Color.Black.copy(alpha = 0.55f))
-                idle && !isPhoneUpright -> NavHintBanner("📱 手機請拿直、對準走道前方", Color.Black.copy(alpha = 0.55f))
+                    NavHintBanner("已走 ${vm.distanceSinceFix.toInt()} m，拍一張照片校正位置", Color.Black.copy(alpha = 0.55f))
+                idle && !isPhoneUpright -> NavHintBanner("手機請拿直、對準走道前方", Color.Black.copy(alpha = 0.55f))
             }
 
             val follow = vm.followState

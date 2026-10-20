@@ -1,405 +1,254 @@
-# Shopping Navigation — 室內導航系統
+# Shopping Navigation — 室內購物導航系統
 
-**VLM（視覺語言模型）視覺推理**即時室內導航 App。
-使用者拍照上傳，系統透過物件偵測（GroundingDINO）、文字辨識（EasyOCR）與
-VLM（GPT-4o / Gemini / CGU gateway）分析環境，並在拓樸地圖上進行照片定位與
-路徑規劃，提供逐步導航指引。
+拍照就能在賣場裡導航的 Android App，搭配一個 Python FastAPI 後端。使用者輸入要找的商品後拍照，
+後端用 **VLM 看懂照片 → 在店家的拓樸地圖上定位 → 規劃路線**，回傳逐步指引；手機在兩張照片之間
+用 **PDR（計步＋航向）** 持續更新位置。App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
 
 開箱影片連結：https://drive.google.com/file/d/1nU0xep0huSmS2-fzG8ooJqlZE7_wVK6P/view?usp=sharing
 
 ---
 
-## 系統功能綜覽
+## 倉庫與版本
 
-系統由 **Android App（前端）** 與 **Python FastAPI（後端）** 組成，後端為共用雲端服務，
-兩端透過 HTTP/JSON 溝通。完整功能如下：
-
-**導航**
-
-- **VLM 拍照導航** — 輸入目標（如「找冰箱」），拍照後由物件偵測 + OCR + VLM
-  綜合判斷，逐步回傳 MOVE / ARRIVED / ASK 指引，並在照片上標註偵測結果。
-
-**地圖與定位**
-
-- **拓樸地圖 v2** — 場所等級地圖，照片節點 + 物件節點子圖、多方向支援，可跨導航重用。
-- **照片定位（locate_v2）** — 給一張新照片，推理它對應到既有地圖的哪個節點
-  （embedding 相似度 + IDF 權重 + 網格比對）。
-- **路徑規劃（route_planner）** — 地圖上的 A* 最短路徑與多目標 TSP 排序。
-- **Neo4j 雲端地圖** — 地圖存入/讀出 Neo4j Aura，供多人共用同一份場所地圖。
-
-**工具與基礎設施**
-
-- **感測器實驗室** — 8 種感測器即時錄製、CSV 匯出、歷史瀏覽與分享（開發/驗證用）。
-- **CGU LLM Gateway** — 一把 `CGU_API_KEY` 通吃 chat / vision / OCR / embedding。
-- **Docker** — 附 Dockerfile（輕量版，不含 torch/easyocr），可打包後端放到任何雲端主機。
-
-| 功能 | 模組 | 說明 |
+| 倉庫 | 內容 | 狀態 |
 |------|------|------|
-| VLM 拍照導航 | `server.py` + `vlm.py` | 拍照 → 物件偵測 + OCR + VLM 決策 → 逐步指引（MOVE/ARRIVED/ASK） |
-| 拓樸地圖 v2 | `topomap_v2.py` | 場所等級地圖：照片節點 + 物件節點子圖、多方向、可跨多次導航重用 |
-| 照片定位 | `locate_v2.py` | 給一張照片，推理它對應到已建地圖中哪個節點 |
-| 路徑規劃 | `route_planner.py` | TopoGraphV2 上的 A* 最短路徑與多目標 TSP 排序 |
-| Neo4j 雲端地圖 | `neo4j_map_store.py` | 把地圖存入/讀出 Neo4j Aura，供多人共用 |
-| CGU LLM Gateway | `llm_gateway.py` | 長庚大學 OpenAI 相容 gateway：一把金鑰通吃 chat/vision/OCR/embedding |
-| 感測器實驗室 | Android `SensorLabScreen` | 8 種感測器即時錄製、CSV 匯出、歷史瀏覽與分享 |
+| **B1229023/APPNAV**（本倉庫，`main`） | Android App ＋ 共用後端 `backend/` | **目前開發主線**（2026-10-20 整合三個倉庫） |
+| B1229013/Shopping-Navigation | 同上，停在 2026-10-07 | 之後會同步成最後的版本 |
+| B1222017/APPNAV_ios | iOS App（Swift） | iOS 繼續在那裡開發；後端改用本倉庫的 `backend/` |
+
+- iOS 與 Android 共用同一套後端 API（`backend/`）。本倉庫已不再保留 iOS 程式的副本。
+- 舊版分支以 tag 保存：`archive/ranging-metric-distance`、`archive/sensorlab-pdr`、
+  `archive/sensor-nav-pdr`、`archive/remove-dead-modules`；整合前的狀態是 `backup/before-consolidate`。
 
 ---
 
-## 如何操作（快速上手）
+## 系統功能
 
-> 完整安裝步驟見下方 [從零開始安裝](#從零開始安裝)；此處為操作全貌。
+**導航（主功能，「AR 導航」頁）**
 
-**環境準備**
+- **選店與起點** — 從 Neo4j 讀出可用的店（`GET /places`），可選「我在起點」對準地圖方向開始（`GET /starts`）。
+- **拍照定位** — VLM 讀出照片裡的物件、商品名與標示文字，再與店家地圖比對，融合
+  **DINOv2 影像相似度 ＋ 物件名稱（中英＋語意向量）＋ OCR 文字 ＋ 手機感測器位置**，算出使用者在哪個節點、面向哪裡。
+- **路線規劃** — 在 Neo4j 的走道拓樸圖上規劃路線，小地圖與指令走同一張圖。
+- **逐步指引** — 每張照片回傳 MOVE / ASK / ARRIVED；抵達時需地圖同意，並以「是／不是」按鈕確認。
+- **PDR 即時位置** — 兩張照片之間用計步與航向更新位置、沿路線前進；照片定位後再校正。
+- **照片品質** — 太暗、模糊、被擋住時會請使用者重拍；信心不足時請使用者原地轉身再拍一張。
 
-1. 啟動後端：`cd backend` → `.\start.ps1`（本機）或用 Dockerfile 部署到雲端主機取得 URL。
-2. 設定 App 連線：模擬器用預設 `http://10.0.2.2:8000/`；實體手機用
-   `adb reverse tcp:8000 tcp:8000` 或在設定頁填入後端 URL。
-3. 開啟 `http://<後端>/health` 回傳 `{"status":"ok"}` 即代表連線正常。
+**建圖與研究工具**
 
-**操作流程 — VLM 拍照導航**
+- **Sensor Lab** — 全螢幕拍照（倍率轉盤、點擊對焦）＋ 8 種感測器錄製與 PDR 紀錄，用來建新店的地圖。
+- **拓樸地圖建置器**（`/topomap-builder`）— 把 Sensor Lab 的走路紀錄排成地圖，上傳到 Neo4j。
+- **PDR Waypoint 編輯器**（根目錄 `pdr-waypoint-editor.html`）— 在平面圖上點出航點、Grid Snap、匯出座標 JSON。
+- **定位評估**（`backend/eval/`）— 單張影像定位基準、權重掃描、逐張報告、VLM 重播（不呼叫 API）。
+- **即時監看**（`/dashboard`）與 **定位診斷頁**（`/debug`、`/session/{id}/debug-page`）。
 
-1. App 進入「導航」頁 → 輸入目標（如「找冰箱」）→ 開始導航。
-2. 拍照或選相簿照片 → 等待分析 → 依 MOVE/ARRIVED/ASK 指引移動。
-3. 重複拍照直到 ARRIVED；過程自動建立拓樸地圖。
+**購物功能**
 
-**進階**
-
-- 已建地圖可用照片定位（`locate_v2`）確認目前位置，或用路徑規劃（`route_planner`）
-  排多目標最短路線；多人共用地圖時把地圖上傳至 Neo4j。
+- 購物清單（自動分類）、預算、歷史紀錄、食材紀錄、AI 助手、附近商店（含 AR 顯示）、收據掃描。
 
 ---
 
 ## 系統架構
 
 ```
-┌──────────────────────────┐   HTTP/JSON    ┌──────────────────────────────────────┐
-│  Android App (Kotlin)    │ ◄────────────► │  Python FastAPI Backend                │
-│                          │   Retrofit     │                                        │
-│  Camera / Gallery ───────┼─ JPEG ───────► │  ┌─ GroundingDINO (物件偵測)          │
-│                          │                │  ├─ EasyOCR (文字辨識)               │
-│  NavigationScreen ◄──────┼── TurnResponse │  ├─ VLM (GPT-4o / Gemini / CGU)       │
-│  Settings / ...          │                │  ├─ Annotator (標註圖)                │
-│                          │                │  ├─ TopoMap / TopoMap v2 (拓樸地圖)   │
-│                          │                │  ├─ locate_v2 (照片定位)             │
-│                          │                │  ├─ route_planner (路徑規劃)         │
-│                          │                │  └─ Neo4j / MapStore (地圖持久化)     │
-└──────────────────────────┘                └──────────────────────────────────────┘
+┌────────────────────────────┐   HTTP/JSON   ┌──────────────────────────────────────────────┐
+│ Android App（Kotlin）       │ ◄───────────► │ FastAPI 後端（backend/server）               │
+│                            │   Retrofit    │                                              │
+│ NavigationScreen  拍照 ─────┼── JPEG ─────► │ VLM 感知（OpenAI 相容 API，最多 3 輪）         │
+│ MapPositionEstimator（PDR） │               │ 定位融合：DINOv2 ＋ 物件 ＋ OCR ＋ 感測器       │
+│ PathFollower ＋ 小地圖       │ ◄─ 指引／路線 ─┤ 路線規劃（Neo4j 拓樸圖）                      │
+│ Sensor Lab（建圖用）         │               │ VLM 決策 → MOVE / ASK / ARRIVED              │
+└────────────────────────────┘               └───────────────┬──────────────────────────────┘
+                                                             │
+                          ┌──────────────────────────────────┼─────────────────────┐
+                          │ Neo4j Aura：店家地圖（節點、走道、方向照片、物件、DINOv2 向量）│
+                          │ backend/maps：起點、額外走道邊、編輯器地圖                    │
+                          └──────────────────────────────────────────────────────────┘
+
+App 的 AI 購物功能（分類、AI 助手、收據）另外直接連 CGU LLM 閘道，不經過導航後端。
 ```
 
-## 導航流程（VLM 拍照導航，`/session`）
+## 導航流程（`/session`）
 
-1. **建立 Session** — 使用者輸入目標（如「找冰箱」），VLM 分解出偵測關鍵字
-2. **拍照上傳** — GroundingDINO 偵測物件、EasyOCR 讀取文字
-3. **VLM 決策** — 綜合偵測結果 + 照片 + 歷史路徑，回傳 MOVE / ARRIVED / ASK
-4. **標註圖** — 在照片上標示所有偵測框和 OCR 文字（含信心值）
-5. **拓樸地圖** — 每一步自動建立並保存地圖（JSON + PNG）
+1. **建立 session** — `POST /session`，帶目標（如「找優格」）和店名；後端把目標拆成要找的物件。
+2. **選起點（可選）** — `POST /session/{id}/start`，從起點出發並重新規劃路線。
+3. **拍照** — `POST /session/{id}/photo`，帶照片和手機的位置／航向：
+   1. 照片品質檢查（模糊、太暗、遮擋）
+   2. VLM 感知：物件、商品名、OCR 文字、店內區域（`VLM_ROUNDS`、`VLM_PASS3`）
+   3. 定位融合：伺服器端 DINOv2 找最像的參考照片，再加物件名稱、OCR、走道吊牌與感測器位置
+   4. 依定位結果在 Neo4j 拓樸圖上規劃到目標的路線
+   5. VLM 決策：根據照片與路線回傳 MOVE / ASK / ARRIVED 與中文指引
+4. **回答與確認** — `POST /session/{id}/answer`（回答 ASK）、`POST /session/{id}/confirm`（確認抵達）。
+5. **路線** — `GET /session/{id}/path` 給 App 畫小地圖與跟隨路線。
+
+每次導航的定位紀錄存在 `backend/output/sessions/<session_id>/`（`session_log.py`）。
+
+## 新店建圖流程
+
+1. 用 App 的 **Sensor Lab** 在店裡走一圈拍照（同時錄 PDR）。
+2. `python build_map_v2_topomap.py` — 把走路紀錄整理成建圖工作區。
+3. 開 `http://<後端>/topomap-builder` — 排節點、接走道、疊平面圖、確認。
+4. `python upload_map_v2.py` — 上傳成 Neo4j 的 V2 地圖格式（`server/map_v2.py`）。
+5. `python rebuild_objects_v2.py` — 對每張方向照片偵測物件並寫回 Neo4j。
+6. `python store_dino_v2.py` — 算每張照片的 DINOv2 向量，存進 `dino_sidecar.pkl` 和 Neo4j。
+7. 在建置器設定起點（位置、面向、照片），存在 `backend/maps/starts/<店名>/`。
 
 ---
 
-## 從零開始安裝
+## 安裝與啟動
 
 ### 前置需求
 
 | 項目 | 版本 |
 |------|------|
-| Android Studio | Ladybug 以上（支援 AGP 9.0.0） |
+| Android Studio | Ladybug 以上（AGP 9.0.0） |
 | JDK | 17+ |
-| Python | 3.10 ~ 3.11 |
-| C++ Build Tools | Visual Studio Build Tools（安裝「使用 C++ 的桌面開發」，本機跑 GroundingDINO 才需要） |
+| Python | 3.11 |
+| Neo4j Aura | 店家地圖存在這裡（導航必需） |
 
-### Step 1：Clone 專案
-
-```bash
-git clone <repo-url>
-cd Shopping-Navigation
-```
-
-### Step 2：設定環境變數
-
-在專案根目錄建立 `.env`（可參考 `.env.example`）：
+### 1. 設定 `.env`（專案根目錄，可參考 `.env.example`）
 
 ```env
-# Android App 連線用（改成你電腦的 IP，或雲端 URL）
-BACKEND_URL=http://192.168.x.x:8000/
-
-# VLM 後端選擇：openai / gemini / ollama
-VLM_BACKEND=openai
-
-# 長庚大學 LLM Gateway（一把金鑰通吃 chat/vision/OCR/embedding）
-CGU_API_KEY=your-cgu-gateway-key
-
-# OpenAI / 相容 API（CGU_API_KEY 為空時使用）
-OPENAI_API_KEY=your-openai-api-key
-OPENAI_BASE_URL=https://api.openai.com/v1
+# ── 導航後端 ──
+OPENAI_API_KEY=your-key            # VLM、物件名稱語意向量
+OPENAI_BASE_URL=https://api.openai.com/v1   # 可改成任何 OpenAI 相容閘道
 OPENAI_MODEL=gpt-4o
-
-# Gemini（選用）
-GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-2.5-flash
-
-# 感知模組開關（1=開，0=關；雲端部署建議都設 0）
-PERCEPTION_ENABLED=1
-OCR_ENABLED=1
-
-# Neo4j Aura（選用，多人共用地圖時）
 NEO4J_URI=neo4j+s://xxxx.databases.neo4j.io
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your-password
+PERCEPTION_ENABLED=0               # 1 = 本機 GroundingDINO（需模型權重）
+OCR_ENABLED=0                      # 1 = 本機 EasyOCR
+
+# ── Android App ──
+BACKEND_URL=http://192.168.x.x:8000/
+CGU_API_KEY=your-cgu-key           # 購物清單分類、AI 助手、收據（CGU 閘道）
+CGU_BASE_URL=https://air.cgu.edu.tw/cgullmapi/v1
+MAPS_API_KEY=your-google-maps-key  # 附近商店
 ```
 
-### Step 3：安裝 Python Backend
+### 2. 啟動後端
 
 ```powershell
 cd backend
-
-# 建立虛擬環境
 python -m venv venv
 .\venv\Scripts\Activate.ps1
-$env:PYTHONUTF8 = "1"
-
-# 安裝基礎套件
 pip install -r requirements-server.txt
-
-# 安裝 CPU 版 PyTorch（覆蓋 CUDA 版，除非你有 ≥4GB VRAM 的 GPU）
-pip install torch torchvision --force-reinstall --index-url https://download.pytorch.org/whl/cpu
-
-# 安裝 transformers（必須 <5，GroundingDINO 不相容 v5）
-pip install "transformers>=4.40,<5"
-
-# 安裝 GroundingDINO
-pip install wheel setuptools
-pip install groundingdino-py --no-build-isolation
-```
-
-> 若只走 VLM 路線（不用本機 GroundingDINO/EasyOCR），可設 `PERCEPTION_ENABLED=0`、
-> `OCR_ENABLED=0`，並改裝輕量的 `requirements-cloud.txt`，就不需要 PyTorch 與模型權重。
-
-### Step 4：下載模型權重（本機完整模式才需要）
-
-下載 `groundingdino_swint_ogc.pth`（約 694MB）放到 `backend/models/`：
-
-```
-backend/
-  models/
-    groundingdino_swint_ogc.pth
-```
-
-下載連結：https://github.com/IDEA-Research/GroundingDINO/releases
-
-### Step 5：啟動 Backend
-
-```powershell
-cd backend
+pip install numpy pillow torch transformers   # 伺服器端 DINOv2 定位（沒裝會退回只用物件＋OCR）
 .\start.ps1
 ```
 
-或手動：
+`start.ps1` 會啟用 venv 並以 `uvicorn server.server:app --port 8000` 啟動。
+瀏覽器開 `http://localhost:8000/docs` 可看到所有端點，`/health` 回傳 `{"status":"ok"}` 代表正常。
 
-```powershell
+### 3. 安裝 App
+
+1. 用 Android Studio 開啟專案根目錄，連接手機後 Run。
+2. 後端連線：模擬器預設 `http://10.0.2.2:8000/`；實體手機用 `adb reverse tcp:8000 tcp:8000`，
+   或在 `.env` 設 `BACKEND_URL`，也可在 App 的設定頁切換。
+
+### Docker（選用，尚未在目前版本驗證）
+
+`backend/Dockerfile` 只裝 `requirements-cloud.txt`（不含 torch／easyocr），預設關閉本機偵測與 OCR。
+
+```bash
 cd backend
-.\venv\Scripts\Activate.ps1
-$env:PYTHONUTF8 = "1"
-python -m uvicorn server.server:app --host 0.0.0.0 --port 8000
+docker build -t shopping-nav-backend .
 ```
 
-啟動成功後，瀏覽器開 `http://localhost:8000/docs` 可看到 Swagger UI 上所有端點。
-
-### Step 6：安裝 Android App
-
-1. 用 Android Studio 開啟專案根目錄
-2. 設定後端連線：
-   - **模擬器**：預設 `http://10.0.2.2:8000/`，不用改
-   - **實體手機 USB**：`adb reverse tcp:8000 tcp:8000`
-   - **同網路 WiFi**：`.env` 設 `BACKEND_URL=http://你的IP:8000/`
-   - App 內也可在設定頁動態切換後端 URL（`BackendConfig`）
-3. 連接手機或模擬器，點 Run
-
-### 連線測試
-
-手機瀏覽器開啟 `http://<你的IP>:8000/health`，應回傳 `{"status":"ok"}`。
-
----
-
-## 使用方式
-
-### VLM 拍照導航
-
-1. 開啟 App → 進入「導航」頁面
-2. 輸入目標（如「找冰箱」）→ 按「開始導航」
-3. 拍照或從相簿選取 → 等待分析
-4. 依指引移動 → 再拍照 → 重複直到 ARRIVED
-
-### 快速模式 vs 完整模式
-
-在 `.env` 中切換：
-
-| 模式 | 設定 | 速度 | 精度 |
-|------|------|------|------|
-| 快速（VLM only） | `PERCEPTION_ENABLED=0`, `OCR_ENABLED=0` | ~5 秒 | 中 |
-| 完整（全模組） | `PERCEPTION_ENABLED=1`, `OCR_ENABLED=1` | ~60 秒 | 高 |
+執行時以環境變數提供 `OPENAI_API_KEY`、`NEO4J_*`。
 
 ---
 
 ## API 端點
 
-### 導航 Session
-
-| Method | Path | 說明 |
-|--------|------|------|
-| `POST` | `/session` | 建立導航 session，回傳 session_id 和 goal_objects |
-| `POST` | `/session/{id}/photo` | 上傳照片，回傳導航指引（TurnResponse） |
-| `POST` | `/session/{id}/answer` | 回答 VLM 提問 |
-| `POST` | `/session/{id}/confirm` | 確認 / 否認抵達 |
-| `POST` | `/session/{id}/confirm_location` | 確認定位候選節點 |
-| `GET` | `/session/{id}` | 查詢 session 狀態和歷史 |
-| `GET` | `/session/{id}/map` | 取得拓樸地圖（`?format=png` 取 PNG） |
-| `GET` | `/session/{id}/photo/{n}.jpg` | 取得第 n 張標註照片 |
-| `GET` | `/session/{id}/raw_photo/{node_id}` | 取得原始照片 |
-| `GET` | `/session/{id}/topo_photo/{photo_id}` | 取得拓樸地圖照片 |
-
-### 工具與診斷
-
-| Method | Path | 說明 |
-|--------|------|------|
-| `POST` | `/ocr` | 單張照片 OCR |
-| `GET` | `/sessions/list` | 列出所有 session |
-| `GET` | `/sessions/{id}/debug` | session 除錯資訊 |
-| `GET` | `/health` | 健康檢查 |
+| 分類 | 端點 |
+|------|------|
+| 店家與起點 | `GET /places`、`GET /starts`、`GET /starts/photo`、`POST /starts` |
+| 導航 session | `POST /session`、`POST /session/{id}/photo`、`POST /session/{id}/answer`、`POST /session/{id}/confirm`、`POST /session/{id}/start` |
+| 路線與地圖 | `GET /session/{id}/path`、`GET /session/{id}/route`、`GET /session/{id}/map`、`POST /session/{id}/sensor-map`、`GET /reference-map` |
+| 單張定位 | `POST /localize`、`POST /ocr` |
+| 照片 | `GET /session/{id}/photo/{node_id}.jpg`、`GET /session/{id}/original/{node_id}.jpg`、`GET /reference-photo/{nid}.jpg` |
+| 建圖工具 | `GET /topomap-builder` 與 `/topomap-*` 系列（來源上傳、走路紀錄、平面圖、建議、確認） |
+| 診斷 | `GET /health`、`GET /dashboard`、`GET /debug`、`GET /sessions`、`GET /session/{id}`、`GET /session/{id}/debug`、`GET /session/{id}/debug-page`、`POST /test/config` |
+| 感測器測試 | `POST /sensor-test`、`GET /sensor-test/{id}/plot.png` |
 
 ---
 
-## 雲端部署（Docker，選用）
-
-`backend/` 附 Docker 打包檔：
+## 專案結構
 
 ```
-backend/
-├── Dockerfile              # Python 3.11 slim，只裝核心依賴
-├── .dockerignore
-└── requirements-cloud.txt  # 無 torch/easyocr（image ~200MB）
+.
+├── app/                      Android App（Kotlin、Jetpack Compose）
+├── backend/
+│   ├── server/               FastAPI 後端（正式使用）
+│   ├── eval/                 定位與導航評估（資料、結果、圖表）
+│   ├── maps/                 起點照片、額外走道邊（neo4j_links）、編輯器地圖
+│   ├── legacy/               舊後端（/snav、topomap_v2、locate_v2）與早期定位研究，只供研究腳本 import
+│   ├── *.py                  建圖與資料處理腳本（見下表）
+│   ├── dino_sidecar.pkl      參考照片的 DINOv2 向量
+│   └── Dockerfile、requirements-*.txt、start.ps1
+├── docs/                     設計文件書、測試計劃書、期中／期末報告、架構圖
+├── 物件導向Project/            使用案例圖、使用案例描述、活動圖
+└── pdr-waypoint-editor.html  PDR 航點編輯器
 ```
 
-步驟：
-
-1. `cd backend` → `docker build -t shopping-nav-backend .`
-2. 在雲端主機執行，環境變數設 `CGU_API_KEY`（或 `OPENAI_API_KEY`），需要多人共用地圖時再設 `NEO4J_*`，
-   並設 `PERCEPTION_ENABLED=0`、`OCR_ENABLED=0`、`VLM_BACKEND=openai`
-3. `.env` 或 App 設定頁把 `BACKEND_URL` 指向主機的網址
-
-雲端版停用 GroundingDINO + EasyOCR（`PERCEPTION_ENABLED=0`, `OCR_ENABLED=0`），
-完全走 VLM 路線，免費方案即可運行。
-
----
-
-## 輸出檔案
-
-每個 session 的輸出保存在 `backend/output/sessions/{session_id}/`：
-
-```
-output/sessions/{session_id}/
-  ├── photo/        原始照片（0.jpg, 1.jpg, ...）
-  ├── annotated/    標註照片（綠框=物件偵測，青框=OCR文字，含信心值）
-  ├── graph/        目標圖 / 場景圖 PNG
-  └── map/          拓樸地圖（map_0.json / map_0.png / ...）
-
-output/maps/
-  └── {map_id}.json  可重用的持久化地圖
-```
-
----
-
-## 專案檔案說明
-
-### Backend（`backend/server/`）
+### 後端模組（`backend/server/`）
 
 | 檔案 | 功能 |
 |------|------|
-| `server.py` | FastAPI 主程式。定義所有 API 端點，串接照片上傳→偵測→OCR→VLM→標註→地圖的完整流程 |
-| `config.py` | 全域設定。讀取 `.env`，定義模型路徑、偵測閾值、VLM 後端、OCR 語言、CGU/Neo4j 參數、label 正規化 |
-| `vlm.py` | VLM 呼叫層。支援 OpenAI / Gemini / Ollama / CGU gateway，負責圖片壓縮、prompt 組裝、API 呼叫 |
-| `llm_gateway.py` | 長庚大學 OpenAI 相容 gateway 共用 client：一把 `CGU_API_KEY` 路由 chat / vision / OCR / embedding |
-| `perception.py` | GroundingDINO 物件偵測。依 goal_objects 關鍵字偵測物件，回傳 bounding box + 信心值 |
-| `ocr.py` | EasyOCR 文字辨識。支援英文和繁體中文 |
-| `annotator.py` | 標註圖產生器。繪製物件偵測框（綠）與 OCR 文字框（青），標示 label 和信心值 |
-| `graph_renderer.py` | 目標圖 / 累積場景圖 PNG 繪製，含偵測後處理（NMS、相鄰框合併、跨步實體追蹤、空間關係推論） |
-| `prompts.py` | Prompt 模板。goal 分解、每步導航、比例式 bbox 感知 prompt |
-| `goal_decomposer.py` | 目標分解。呼叫 VLM 將使用者目標轉換為偵測關鍵字列表 |
-| `scene.py` | 場景格式化。將偵測與 OCR 結果轉為 VLM 可讀文字（含空間位置：左/中/右、近/遠） |
-| `topomap.py` | 拓樸地圖（v1）。NetworkX 動態圖：節點=拍照位置，邊=移動動作，供單次導航 |
-| `topomap_v2.py` | 拓樸地圖 v2。場所等級地圖：照片節點 + 物件節點子圖、多方向、可跨導航重用 |
-| `locate_v2.py` | 照片定位。給一張照片的偵測結果，推理最可能對應到地圖中哪個節點（embedding 相似度 + IDF 權重 + 網格比對） |
-| `route_planner.py` | 路徑規劃。TopoGraphV2 上的 A* 最短路徑與多目標 TSP 排序 |
-| `map_store.py` | 地圖 JSON 持久化：save / list / load / delete |
-| `neo4j_map_store.py` | 把 TopoGraphV2 存入 / 讀出 Neo4j Aura，供多人共用 |
-| `models.py` | 資料模型。API 的 request/response schema（Pydantic）與 VLM 回應格式 |
-| `session.py` | Session 管理。保存每個導航工作的狀態、歷史和地圖 |
-| `store_knowledge.py` / `store_map.py` / `navigator.py` | 靜態環境知識、預建地圖與靜態導航引擎（早期系辦 demo 用） |
-| `batch_mapper.py` | 批次建圖工具。對資料夾照片批次執行 GroundingDINO 偵測 |
-| `run_server.py` / `start.ps1` | 啟動腳本（設定 logging / 啟用 venv 並啟動 uvicorn） |
+| `server.py` | FastAPI 主程式：所有端點與拍照導航流程 |
+| `config.py` | 讀 `.env`，所有開關與權重（`LOC_*`、`VLM_*`、`EMBEDDING_*`、`NEO4J_*`…） |
+| `vlm.py` / `prompts.py` | VLM 呼叫與提示詞：感知（最多 3 輪）、導航決策、提問 |
+| `goal_decomposer.py` | 把目標拆成要找的物件 |
+| `visual_localization.py` | 照片物件／OCR 與 Neo4j 地圖比對（中英名稱、語意向量、稀有度權重、九宮格） |
+| `locate_fusion.py` / `dino_embed.py` | 伺服器端 DINOv2 影像分數，與物件、OCR 融合（權重 1 : 0.1 : 0.3） |
+| `loc_fusion.py` | 把影像證據與手機感測器位置合成機率排名 |
+| `place_recognizer.py` | 判斷使用者在哪一間已知的店（目前沒有被其他模組使用） |
+| `aisle_signs.py` | 從走道吊牌號碼縮小可能的位置 |
+| `photo_quality.py` | 模糊、太暗、遮擋檢查 |
+| `heading.py` | 估計使用者朝向，產生左轉／右轉指令 |
+| `editor_map.py` / `path_planner.py` | 可走路線圖、A* 與多目標排序、轉彎清單、小地圖資料 |
+| `neo4j_client.py` | Neo4j Aura HTTP 客戶端（讀地圖、照片、DINOv2 向量） |
+| `map_v2.py` / `map_build.py` | 建新店地圖：Sensor Lab 資料 → 建圖工作區 → Neo4j V2 格式 |
+| `start_points.py` | 每間店的起點（位置、面向、照片） |
+| `session.py` / `session_log.py` | session 狀態（記憶體）與每次導航的紀錄（磁碟） |
+| `scene.py` / `annotator.py` / `graph_renderer.py` | 給 VLM 的場景文字、標註圖、除錯用場景圖 |
+| `perception.py` / `ocr.py` | 本機 GroundingDINO 與 EasyOCR（`PERCEPTION_ENABLED`、`OCR_ENABLED` 開啟時） |
+| `topomap_builder.html` / `dashboard.html` / `debug_page.html` | 建圖工具、即時監看、定位診斷頁 |
+| `tests/` | pytest（39 個測試檔） |
+
+### 後端腳本（`backend/`）
+
+| 檔案 | 功能 |
+|------|------|
+| `build_map_v2_topomap.py` | Sensor Lab 走路紀錄 → 建圖工作區 |
+| `upload_map_v2.py` | 建置器確認後的地圖上傳到 Neo4j |
+| `rebuild_objects_v2.py` | 重新偵測每張方向照片的物件並寫回 Neo4j |
+| `store_dino_v2.py` | 計算並儲存每張方向照片的 DINOv2 向量 |
+| `build_store_graph.py`、`build_store_map.py`、`build_html_map.py`、`generate_topomap.py`、`render_clean.py`、`ocr_dump.py` | 早期的拓樸圖產生與繪製工具 |
 
 ### Android App（`app/src/main/java/com/example/shopping/`）
 
 | 檔案 | 功能 |
 |------|------|
-| `MainActivity.kt` | App 進入點與 composable 路由 |
-| `network/NavigationApi.kt` | Retrofit HTTP client（導航端點，OkHttp 30s connect / 300s read timeout） |
-| `network/BackendConfig.kt` | 後端 URL 動態設定（可在 App 內切換） |
-| `viewmodel/NavigationViewModel.kt` | 導航狀態管理 |
-| `ui/screens/NavigationScreen.kt` | 導航主畫面（CameraX、相簿、指引、標註圖） |
-| `ui/screens/SensorLabScreen.kt` | 感測器實驗室：8 種感測器即時錄製、CSV 匯出、歷史瀏覽與分享 |
-| `ui/screens/SettingsScreen.kt` | 設定頁面（後端 URL 設定等） |
-| `ui/screens/HomeScreen.kt` / `ShoppingListScreen.kt` / `AIScreen.kt` / `LoginScreen.kt` / `HistoryScreen.kt` / `IngredientsScreen.kt` / `MainContainer.kt` / `NearbyStoresSheet.kt` / `NearbyStoresAr.kt` | 其他頁面（首頁、購物清單、AI 助手、登入、歷史、食材推薦、主容器、附近商店） |
-| `ui/components/*.kt` | UI 動畫與互動元件 |
-| `ui/utils/CategoryClassifier.kt` | 商品分類規則：首頁 10 個分類按鈕、按鈕與預算類別的對應、人工修正的例外清單、關鍵字備案分類 |
-| `ui/utils/LlmCategoryClassifier.kt` | 用 LLM（`gpt-5.6-luna`，經長庚閘道）判斷商品屬於哪個首頁分類，失敗時改用關鍵字分類 |
-| `ui/utils/FoodIcons.kt` | 食物圖示 |
-| `model/*.kt` / `ui/theme/*.kt` | 資料模型與 Material3 主題 |
-
-### 設定檔
-
-| 檔案 | 功能 |
-|------|------|
-| `.env` / `.env.example` | 環境變數（VLM 後端、API Key、模組開關、Neo4j） |
-| `gradle/libs.versions.toml` | Android 依賴版本管理 |
-| `app/build.gradle.kts` | Android app 建置設定 |
-| `app/src/main/AndroidManifest.xml` | Android 權限宣告（相機、網路、位置） |
-| `app/src/main/res/xml/network_security_config.xml` | 允許 HTTP 明文連線（開發用） |
-| `app/src/main/res/xml/file_paths.xml` | FileProvider path |
-| `backend/requirements-server.txt` | 本機完整版 Python 套件清單 |
-| `backend/requirements-cloud.txt` | 雲端輕量版（無 torch/easyocr） |
-| `backend/Dockerfile` | 雲端部署（Docker）設定 |
+| `MainActivity.kt` | 進入點與頁面路由（登入、主畫面、AR 導航、設定、Sensor Lab） |
+| `ui/screens/NavigationScreen.kt` | 導航：選店與目標（`TeammateHomeScreen`）、相機、指引、PDR 跟隨 |
+| `ui/screens/NavigationPanels.kt` | 導航畫面元件：狀態卡、上一張照片縮圖、購物清單、小地圖、拍照說明 |
+| `ui/screens/ArGuidanceArrow.kt` | AR 方向箭頭 |
+| `viewmodel/NavigationViewModel.kt` | 導航狀態：session、拍照上傳、定位、路線、抵達確認 |
+| `navigation/MapPositionEstimator.kt` | PDR 在地圖上的位置估計（移植自 iOS） |
+| `navigation/PathFollower.kt` | 沿路線前進與轉彎提示（移植自 iOS） |
+| `sensor/PdrTracker.kt` | 計步與航向（Rotation Vector／Game Rotation Vector 北方校正） |
+| `network/NavigationApi.kt` / `BackendConfig.kt` | 導航後端 API 與後端網址設定 |
+| `ui/screens/SensorLabScreen.kt` | Sensor Lab：全螢幕拍照與感測器錄製（背景執行緒、約 50 Hz） |
+| `ui/screens/SensorNavScreen.kt`、`viewmodel/SensorNavViewModel.kt`、`network/SensorNavApi.kt` | 舊版「感測器導航」，呼叫 `/snav` 端點；目前後端已不提供，設定頁的入口無法使用 |
+| `ui/screens/MainContainer.kt` | 主畫面分頁（首頁、清單、食材、預算、歷史、AI），CGU 閘道請求 |
+| `ui/screens/HomeScreen.kt`、`ShoppingListScreen.kt`、`IngredientsScreen.kt`、`HistoryScreen.kt`、`AIScreen.kt`、`LoginScreen.kt`、`SettingsScreen.kt`、`NearbyStoresSheet.kt`、`NearbyStoresAr.kt` | 購物相關頁面 |
+| `ui/utils/CategoryClassifier.kt`、`LlmCategoryClassifier.kt` | 商品分類（例外清單 → LLM → 關鍵字） |
 
 ---
 
-## 技術細節
-
-### 偵測參數
-
-| 參數 | 值 | 說明 |
-|------|------|------|
-| `GROUNDINGDINO_BOX_THRESHOLD` | 0.30 | 主要偵測信心門檻 |
-| `GROUNDINGDINO_BOX_THRESHOLD_FALLBACK` | 0.20 | 未偵測到時降低重試 |
-| `GROUNDINGDINO_TEXT_THRESHOLD` | 0.25 | 文字匹配門檻 |
-| `OCR_MIN_CONFIDENCE` | 0.3 | OCR 最低信心值 |
-| `OCR_LANGUAGES` | en, ch_tra | OCR 語言（英文 + 繁體中文） |
-
-### 效能參考（CPU 模式，Intel i5 + MX550）
-
-| 模組 | 耗時 |
-|------|------|
-| GroundingDINO | ~30-40 秒 |
-| EasyOCR | ~20-30 秒 |
-| VLM (GPT-4o) | ~3-5 秒 |
-| 總計（完整模式） | ~55-80 秒 |
-| 總計（快速模式 / 雲端 VLM only） | ~3-5 秒 |
-
-### GPU 支援
-
-系統會自動偵測 GPU VRAM：
-- ≥ 3GB VRAM：自動使用 GPU（速度提升 5-10 倍）
-- < 3GB VRAM：自動降回 CPU 模式
-
-### 商品分類
+## 商品分類
 
 每個商品屬於一個首頁分類按鈕，再由按鈕換算成預算類別：
 
@@ -410,12 +259,30 @@ output/maps/
 | 清潔用品、廚房用品 | 生活用品（`Groceries`） |
 | 其他 | 其他（`Other`） |
 
-判斷順序：**例外清單 → LLM（`gpt-5.6-luna`）→ 關鍵字備案**。
+判斷順序：**例外清單 → LLM → 關鍵字備案**。LLM 走 CGU 閘道的 `gpt-5.6-luna`（`CGU_CHAT_MODEL`），
+AI 助手與收據掃描也用同一個模型。
 
-- **何時分類**：手動新增商品、修改商品名稱、掃描收據時各分類一次；App 啟動時會把還沒分類的舊商品一次批次補完。結果存在 `shopping_list.json` 的 `homeCategory`（首頁分類）和 `location`（預算類別）欄位，之後不會重複呼叫 LLM。
-- **LLM 失敗時**（網路、模型名稱、回覆格式）：畫面會顯示「AI 分類失敗，已改用關鍵字分類」，並改用關鍵字分類。
-- **修正誤判**：若 LLM 一直把某個商品分錯，在 `CategoryClassifier.kt` 的 `productOverrides` 加一行（例如 `"可樂果" to HOME_SNACKS`）。名稱只要包含該字串就會套用，且優先於 LLM。
-- **掃描收據**：辨識文字和整理收據仍用 `gpt-4o-mini`，只有商品分類用 `gpt-5.6-luna`。
+- **何時分類**：手動新增、修改名稱、掃描收據時；App 啟動時把還沒分類的舊商品一次補完。
+  結果存在 `shopping_list.json` 的 `homeCategory` 與 `location`，之後不會重複呼叫 LLM。
+- **LLM 失敗時**：顯示「AI 分類失敗，已改用關鍵字分類」，改用關鍵字分類。
+- **修正誤判**：在 `CategoryClassifier.kt` 的 `productOverrides` 加一行（例如 `"米酒" to HOME_SEASONING`），
+  名稱包含該字串就套用，優先於 LLM。
+- **實際打 LLM 測試**：`RUN_LLM_PROBE=1 ./gradlew :app:testDebugUnitTest --tests com.example.shopping.ui.utils.LlmClassificationProbe`。
+
+---
+
+## 測試
+
+```powershell
+# 後端
+cd backend
+.\venv\Scripts\python.exe -m pytest -q
+
+# Android 單元測試
+.\gradlew :app:testDebugUnitTest
+```
+
+目前後端 `test_vlm.py` 有 2 個檢查 perception 提示詞文字的測試未通過（整合前就存在）。
 
 ---
 
@@ -423,18 +290,17 @@ output/maps/
 
 | 問題 | 解決方式 |
 |------|----------|
-| 手機連不到 server | 確認同一 Wi-Fi、IP 正確、防火牆允許 port 8000；或用 `adb reverse tcp:8000 tcp:8000` |
-| `Perception unavailable` | 確認 `models/groundingdino_swint_ogc.pth` 存在，或設 `PERCEPTION_ENABLED=0` 走 VLM |
-| `transformers` BertModel 錯誤 | 安裝 `transformers<5`：`pip install "transformers>=4.40,<5"` |
-| 照片上傳 timeout | 改用快速模式（`PERCEPTION_ENABLED=0`）或增加手機端 timeout |
-| GroundingDINO 安裝失敗 | 安裝 Visual Studio C++ Build Tools，設定 `$env:PYTHONUTF8="1"` |
+| 手機連不到後端 | 確認同一 Wi-Fi、IP 正確、防火牆允許 8000；或 `adb reverse tcp:8000 tcp:8000` |
+| 選店清單是空的 | 確認 `.env` 的 `NEO4J_URI`／`NEO4J_PASSWORD`；沒有 Neo4j 時只會列出 `NEO4J_PLACE` |
+| 定位只靠物件與文字 | 伺服器端 DINOv2 需要 `torch`＋`transformers` 與 `dino_sidecar.pkl`；`LOC_SERVER_DINO=0` 可關閉 |
+| 不想每張照片多一次 embedding 請求 | 設 `EMBEDDING_ENABLED=0`，物件名稱改回只用字元相似度 |
 | AGP 版本不相容 | `gradle/libs.versions.toml` 中 `agp` 設為 `9.0.0` |
-| CGU gateway 回 invalid key | `llm_gateway` 需要 base URL override，確認 `CGU_API_KEY` 與 gateway endpoint 正確 |
 
 ---
 
 ## 相關文件
 
-- [`backend/README_topomap_v2.md`](backend/README_topomap_v2.md) — 拓樸地圖 v2 資料結構
-- [`backend/README_locate_v2.md`](backend/README_locate_v2.md) — 照片定位邏輯
-- `http://localhost:8000/docs` — Swagger UI（所有 API 端點）
+- [`backend/eval/README.md`](backend/eval/README.md) — 評估工具與指標
+- [`backend/legacy/README_locate_v2.md`](backend/legacy/README_locate_v2.md)、[`backend/legacy/README_topomap_v2.md`](backend/legacy/README_topomap_v2.md) — 舊版定位與拓樸地圖（研究用）
+- `docs/` — 設計文件書、測試計劃書、期中／期末報告
+- `http://localhost:8000/docs` — Swagger UI

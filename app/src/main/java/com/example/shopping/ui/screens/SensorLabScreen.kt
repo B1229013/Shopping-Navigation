@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
@@ -98,6 +100,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -377,7 +381,12 @@ fun SensorLabScreen(navController: NavController) {
 
 
     // ── PdrTracker ──
-    val pdrTracker = remember { PdrTracker(sensorManager) }
+    // Sensor events (11 sensors, mostly ~50 Hz) and every CSV row are handled on their own
+    // thread: on the main thread, next to the camera and the UI, they caused "app isn't
+    // responding". Callbacks below therefore run on this thread, not the main one.
+    val sensorThread = remember { HandlerThread("sensor-lab").apply { start() } }
+    DisposableEffect(Unit) { onDispose { sensorThread.quitSafely() } }
+    val pdrTracker = remember { PdrTracker(sensorManager, Handler(sensorThread.looper)) }
 
     // ── Camera ──
     val imageCapture = remember { ImageCapture.Builder().build() }
@@ -409,9 +418,11 @@ fun SensorLabScreen(navController: NavController) {
     var pausedElapsedMs by remember { mutableLongStateOf(0L) }
     var recordStartTime by remember { mutableLongStateOf(0L) }
     var elapsedSeconds by remember { mutableDoubleStateOf(0.0) }
-    // 普通清單：50Hz 取樣（在主執行緒的感測器 callback 中）append 時不觸發 Compose 重組。
+    // 同步清單：感測器執行緒以約 50Hz append，主執行緒清空／匯出；append 不觸發 Compose 重組，
     // UI 只觀察 displayRecordCount，由下方 100ms 輪詢同步。
-    val records = remember { mutableListOf<SensorRecord>() }
+    val records = remember { Collections.synchronizedList(ArrayList<SensorRecord>()) }
+    // 感測器執行緒看這個決定要不要記錄（isRecording 是畫面狀態，開始時要等 PDR 重設完才打開）
+    val recordingGate = remember { AtomicBoolean(false) }
     var displayRecordCount by remember { mutableIntStateOf(0) }
 
     // ── Posture ──
@@ -446,7 +457,8 @@ fun SensorLabScreen(navController: NavController) {
 
     // ── PDR waypoints ──
     val waypoints = remember { mutableStateListOf<WaypointMarker>() }
-    var pendingWaypoint by remember { mutableStateOf("") }
+    // 下一列 CSV 的點位標記：主執行緒寫入，感測器執行緒取出並清空（原子操作，不會漏標）
+    val pendingWaypoint = remember { AtomicReference("") }
     var showWaypointDialog by remember { mutableStateOf(false) }
     var waypointName by remember { mutableStateOf("") }
     var isTakingPhoto by remember { mutableStateOf(false) }
@@ -484,10 +496,15 @@ fun SensorLabScreen(navController: NavController) {
                 gyroCalNoise = pdrTracker.gyroCalNoise
             }
             pdrTracker.onSampleReady = {
-                if (isRecording) {
-                    val now = SystemClock.elapsedRealtime()
-                    val elapsed = (now - recordStartTime) / 1000.0
-                    if (records.isEmpty() || elapsed - records.last().elapsedSec >= 0.02) {
+                // Sensor thread. PdrTracker already keeps one sample per ≥15 ms of event time (≈50 Hz);
+                // the row is stamped with that event time (same clock as recordStartTime) instead of
+                // when the callback happened to run.
+                if (recordingGate.get()) {
+                    val nowMs = SystemClock.elapsedRealtime()
+                    val eventMs = pdrTracker.lastSampleNs / 1_000_000
+                    val elapsed = ((if (eventMs in (nowMs - 1000)..nowMs) eventMs else nowMs) - recordStartTime) / 1000.0
+                    val prevSec = synchronized(records) { records.lastOrNull()?.elapsedSec }
+                    if (elapsed >= 0 && (prevSec == null || elapsed > prevSec)) {
                         val rv = pdrTracker.currentRotVec
                         val grv = pdrTracker.currentGameRotVec
                         records.add(SensorRecord(
@@ -512,9 +529,8 @@ fun SensorLabScreen(navController: NavController) {
                             gyroYawDeg = pdrTracker.getGyroOnlyYawDeg(),
                             calYawDeg = pdrTracker.getCalibratedYawDeg(),
                             gpsLat = pdrTracker.gpsLat, gpsLng = pdrTracker.gpsLng, gpsAccM = pdrTracker.gpsAccuracy,
-                            waypoint = pendingWaypoint,
+                            waypoint = pendingWaypoint.getAndSet(""),
                         ))
-                        if (pendingWaypoint.isNotBlank()) pendingWaypoint = ""
                     }
                 }
             }
@@ -642,7 +658,7 @@ fun SensorLabScreen(navController: NavController) {
         if (multiCapturePhotos.isNotEmpty()) {
             val name = "照片${waypoints.size + 1}"
             waypoints.add(WaypointMarker(multiCaptureX, multiCaptureY, name, multiCaptureStepIndex, multiCaptureElapsed, multiCapturePhotos.toList()))
-            pendingWaypoint = name
+            pendingWaypoint.set(name)
         }
         isMultiCapturing = false
         multiCaptureDir = 0
@@ -684,7 +700,7 @@ fun SensorLabScreen(navController: NavController) {
                 val name = "按鍵$volumeWaypointCount"
                 val elapsed = (SystemClock.elapsedRealtime() - recordStartTime) / 1000.0
                 waypoints.add(WaypointMarker(displayPdrX, displayPdrY, name, displayStepCount, elapsed))
-                pendingWaypoint = name
+                pendingWaypoint.set(name)
             }
             volumeKeyHandler.onVolumeUp = {
                 if (!isMultiCapturing) {
@@ -787,18 +803,25 @@ fun SensorLabScreen(navController: NavController) {
                     northCalibrated = northCalibrated,
                     magAccuracy = magCalStatus,
                     onStart = {
-                        records.clear()
+                        recordingGate.set(false)
                         displayRecordCount = 0
-                        pdrTracker.reset()
-                        northCalibrated = pdrTracker.isNorthCalibrated
+                        northCalibrated = false
                         waypoints.clear()
-                        pendingWaypoint = ""
+                        pendingWaypoint.set("")
                         pausedElapsedMs = 0L
                         recordStartTime = SystemClock.elapsedRealtime()
                         isPaused = false
                         isRecording = true
+                        // Reset on the sensor thread, then start the log there: the first row is a
+                        // fresh walk at (0, 0), never a sample computed before the reset.
+                        pdrTracker.reset {
+                            records.clear()
+                            recordStartTime = SystemClock.elapsedRealtime()
+                            recordingGate.set(true)
+                        }
                     },
                     onPause = {
+                        recordingGate.set(false)
                         pausedElapsedMs = SystemClock.elapsedRealtime() - recordStartTime
                         isRecording = false
                         isPaused = true
@@ -807,8 +830,10 @@ fun SensorLabScreen(navController: NavController) {
                         recordStartTime = SystemClock.elapsedRealtime() - pausedElapsedMs
                         isPaused = false
                         isRecording = true
+                        recordingGate.set(true)
                     },
                     onStop = {
+                        recordingGate.set(false)
                         isRecording = false
                         isPaused = false
                     },
@@ -871,7 +896,7 @@ fun SensorLabScreen(navController: NavController) {
                     onExport = {
                         if (!isExporting) {
                             isExporting = true
-                            val snapshot = records.toList()
+                            val snapshot = synchronized(records) { records.toList() }
                             val wpSnapshot = waypoints.toList()
                             val gt = groundTruth
                             val pos = posture
@@ -957,7 +982,7 @@ fun SensorLabScreen(navController: NavController) {
                         val name = waypointName.ifBlank { "點位${waypoints.size + 1}" }
                         val elapsed = (SystemClock.elapsedRealtime() - recordStartTime) / 1000.0
                         waypoints.add(WaypointMarker(displayPdrX, displayPdrY, name, displayStepCount, elapsed))
-                        pendingWaypoint = name
+                        pendingWaypoint.set(name)
                         showWaypointDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ChartAmber),

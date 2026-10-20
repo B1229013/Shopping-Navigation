@@ -49,6 +49,21 @@ class VLMDetectedObject:
     bbox: List[float]  # [x1,y1,x2,y2] absolute pixels
     score: float
     position: str = ""
+    # The English name the VLM gave next to `label` (its 繁體中文 name), when it gave both.
+    # Only localization uses it — see localization_label.
+    label_en: str = ""
+
+
+def localization_label(det: VLMDetectedObject) -> str:
+    """The name to match against the reference map's object labels, which are stored as
+    「中文 English」 ("區域招牌 area sign"). `label` alone is the 中文 half, and the label
+    similarity scores "區域招牌" vs "區域招牌 area sign" at 0.33 — below the 0.55 match
+    threshold — so localization uses both halves. Everything else (prompts, goal and
+    arrival checks, annotations) keeps `label`."""
+    en = (det.label_en or "").strip()
+    if en and en.lower() not in det.label.lower():
+        return f"{det.label} {en}"
+    return det.label
 
 
 @dataclass
@@ -320,10 +335,15 @@ def _load_json_or_salvage(text: str) -> Optional[dict]:
 
 
 def _parse_perception(text: str, img_w: int, img_h: int) -> Optional[VLMPerception]:
-    """Parse the PERCEIVE_PROMPT JSON reply, converting its 0-1 fractional boxes
+    """Parse a perception JSON reply, converting its 0-1 fractional boxes
     to absolute pixel coordinates (matching what GroundingDINO/EasyOCR produce,
     so downstream code — scene.py formatting, annotator.py drawing — doesn't
-    need to know whether detections came from a real detector or the VLM)."""
+    need to know whether detections came from a real detector or the VLM).
+
+    Two reply formats: PERCEIVE_PROMPT / PERCEIVE_REFINE_PROMPT answer with "items"
+    (zh / en / conf / box / text); PERCEIVE_DISTINCTIVE_PROMPT (pass 3) answers with
+    "detections" (label / box / score) and "ocr_texts" (text / score / box). Until
+    2026-10 only "items" was read, so every pass-3 reply was parsed as empty."""
     start = text.find("{")
     if start < 0:
         return None
@@ -342,14 +362,14 @@ def _parse_perception(text: str, img_w: int, img_h: int) -> Optional[VLMPercepti
             pixel_box = [x1 * img_w, y1 * img_h, x2 * img_w, y2 * img_h]
             h, v, depth = scene._position(pixel_box, img_w, img_h)
 
-            label = str(item.get("zh", ""))
-            if not label:
-                label = str(item.get("en", ""))
+            zh = str(item.get("zh", "") or "").strip()
+            en = str(item.get("en", "") or "").strip()
             detections.append(VLMDetectedObject(
-                label=label,
+                label=zh or en,
                 bbox=pixel_box,
                 score=float(item.get("conf", 0.5)),
                 position=f"{h} {v}, {depth}",
+                label_en=en if zh else "",
             ))
 
             item_text = str(item.get("text", "")).strip()
@@ -364,8 +384,37 @@ def _parse_perception(text: str, img_w: int, img_h: int) -> Optional[VLMPercepti
                     position=side,
                 ))
 
+        # pass-3 format
+        def _pixel_box(box):
+            if not box or len(box) != 4:
+                return None
+            x1, y1, x2, y2 = (float(c) for c in box)
+            if x2 <= x1 or y2 <= y1:      # the model fills [0,0,0,0] for "not really seen"
+                return None
+            return [x1 * img_w, y1 * img_h, x2 * img_w, y2 * img_h]
+
+        for item in obj.get("detections", []) or []:
+            label = str(item.get("label", "") or "").strip()
+            pixel_box = _pixel_box(item.get("box"))
+            if not label or pixel_box is None:
+                continue
+            h, v, depth = scene._position(pixel_box, img_w, img_h)
+            detections.append(VLMDetectedObject(
+                label=label, bbox=pixel_box, score=float(item.get("score", 0.5)),
+                position=f"{h} {v}, {depth}"))
+        for item in obj.get("ocr_texts", []) or []:
+            item_text = str(item.get("text", "") or "").strip()
+            pixel_box = _pixel_box(item.get("box"))
+            if not item_text or pixel_box is None:
+                continue
+            px1, py1, px2, py2 = pixel_box
+            ocr_texts.append(VLMDetectedText(
+                text=item_text, score=float(item.get("score", 0.5)),
+                bbox=[[px1, py1], [px2, py1], [px2, py2], [px1, py2]],
+                position=scene._horizontal_side((px1 + px2) / 2, img_w)))
+
         return VLMPerception(
-            scene_description=str(obj.get("scene", "")),
+            scene_description=str(obj.get("scene", "") or obj.get("scene_description", "")),
             store_zone="",
             detections=detections,
             ocr_texts=ocr_texts,

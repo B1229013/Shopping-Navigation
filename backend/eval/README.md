@@ -43,6 +43,45 @@ not mistaken for a perfect (or terrible) score.
    python -m eval.runner score --labels eval/labels.json --predictions preds.json
    ```
 
+## 單張影像定位基準（不靠感測器）
+
+`eval/image_only.py` 用正式伺服器的定位路徑（`server._run_early_localization` →
+`locate_fusion.server_image_evidence` → `visual_localization.localize(v2=True)`）逐張跑，
+不帶任何手機資料（位置、步行距離、上次定位、手機 DINOv2、購物目標）：
+
+```
+python -m eval.image_only --set 0916                       # 268 張 0916 測試照片
+python -m eval.image_only --set field1017                  # 2026-10-17 A7 實測 A 部分 24 張
+python -m eval.image_only --set route1 --photos <測試路線1>  # 走道中間的照片
+```
+
+- 照片和標註：`eval/data/0916_labels.csv`、`field1017_labels.csv`、`route1_labels.csv`；
+  照片路徑相對於 `--data-root`（預設 backend/，在 worktree 裡要指到主 checkout 的 backend/）。
+- 輸出 `eval/results/image_only_<set>.json` 與 `.md`：Top-1／Top-5／1 hop 內、誤差（m）、
+  信心 ≥0.3／≥0.6 的涵蓋率與命中率、正式閘門（品質／遮擋退件）、朝向、各階段耗時、失敗分類與
+  最常混淆節點對；`prod` 與 `dino_only`（物件、OCR、走道號碼權重 0）兩組並列。
+- 快取在 `output/eval/image_only/<set>/`：縮圖、`perception.json`（品質、OCR、GroundingDINO、
+  遮擋、耗時）、`dino.json`（查詢照片 DINOv2 向量）、`refmap.pkl`（地圖快照）。只改融合 → 直接重跑；
+  換 DINOv2 → `--reembed`；改偵測 → `--redetect`；離線 → `--map snapshot`。
+- 偵測分兩輪跑（先全部 OCR、再全部 GroundingDINO），8 GB 筆電同時載兩個模型會換頁、耗時加倍。
+
+### 帶感測器、Sensor Lab 測試資料
+
+```
+python -m eval.image_only --set lab1019 --data-root <主 checkout>/backend --sim
+```
+
+- `lab1019`：2026-10-19 三趟 Sensor Lab 測試（`output/eval_photos/1019_A7/1,2,3`），94 點（節點 65、中點 29），
+  每點四方向，答案在 `eval/data/lab1019_labels.csv`（拍照前設的點位標記，更正寫在 note 欄）。
+- 同一批照片跑「不帶感測器」與「帶感測器」：
+  - `+replay`：`eval/sensorlab.py` 把手機的 `MapPositionEstimator`（Kotlin 版的單元測試已移植成
+    `eval/tests/test_sensorlab.py`）套在這趟的原始 PDR 上：入口對齊、每點拍完後用正確位置修正一次（oracle），
+    送出的 `map_x/y`、`dist_since_fix`、`fix_node` 和導航模式相同。
+  - `+simσ`（`--sim`）：手機位置 = 真實位置 + σ = 1、2、4、8 m 的高斯誤差。
+- 報表多了「照片類型 × 感測器」表、同一張照片帶／不帶感測器的配對比較、逐點計分（同一點四張只算一個樣本）。
+- `eval/results/image_only_<set>_photos.jsonl`：每張照片一行，含所有偵測物件、OCR 文字、每個參考節點的
+  DINOv2 cosine／物件／OCR／融合分數、走道號碼、伺服器影像證據、重播的手機輸入，以及每個版本的前五名與誤差。
+
 ## Before / after
 
 Keep a table in `docs/superpowers/specs/2026-05-25-navigation-accuracy-design.md`

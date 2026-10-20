@@ -111,6 +111,7 @@ from server.vlm import (
     perceive_and_decide as _vlm_perceive_and_decide,
     warm_up as _vlm_warm_up,
     ask_about_image as _vlm_ask_about_image,
+    localization_label as _vlm_localization_label,
 )
 from server.neo4j_client import get_neo4j
 from server import aisle_signs, photo_quality, session_log, start_points
@@ -2092,7 +2093,12 @@ async def _handle_photo(
 
         # ── Localize with detection labels + OCR + zone BEFORE decide ──
         _is_first_localization = s.last_corrected_nid is None
-        _loc_items = _build_localization_items(detections, ocr_results, img_w, img_h)
+        # Localization matches 「中文 English」 names (the map's label format); the rest of
+        # the turn keeps the VLM's 中文 label.
+        _loc_dets = [PerceptionDetection(label=_vlm_localization_label(v), box=d.box, score=d.score,
+                                         position=d.position)
+                     for v, d in zip(vlm_perception.detections, detections)]
+        _loc_items = _build_localization_items(_loc_dets, ocr_results, img_w, img_h)
         _ocr_items = _build_ocr_items(ocr_results, img_w, img_h)
         _store_zone = vlm_perception.store_zone or ""
         log.info("[session %s] VLM store_zone: %s | scene: %s",
@@ -2100,7 +2106,7 @@ async def _handle_photo(
         # A blocked view must not move the user, re-plan the route or set the heading.
         _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h, goals=s.goal_objects)
         _early_loc = None if _occlusion.hint else _run_early_localization(
-            s, session_id, detected_labels, ocr_texts,
+            s, session_id, [d.label for d in _loc_dets], ocr_texts,
             detected_items=_loc_items,
             image_path=str(photo_path),
             store_zone=_store_zone,
@@ -3092,7 +3098,7 @@ async def localize_photo(photo: UploadFile = File(...), place: str = Query(defau
                 img_w=img_w, img_h=img_h,
             )
 
-        detected_labels = [d.label for d in perception.detections]
+        detected_labels = [_vlm_localization_label(d) for d in perception.detections]
         ocr_texts = [t.text for t in perception.ocr_texts]
 
         # Also try EasyOCR if available

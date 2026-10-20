@@ -43,63 +43,101 @@ log = logging.getLogger(__name__)
 # ── Embedding cache for hybrid_max similarity ───────────────────────────
 _emb_cache: Dict[str, np.ndarray] = {}
 _emb_loaded = False
+_emb_on = False                 # embeddings usable: cache file loaded and/or an API key to fetch
+_emb_persisted: set = set()     # labels stored in the cache file (the reference map's)
+_EMB_BATCH = 256
+_EMB_RETRY_S = 300              # after a failed request, don't try again for this long
+_emb_retry_at = 0.0
 
 
 def _load_embedding_cache() -> bool:
-    """Load pre-computed label embeddings from cache file. Returns True if loaded."""
-    global _emb_cache, _emb_loaded
+    """Load the label-embedding cache file once. Returns whether hybrid similarity is on:
+    EMBEDDING_ENABLED and (vectors on disk or an API key to fetch them)."""
+    global _emb_loaded, _emb_on
     if _emb_loaded:
-        return bool(_emb_cache)
+        return _emb_on
     _emb_loaded = True
 
-    from server.config import EMBEDDING_ENABLED, EMBEDDING_CACHE_PATH
+    from server.config import EMBEDDING_CACHE_PATH, EMBEDDING_ENABLED, EMBEDDING_MODEL, OPENAI_API_KEY
     if not EMBEDDING_ENABLED or not EMBEDDING_CACHE_PATH:
         return False
-
     cache_path = Path(EMBEDDING_CACHE_PATH)
-    if not cache_path.exists():
-        log.warning("Embedding cache not found: %s", cache_path)
-        return False
+    if cache_path.exists():
+        try:
+            if cache_path.suffix == ".npz":
+                z = np.load(cache_path, allow_pickle=False)
+                if str(z["model"]) != EMBEDDING_MODEL:
+                    raise ValueError(f"cache is {z['model']}, config wants {EMBEDDING_MODEL}")
+                vecs = z["vectors"].astype(np.float32)
+                data = dict(zip(z["labels"].tolist(), vecs))
+            else:
+                data = {label: np.array(vec, dtype=np.float32)
+                        for label, vec in json.loads(cache_path.read_text(encoding="utf-8")).items()}
+            _emb_cache.update(data)
+            _emb_persisted.update(data)
+            log.info("Loaded %d label embeddings from %s", len(data), cache_path)
+        except Exception as e:
+            log.warning("Failed to load embedding cache %s: %s", cache_path, e)
+    _emb_on = bool(_emb_cache) or bool(OPENAI_API_KEY)
+    if not _emb_on:
+        log.warning("Label embeddings off: no cache at %s and no OPENAI_API_KEY", cache_path)
+    return _emb_on
 
-    try:
-        data = json.loads(cache_path.read_text(encoding="utf-8"))
-        _emb_cache.update({label: np.array(vec, dtype=np.float32) for label, vec in data.items()})
-        log.info("Loaded %d label embeddings from %s", len(_emb_cache), cache_path)
-        return True
-    except Exception as e:
-        log.warning("Failed to load embedding cache: %s", e)
-        return False
+
+def ensure_label_embeddings(labels: List[str], persist: bool = False) -> int:
+    """Fetch the embeddings of labels not cached yet (OpenAI, batched); persist=True also
+    writes them to EMBEDDING_CACHE_PATH (.npz) — for the reference map's labels, which
+    are the same on every photo. Returns how many were fetched; failures leave the
+    labels without a vector (character similarity only)."""
+    if not _load_embedding_cache():
+        return 0
+    global _emb_retry_at
+    import time as _time
+    missing = list(dict.fromkeys(l for l in labels if l and l not in _emb_cache))
+    from server.config import EMBEDDING_CACHE_PATH, EMBEDDING_MODEL, OPENAI_API_KEY
+    fetched = 0
+    if missing and OPENAI_API_KEY and _time.time() >= _emb_retry_at:
+        for i in range(0, len(missing), _EMB_BATCH):
+            batch = missing[i:i + _EMB_BATCH]
+            try:
+                resp = requests.post(
+                    "https://api.openai.com/v1/embeddings",
+                    json={"input": batch, "model": EMBEDDING_MODEL},
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                    timeout=30,
+                )
+                resp.raise_for_status()
+            except Exception as e:
+                log.warning("Label embedding request failed (%d labels): %s — character similarity "
+                            "only for them; retry in %d s", len(batch), e, _EMB_RETRY_S)
+                _emb_retry_at = _time.time() + _EMB_RETRY_S
+                break
+            for item in resp.json()["data"]:
+                _emb_cache[batch[item["index"]]] = np.array(item["embedding"], dtype=np.float32)
+                fetched += 1
+    if persist:
+        new = [l for l in labels if l in _emb_cache and l not in _emb_persisted]
+        if new and str(EMBEDDING_CACHE_PATH).endswith(".npz"):
+            _emb_persisted.update(new)
+            keep = sorted(_emb_persisted)
+            try:
+                path = Path(EMBEDDING_CACHE_PATH)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".tmp.npz")
+                np.savez_compressed(tmp, model=np.array(EMBEDDING_MODEL), labels=np.array(keep),
+                                    vectors=np.stack([_emb_cache[l] for l in keep]).astype(np.float16))
+                tmp.replace(path)
+                log.info("Saved %d label embeddings to %s", len(keep), path)
+            except Exception as e:
+                log.warning("Could not save label embeddings to %s: %s", EMBEDDING_CACHE_PATH, e)
+    if fetched:
+        log.info("Fetched %d label embeddings", fetched)
+    return fetched
 
 
-def _compute_query_embeddings(labels: List[str]) -> Dict[str, np.ndarray]:
-    """Compute embeddings for query labels not in cache, via OpenAI API."""
-    missing = [l for l in labels if l and l not in _emb_cache]
-    if not missing:
-        return {}
-
-    from server.config import OPENAI_API_KEY, EMBEDDING_MODEL
-    if not OPENAI_API_KEY:
-        return {}
-
-    try:
-        resp = requests.post(
-            "https://api.openai.com/v1/embeddings",
-            json={"input": missing, "model": EMBEDDING_MODEL},
-            headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        result = {}
-        for item in resp.json()["data"]:
-            idx = item["index"]
-            vec = np.array(item["embedding"], dtype=np.float32)
-            result[missing[idx]] = vec
-            _emb_cache[missing[idx]] = vec
-        log.info("Computed %d new query embeddings", len(result))
-        return result
-    except Exception as e:
-        log.warning("Query embedding computation failed: %s", e)
-        return {}
+def _compute_query_embeddings(labels: List[str]) -> int:
+    """Embed a photo's labels that are not cached yet (kept in memory only)."""
+    return ensure_label_embeddings(labels)
 
 
 def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:

@@ -22,7 +22,11 @@ from server.neo4j_client import DirectionalRef, RefMap
 
 log_ = logging.getLogger(__name__)
 
-W_V, W_N, W_O = 5.0, 0.5, 0.5
+# DINOv2 : objects : OCR. Only the ratios matter (the node scores are rescaled to 0..2).
+# 5 : 0.5 : 0.5 (legacy 5-fold CV on 0916) → 1 : 0.1 : 0.3 after the 2026-10 weight sweep on
+# the lab1019 test walk with 「中文 English」 object names and embedding similarity
+# (eval/results/weight_sweep_lab1019_bilingual_embed.md: 46.5% → 48.1% Top-1).
+W_V, W_N, W_O = 1.0, 0.1, 0.3
 NODE_SIM_THRESHOLD = 0.55
 
 
@@ -228,6 +232,19 @@ def _index_for(ref_map: RefMap, embs: Dict[str, np.ndarray]) -> dict:
     return _index_cache[key]
 
 
+def _ensure_label_vectors(index: dict, q_labels: List[str]) -> None:
+    """Object labels are compared with max(character, embedding) similarity
+    (visual_localization._hybrid_max_sim), which only uses embeddings both labels have:
+    the map's labels are fetched once and saved, the photo's on every call."""
+    from server import visual_localization as VL
+    if not VL._load_embedding_cache():
+        return
+    if "label_list" not in index:
+        index["label_list"] = sorted({l for e in index["entries"] for l in e["labels"]})
+    VL.ensure_label_embeddings(index["label_list"], persist=True)   # no-op once cached
+    VL.ensure_label_embeddings(q_labels)
+
+
 @dataclass
 class ServerImageEvidence:
     scores: Dict[int, float]                  # nid → 0..2 image evidence
@@ -256,6 +273,7 @@ def server_image_evidence(
     if not any(e["emb"] is not None for e in index["entries"]):
         log_.warning("DINOv2 sidecar has no embedding for any reference photo of this place")
         return None
+    _ensure_label_vectors(index, q_labels)
     best = best_photo_per_node(index, q_emb, q_labels, q_ocr_tokens)
     if not best:
         return None

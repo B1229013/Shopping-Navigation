@@ -37,9 +37,51 @@ RATIOS = (0.0, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0)
 PROD = (5.0, 0.5, 0.5)
 
 
-def components(items, perc_all, dino, ref_map, labels_fn, path):
+def greedy_score(sub, thr):
+    """locate_fusion._node_score on a (query labels × reference labels) similarity matrix:
+    pairs ≥ thr, highest first (ties: larger i, then larger j — Python's reverse tuple
+    sort), one-to-one, summed and divided by the number of query labels."""
+    nq = sub.shape[0]
+    if nq == 0 or sub.shape[1] == 0:
+        return 0.0
+    qi, rj = np.nonzero(sub >= thr)
+    if not len(qi):
+        return 0.0
+    vals = sub[qi, rj]
+    order = np.lexsort((-rj, -qi, -vals))
+    uq, ur, tot = set(), set(), 0.0
+    for o in order:
+        i, j = int(qi[o]), int(rj[o])
+        if i in uq or j in ur:
+            continue
+        uq.add(i); ur.add(j)
+        tot += float(vals[o])
+    return tot / nq
+
+
+class SemanticSim:
+    """Label similarity from OpenAI text embeddings: 'embed' = cosine only (legacy
+    locate_v2._embedding_sim), 'hybrid' = max(character similarity, cosine) (the server's
+    _hybrid_max_sim with its embedding cache on)."""
+
+    def __init__(self, mode, emb, ref_labels):
+        self.mode, self.emb = mode, emb
+        self.ref_labels = ref_labels
+        self.R = emb.matrix(ref_labels)
+
+    def matrix(self, q_labels):
+        S = emb_S = self.emb.matrix(q_labels) @ self.R.T if q_labels else np.zeros((0, len(self.ref_labels)))
+        if self.mode == "hybrid" and q_labels:
+            from server.visual_localization import _semantic_similarity
+            char = np.array([[_semantic_similarity(q, r) for r in self.ref_labels] for q in q_labels])
+            S = np.maximum(emb_S, char)
+        return S
+
+
+def components(items, perc_all, dino, ref_map, labels_fn, path, sim=None):
     """{vis, nod, ocr}: (photos × reference photos); owner: node of each reference photo;
-    aisle: (photos × nodes)."""
+    aisle: (photos × nodes). sim: None = the server's own _node_score (character
+    similarity, no embedding cache), else a SemanticSim."""
     if path.is_file():
         z = np.load(path, allow_pickle=False)
         if list(z["ids"]) == [it["id"] for it in items]:
@@ -49,6 +91,9 @@ def components(items, perc_all, dino, ref_map, labels_fn, path):
     embs = LF._reference_embeddings(ref_map, LF._load_sidecar(C.DINO_SIDECAR_PATH))
     idx = LF._index_for(ref_map, embs)
     E = idx["entries"]
+    if sim is not None:
+        col = {l: j for j, l in enumerate(sim.ref_labels)}
+        entry_cols = [np.array([col[l] for l in e["labels"]], dtype=int) for e in E]
     nodes = list(ref_map.photos)          # map order: fuse_v2 breaks ties in this order
     assert {e["nid"] for e in E} == set(nodes), "every node needs a reference photo"
     R = np.stack([e["emb"] if e["emb"] is not None else np.zeros(768, np.float32) for e in E])
@@ -65,8 +110,10 @@ def components(items, perc_all, dino, ref_map, labels_fn, path):
         labels = [d["label"] for d in p["detections"]]
         q_ocr = {LF._norm_ocr(o["text"]) for o in p["ocr"]} - {""}
         denom = sum(idx["idf"].get(t, idx["def_idf"]) for t in q_ocr)
+        S = sim.matrix(labels) if sim is not None else None
         for k, e in enumerate(E):
-            nod[i, k] = LF._node_score(labels, e["labels"])
+            nod[i, k] = (LF._node_score(labels, e["labels"]) if S is None
+                         else greedy_score(S[:, entry_cols[k]], LF.NODE_SIM_THRESHOLD))
             sh = q_ocr & e["ocrset"]
             if sh:
                 ocr[i, k] = sum(idx["idf"].get(t, idx["def_idf"]) for t in sh) / denom
@@ -130,6 +177,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--set", required=True, choices=io.SETS)
     ap.add_argument("--labels", choices=("zh", "bilingual"), default="zh")
+    ap.add_argument("--sim", choices=("char", "embed", "hybrid"), default="char",
+                    help="object-label similarity: char = the server as deployed (no embedding cache); "
+                         "embed = OpenAI text-embedding cosine (legacy); hybrid = max of both (server with its "
+                         "embedding cache on). embed/hybrid fetch missing label vectors once (paid, cached)")
     ap.add_argument("--data-root", default=str(BACKEND))
     ap.add_argument("--cache")
     args = ap.parse_args(argv)
@@ -146,11 +197,45 @@ def main(argv=None):
         from eval.whatif import bilingual_labels as labels_fn
     else:
         labels_fn = lambda p: p
-    comp = components(items, perc_all, dino, ref_map, labels_fn, cache / f"components_{args.labels}.npz")
+    sim = None
+    tag = args.labels if args.sim == "char" else f"{args.labels}_{args.sim}"
+    if args.sim != "char":
+        from eval.label_embeddings import LabelEmbeddings
+        from server import config as C, locate_fusion as LF
+        from server import visual_localization as VL
+        embs = LF._reference_embeddings(ref_map, LF._load_sidecar(C.DINO_SIDECAR_PATH))
+        ref_labels = sorted({l for e in LF._index_for(ref_map, embs)["entries"] for l in e["labels"]})
+        q_labels = {d["label"] for it in items for d in labels_fn(perc_all[it["id"]])["detections"]}
+        emb = LabelEmbeddings(cache / "label_embeddings.npz")
+        n_new = emb.ensure(ref_labels + sorted(q_labels))
+        print(f"label vectors: {len(ref_labels)} map + {len(q_labels)} photo labels; fetched {n_new} new "
+              f"({emb.tokens} tokens)", file=sys.stderr)
+        sim = SemanticSim(args.sim, emb, ref_labels)
+        # the vectorized object score must equal the server's _node_score on the same vectors
+        VL._emb_cache.clear()
+        VL._emb_cache.update({l: emb.matrix([l])[0] for l in set(ref_labels) | q_labels})
+        real = LF._embedding_sim
+        if args.sim == "embed":
+            LF._embedding_sim = lambda a, b: VL._cosine_sim(VL._emb_cache[a], VL._emb_cache[b])
+        E = LF._index_for(ref_map, embs)["entries"]
+        col = {l: j for j, l in enumerate(ref_labels)}
+        worst = 0.0
+        for it in items[:3]:
+            labs = [d["label"] for d in labels_fn(perc_all[it["id"]])["detections"]]
+            S = sim.matrix(labs)
+            for e in E[::7]:
+                worst = max(worst, abs(LF._node_score(labs, e["labels"]) -
+                                       greedy_score(S[:, [col[l] for l in e["labels"]]], LF.NODE_SIM_THRESHOLD)))
+        LF._embedding_sim = real
+        VL._emb_cache.clear()
+        if worst > 1e-4:
+            sys.exit(f"vectorized object score differs from _node_score by {worst:.5f}")
+        print(f"check: object score = server _node_score on the same vectors (max diff {worst:.1e})", file=sys.stderr)
+    comp = components(items, perc_all, dino, ref_map, labels_fn, cache / f"components_{tag}.npz", sim)
 
     # the production weights must give the production picks
     _, order = rank(comp, *PROD)
-    if args.labels == "zh":
+    if args.labels == "zh" and args.sim == "char":
         base = {d["id"]: d["results"]["prod"][0]["pred"] for d in map(
             json.loads, (BACKEND / "eval" / "results" / f"image_only_{args.set}_vlm_photos.jsonl").read_text(encoding="utf-8").splitlines())}
         diff = [it["id"] for i, it in enumerate(items) if int(comp["nodes"][order[i, 0]]) != base[it["id"]]]
@@ -190,11 +275,14 @@ def main(argv=None):
 
     def cell(r, k="top1"):
         return r["all"][k]
-    L = [f"# DINOv2 : 物件 : 文字 權重掃描（{args.set}，物件名稱 {('中文' if args.labels == 'zh' else '中文 English')}，不帶感測器）", "",
+    sim_name = {"char": "字元相似度（現行伺服器）", "embed": "語意向量 cosine（legacy 做法）",
+                "hybrid": "字元與語意向量取較大值（伺服器開啟向量快取時）"}[args.sim]
+    L = [f"# DINOv2 : 物件 : 文字 權重掃描（{args.set}，物件名稱 {('中文' if args.labels == 'zh' else '中文 English')}，"
+         f"相似度 {sim_name}，不帶感測器）", "",
          f"- {len(items)} 張；DINOv2 固定 1，物件和文字比例各取 {', '.join(f'{x:g}' for x in RATIOS)}（共 {len(rows)} 組）；走道號碼維持 ×1",
          f"- 正式的 5 : 0.5 : 0.5（＝1 : 0.1 : 0.1）：Top-1 {prod['all']['top1']}%（節點 {prod['at_node']['top1']}%、"
          f"節點之間 {prod['between']['top1']}%），Top-5 {prod['all']['top5']}%"
-         + ("；已確認和伺服器每張照片的結果相同" if args.labels == "zh" else ""),
+         + ("；已確認和伺服器每張照片的結果相同" if (args.labels, args.sim) == ("zh", "char") else ""),
          f"- 全部資料最好的一組：1 : {best_all['w_objects']:g} : {best_all['w_text']:g} → Top-1 {best_all['all']['top1']}%"
          f"（節點 {best_all['at_node']['top1']}%、節點之間 {best_all['between']['top1']}%），Top-5 {best_all['all']['top5']}%",
          f"- **交叉驗證**（兩趟挑比例、第三趟驗證）：Top-1 {cv_top1}%（正式比例 {prod['all']['top1']}%）；"
@@ -214,8 +302,8 @@ def main(argv=None):
         _, order = rank(comp, float(k), 1.0, 1.0)
         s = {name: score(order, comp, items, hops, sel) for name, sel in conds}
         L.append(f"| {k} : 1 : 1 | {s['all']['top1']}% | {s['at_node']['top1']}% | {s['between']['top1']}% | {s['all']['top5']}% |")
-    out = BACKEND / "eval" / "results" / f"weight_sweep_{args.set}_{args.labels}"
-    Path(f"{out}.json").write_text(json.dumps({"labels": args.labels, "ratios": RATIOS, "prod": prod, "rows": rows,
+    out = BACKEND / "eval" / "results" / f"weight_sweep_{args.set}_{tag}"
+    Path(f"{out}.json").write_text(json.dumps({"labels": args.labels, "sim": args.sim, "ratios": RATIOS, "prod": prod, "rows": rows,
                                                "cv": cv, "cv_top1": cv_top1}, ensure_ascii=False, indent=1), encoding="utf-8")
     Path(f"{out}.md").write_text("\n".join(L) + "\n", encoding="utf-8")
     print("\n".join(L[:8]))

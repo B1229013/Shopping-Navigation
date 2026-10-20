@@ -19,7 +19,8 @@
       "name": "大圈起點 #0",
       "x": 0.0,
       "y": 0.0,
-      "heading_deg": 0.0
+      "heading_deg": 0.0,
+      "photo": "start0.jpg"
     }
   ]
 }

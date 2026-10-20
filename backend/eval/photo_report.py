@@ -99,6 +99,11 @@ class Explainer:
             shared = sorted(set(q_ocr) & e["ocrset"])
             ocr[k] = sum(idf[t] for t in shared) / denom if shared and denom else 0.0
             details.append((pr, shared))
+        dmax = {}
+        for k, e in enumerate(E):
+            if e["emb"] is not None and vis[k] > dmax.get(e["nid"], (-9.0, None))[0]:
+                dmax[e["nid"]] = (float(vis[k]), e["slot"])
+        dino_top5 = [[n, round(c, 4), s] for n, (c, s) in sorted(dmax.items(), key=lambda kv: -kv[1][0])[:5]]
         mm = lambda a: (a - a.min()) / (a.max() - a.min()) if a.max() > a.min() else a * 0
         vmm, nmm = mm(vis), mm(nod)
         fused = LF.W_V * vmm + LF.W_N * nmm + LF.W_O * ocr
@@ -122,7 +127,8 @@ class Explainer:
                 "ocr_score": float(ocr[k]), "ocr_shared": [[t, round(idf[t], 3)] for t in shared],
                 "fused": float(fused[k]), "aisle": float(aisle.get(n, 0.0)), "evidence": ev[n],
             }
-        return per, {"ocr_tokens": [[t, round(idf[t], 3)] for t in q_ocr], "ocr_idf_total": round(denom, 3)}
+        return per, {"ocr_tokens": [[t, round(idf[t], 3)] for t in q_ocr], "ocr_idf_total": round(denom, 3),
+                     "dino_only_top5": dino_top5}
 
 
 def _mini_map(ref_map, truth_xy, ok, ranked, size=230):
@@ -197,7 +203,7 @@ tr.truthrow{background:#e9f7ec}tr.pick{background:#fff6e5}.ref img{border-radius
 .m{background:#dafbe1}.nav a{margin-right:12px}code{background:#eef1f4;padding:1px 4px;border-radius:3px}"""
 
 
-def _cand_row(rank, n, d, p, truth_ok, img_html, dist):
+def _cand_row(rank, n, d, p, truth_ok, img_html, dist, w=(5.0, 0.5, 0.5)):
     cls = "truthrow" if truth_ok else ""
     aisle = f"<br>走道號碼 +{d['aisle']:.2f}" if d["aisle"] else ""
     objs = "".join(f"<div>{html.escape(q)} → {html.escape(r)} <b>{s:.2f}</b></div>" for q, r, s in d["object_pairs"]) or "<span class=small>無配對</span>"
@@ -205,9 +211,9 @@ def _cand_row(rank, n, d, p, truth_ok, img_html, dist):
     return (f"<tr class='{cls}'><td>{rank}</td><td><b>節點 {n}</b>{' ✓正確' if truth_ok else ''}<div class=small>"
             f"離正確位置 {dist:.1f} m<br>方向照片 {html.escape(str(d['slot']))}</div></td><td class=ref>{img_html}</td>"
             f"<td><b>{p:.3f}</b></td><td>{d['evidence']:.2f}<div class=small>融合 {d['fused']:.2f}{aisle}</div></td>"
-            f"<td>{d['dino_cos']:.3f}<div class=small>正規化 {d['dino_mm']:.2f} ×{5.0:g}</div></td>"
-            f"<td>{d['objects_score']:.2f}<div class=small>正規化 {d['objects_mm']:.2f} ×0.5</div>{objs}</td>"
-            f"<td>{d['ocr_score']:.2f}<div class=small>×0.5</div>{ocrs}</td></tr>")
+            f"<td>{d['dino_cos']:.3f}<div class=small>正規化 {d['dino_mm']:.2f} ×{w[0]:g}</div></td>"
+            f"<td>{d['objects_score']:.2f}<div class=small>正規化 {d['objects_mm']:.2f} ×{w[1]:g}</div>{objs}</td>"
+            f"<td>{d['ocr_score']:.2f}<div class=small>×{w[2]:g}</div>{ocrs}</td></tr>")
 
 
 def main(argv=None):
@@ -220,7 +226,16 @@ def main(argv=None):
     ap.add_argument("--out")
     ap.add_argument("--variant", default="prod", choices=io.VARIANTS + io.ABLATIONS)
     ap.add_argument("--limit", type=int, help="first N photos only (check the output)")
+    ap.add_argument("--labels", choices=("zh", "bilingual"), default="zh",
+                    help="bilingual = the VLM's object names as 「中文 English」 (eval/whatif)")
+    ap.add_argument("--sim", choices=("char", "hybrid"), default="char",
+                    help="hybrid = the server's label similarity with its embedding cache on "
+                         "(vectors from eval/label_embeddings' cache; no API call)")
+    ap.add_argument("--weights", default="5,0.5,0.5", help="DINOv2,objects,text (locate_fusion W_V,W_N,W_O)")
     args = ap.parse_args(argv)
+    weights_arg = tuple(float(x) for x in args.weights.split(","))
+    tag = "" if (args.labels, args.sim, weights_arg) == ("zh", "char", (5.0, 0.5, 0.5)) else \
+        f"_{args.labels}_{args.sim}_{'-'.join(f'{w:g}' for w in weights_arg)}"
 
     import logging
     from server import config as C
@@ -229,7 +244,7 @@ def main(argv=None):
     logging.getLogger().setLevel(logging.WARNING)
     C.RERANK_ENABLED = False
     cache = Path(args.cache) if args.cache else BACKEND / "output" / "eval" / "image_only" / args.set
-    out = Path(args.out) if args.out else Path(args.data_root) / "output" / "eval_photos" / f"{args.set}_report"
+    out = Path(args.out) if args.out else Path(args.data_root) / "output" / "eval_photos" / f"{args.set}_report{tag}"
     (out / "img").mkdir(parents=True, exist_ok=True)
     refs = Path(args.refs)
 
@@ -243,6 +258,33 @@ def main(argv=None):
     dino = io._load_json(cache / "dino.json")
     hops = io.hop_table(ref_map)
     xy = {n: (p.pdr_x, p.pdr_y) for n, p in ref_map.photos.items()}
+    from server import locate_fusion as LF
+    LF.W_V, LF.W_N, LF.W_O = weights_arg
+    labels_fn = lambda p: p
+    if args.labels == "bilingual":
+        from eval.whatif import bilingual_labels as labels_fn
+    if args.sim == "hybrid":
+        from eval.label_embeddings import LabelEmbeddings
+        from server import visual_localization as VL
+        emb = LabelEmbeddings(cache / "label_embeddings.npz")
+        embs = LF._reference_embeddings(ref_map, LF._load_sidecar(C.DINO_SIDECAR_PATH))
+        need = {l for e in LF._index_for(ref_map, embs)["entries"] for l in e["labels"]} | \
+               {d["label"] for it in items for d in labels_fn(perc_all[it["id"]])["detections"]}
+        missing = [l for l in need if l not in emb.vec]
+        if missing:
+            sys.exit(f"{len(missing)} labels have no cached vector — run eval.weight_sweep --sim hybrid first")
+        VL._emb_cache.clear()
+        VL._emb_cache.update({l: emb.matrix([l])[0] for l in need})
+        VL._emb_loaded = True        # the server's own hybrid_max path, cache on
+        # speed: one (photo labels × map labels) matrix per photo instead of ~2×10⁵ single
+        # _hybrid_max_sim calls; same values (weight_sweep checks this against _node_score)
+        from eval.weight_sweep import SemanticSim
+        ref_labels = sorted({l for e in LF._index_for(ref_map, embs)["entries"] for l in e["labels"]})
+        semsim = SemanticSim("hybrid", emb, ref_labels)
+        ridx = {l: j for j, l in enumerate(ref_labels)}
+        real_hybrid = VL._hybrid_max_sim
+    else:
+        semsim = None
     ex = Explainer(ref_map, C.NEO4J_PLACE)
     k_img = parse_image_k(C.LOC_SERVER_IMAGE_K)
     from server import dino_embed
@@ -254,6 +296,15 @@ def main(argv=None):
         p, q = perc_all.get(it["id"]), dino.get(it["id"])
         if p is None or q is None:
             sys.exit(f"{it['id']}: not in the image_only cache — run eval.image_only first")
+        p = labels_fn(p)
+        if semsim is not None:
+            uniq = list(dict.fromkeys(d["label"] for d in p["detections"]))
+            S, qidx = semsim.matrix(uniq), {l: i for i, l in enumerate(uniq)}
+
+            def lookup(a, b, S=S, qidx=qidx):
+                i, j = qidx.get(a), ridx.get(b)
+                return float(S[i, j]) if i is not None and j is not None else real_hybrid(a, b)
+            VL._hybrid_max_sim = lookup     # read at call time by locate_fusion and match_by_grid
         img = io.preprocess(it, cache / "img")
         embed.key = it["id"]
         with io.variant(args.variant):
@@ -291,7 +342,8 @@ def main(argv=None):
             rp = _ref_path(refs, d["photo_file"]) if d["photo_file"] else None
             im = (f"<img src='img/{_thumb(rp, out / 'img' / ('ref_' + Path(d['photo_file']).name), 200).name}' width=170>"
                   if rp else "<span class=small>找不到參考照片</span>")
-            rows.append(_cand_row(ranked.index(n) + 1, n, d, prob[n], n in ok, im, math.dist(xy[n], it["truth_xy"])))
+            rows.append(_cand_row(ranked.index(n) + 1, n, d, prob[n], n in ok, im, math.dist(xy[n], it["truth_xy"]),
+                                  weights))
         verdict = ("<span class=ok>對</span>" if hit else "<span class=near>差一格</span>" if hop <= 1
                    else f"<span class=bad>錯（差 {hop} 格）</span>")
         tags_o = "".join(f"<span class=tag>{html.escape(d['label'])}</span>" for d in p["detections"])
@@ -303,7 +355,12 @@ def main(argv=None):
             f"<div>{_mini_map(ref_map, it['truth_xy'], ok, ranked)}<div class=small>綠框＝正確位置，紅＝第 1 名，橘＝第 2～5 名</div></div>"
             f"<div style='flex:1;min-width:280px'><b>VLM 看到的物件（{len(p['detections'])}）</b><div>{tags_o}</div>"
             f"<b>VLM 讀到的文字（{len(qinfo['ocr_tokens'])}）</b><div>{tags_t or '<span class=small>無</span>'}</div>"
-            f"<div class=small>場景：{html.escape(p.get('scene') or '')}</div></div></div>"
+            f"<div class=small>場景：{html.escape(p.get('scene') or '')}</div>"
+            f"<b>DINOv2 單獨的前五名</b>（只看影像相似度，每個節點取最像的方向照片）<div>" + "".join(
+                f"<span class='tag{' m' if n in ok else ''}'>{i_ + 1}. 節點 {n}　{c:.3f}　{html.escape(str(s))}</span>"
+                for i_, (n, c, s) in enumerate(qinfo["dino_only_top5"])) +
+            ("" if any(n in ok for n, *_ in qinfo["dino_only_top5"]) else "<span class=small>（正確節點不在 DINOv2 前五名）</span>") +
+            "</div></div></div>"
             "<table><tr><th>名次</th><th>節點</th><th>對應的參考照片</th><th>機率</th><th>影像證據 0–2</th>"
             "<th>DINOv2 cosine</th><th>物件分數與配對</th><th>文字分數與共同文字（×權重）</th></tr>" + "".join(rows) + "</table></div>")
         print(f"\r  {i}/{len(items)}", end="", file=sys.stderr)
@@ -312,7 +369,7 @@ def main(argv=None):
     with open(out / "matches.jsonl", "w", encoding="utf-8") as f:
         for r in records:
             f.write(json.dumps(io._rounded(r, 4), ensure_ascii=False) + "\n")
-    dst = BACKEND / "eval" / "results" / f"image_only_{args.set}{'_vlm' if args.perception == 'vlm' else ''}_matches.jsonl"
+    dst = BACKEND / "eval" / "results" / f"image_only_{args.set}{'_vlm' if args.perception == 'vlm' else ''}_matches{tag}.jsonl"
     shutil.copyfile(out / "matches.jsonl", dst)
 
     def summary(rs):
@@ -333,8 +390,12 @@ def main(argv=None):
         f"<h1>{args.set} 逐張定位報告</h1><ul><li>全部：{summary(records)}</li>"
         f"<li><a href=nodes.html>節點照片</a>：{summary([r for r in records if r['condition'] == 'at_node'])}</li>"
         f"<li><a href=between.html>節點之間照片</a>：{summary([r for r in records if r['condition'] == 'between'])}</li></ul>"
-        f"<p class=small>版本 {args.variant}（DINOv2 : 物件 : 文字 = {weights[0]:g} : {weights[1]:g} : {weights[2]:g}），"
-        f"不帶感測器；每張照片的數字都用伺服器的函式重算，並確認前五名和機率與伺服器結果相同。</p>" + METHOD_HTML,
+        f"<p><b>這一版的設定</b>：物件名稱 {'「中文 English」' if args.labels == 'bilingual' else '中文（現行）'}；"
+        f"物件相似度 {'字元與語意向量取較大值（伺服器開啟向量快取時）' if args.sim == 'hybrid' else '字元相似度（現行）'}；"
+        f"DINOv2 : 物件 : 文字 = {weights[0]:g} : {weights[1]:g} : {weights[2]:g}"
+        f"{'（現行正式設定）' if not tag else '（試算設定，伺服器尚未採用）'}。</p>"
+        f"<p class=small>版本 {args.variant}，不帶感測器；每張照片的數字都用伺服器的函式重算，並確認前五名和機率與伺服器結果相同。</p>"
+        + METHOD_HTML,
         encoding="utf-8")
     print(f"→ {out / 'index.html'}  ({len(records)} photos) ; {dst}", file=sys.stderr)
 

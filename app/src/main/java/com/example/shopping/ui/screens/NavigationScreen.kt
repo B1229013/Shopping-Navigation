@@ -605,7 +605,27 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                 Text(vm.guidance, fontSize = 14.sp, color = Color.White, lineHeight = 20.sp)
 
                 // ASK flow
-                if (vm.pendingQuestion != null && !vm.hasArrived) {
+                if (vm.pendingQuestion != null && !vm.hasArrived && vm.pendingIsConfirm) {
+                    // "Have you arrived?" — a yes/no tap, not free text (free text that was
+                    // neither yes nor no used to count as yes)
+                    Text(vm.pendingQuestion!!, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFF9800))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { vm.answerConfirm(true) },
+                            enabled = !vm.isAnswering,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White),
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.weight(1f).height(44.dp)
+                        ) { Text("是，到了", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                        Button(
+                            onClick = { vm.answerConfirm(false) },
+                            enabled = !vm.isAnswering,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9E9E9E), contentColor = Color.White),
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.weight(1f).height(44.dp)
+                        ) { Text("不是，繼續找", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                    }
+                } else if (vm.pendingQuestion != null && !vm.hasArrived) {
                     Text(vm.pendingQuestion!!, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFF9800))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(

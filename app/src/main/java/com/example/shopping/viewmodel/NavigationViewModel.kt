@@ -28,6 +28,7 @@ import com.example.shopping.network.ConfirmArrivalRequest
 import com.example.shopping.network.NavigationApi
 import com.example.shopping.network.PathResponse
 import com.example.shopping.network.StartPoint
+import com.example.shopping.network.StartPositionRequest
 import com.example.shopping.network.TurnResponse
 import com.example.shopping.sensor.PdrTracker
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +60,8 @@ class NavigationViewModel : ViewModel() {
     var guidance: String by mutableStateOf("")
     var currentAction: String by mutableStateOf("TAKE_PHOTO")
     var pendingQuestion: String? by mutableStateOf(null)
+    /** [pendingQuestion] asks whether the user has arrived: answered with 是 / 不是 buttons. */
+    var pendingIsConfirm: Boolean by mutableStateOf(false)
     var answerText: String by mutableStateOf("")
     var isUploading: Boolean by mutableStateOf(false)
     var isAnswering: Boolean by mutableStateOf(false)
@@ -256,6 +259,17 @@ class NavigationViewModel : ViewModel() {
         publishEstimate()
         mapPosition?.let { followMapPosition(it) }
         currentLocation = start.name
+        // The server plans the visit order from here (not from its default start), then
+        // the route is fetched again from this position.
+        val sid = sessionId ?: return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { NavigationApi.service.setStart(sid, StartPositionRequest(start.x, start.y)) }
+            } catch (e: Exception) {
+                Log.w("NavStart", "Could not tell the server the start point", e)
+            }
+            loadRoute(fromPhone = true)
+        }
     }
 
     private fun loadStarts(place: String) {
@@ -378,12 +392,15 @@ class NavigationViewModel : ViewModel() {
             }
             "ASK" -> {
                 pendingQuestion = response.question
+                pendingIsConfirm = response.confirm_question
             }
             "MOVE" -> {
                 pendingQuestion = null
+                pendingIsConfirm = false
                 pendingArrival = false
             }
         }
+        if (response.action != "ASK") pendingIsConfirm = false
     }
 
     /**
@@ -507,16 +524,23 @@ class NavigationViewModel : ViewModel() {
         }
     }
 
+    /** Answer an "have you arrived?" question with a button (是 / 不是). */
+    fun answerConfirm(yes: Boolean) {
+        answerText = if (yes) "是" else "不是"
+        submitAnswer()
+    }
+
     fun submitAnswer() {
         val sid = sessionId ?: return
         if (answerText.isBlank() || isAnswering) return
         isAnswering = true
         errorMessage = null
+        val answer = answerText
 
         viewModelScope.launch {
             try {
                 val response = withContext(Dispatchers.IO) {
-                    NavigationApi.service.postAnswer(sid, AnswerRequest(answer = answerText))
+                    NavigationApi.service.postAnswer(sid, AnswerRequest(answer = answer))
                 }
                 handleTurnResponse(response)
                 answerText = ""

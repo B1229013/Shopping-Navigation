@@ -37,3 +37,14 @@ def _no_server_dino(monkeypatch):
     test photo; tests that cover it turn it back on and fake the embedding."""
     from server import config
     monkeypatch.setattr(config, "LOC_SERVER_DINO", False)
+
+
+@pytest.fixture(autouse=True)
+def _sessions_in_tmp(tmp_path, monkeypatch):
+    """Session records and photos go to a temp folder, not backend/output/sessions/ —
+    every full run used to leave ~33 fake sessions among the real store-test records."""
+    from server import config
+    import server.server as srv
+    root = tmp_path / "sessions"
+    monkeypatch.setattr(config, "OUTPUT_ROOT", root)     # photos (ensure_output_dir)
+    monkeypatch.setattr(srv, "OUTPUT_ROOT", root)        # the records

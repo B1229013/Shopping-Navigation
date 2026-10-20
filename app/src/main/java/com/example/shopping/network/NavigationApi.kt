@@ -50,10 +50,16 @@ data class StartPoint(
 
 data class StartsResponse(val place: String? = null, val starts: List<StartPoint> = emptyList())
 
+data class StartPositionRequest(val x: Double, val y: Double)
+
+data class SetStartResponse(val start_node: Int? = null, val replanned: Boolean = false)
+
 data class TurnResponse(
     val action: String,   // "ARRIVED", "MOVE", "ASK"
     val guidance: String,
     val question: String?,
+    // The question asks "have you arrived?": answer it with 是 / 不是 buttons.
+    val confirm_question: Boolean = false,
     val node_id: Int,
     val annotated_photo_url: String?,
     // Photo unusable (blurred / dark / blocked by people or carts): ask for a retake.
@@ -158,6 +164,10 @@ interface NavigationApiService {
 
     @GET("starts")
     suspend fun getStarts(@Query("place") place: String): StartsResponse
+
+    /** The user stands at a start point: the server re-plans the visit order from there. */
+    @POST("session/{sessionId}/start")
+    suspend fun setStart(@Path("sessionId") sessionId: String, @Body body: StartPositionRequest): SetStartResponse
 
     /**
      * Optional fields are omitted when null. `heading` / `map_*` / `dist_since_fix` /

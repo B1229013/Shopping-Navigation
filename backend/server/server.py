@@ -44,9 +44,6 @@ from server.models import (
     AnswerRequest,
     ErrorResponse,
     ConfirmArrivalRequest,
-    ModifyRouteRequest,
-    PlanRouteRequest,
-    PlanRouteResponse,
     PathResponse,
     StartSessionRequest,
     StartSessionResponse,
@@ -205,34 +202,116 @@ _USELESS_LANDMARK = frozenset({
     "柱子", "天花板", "地板", "白色地磚走道",
 })
 
-def _build_nav_graph(ref_map) -> "nx.Graph":
-    """Build a networkx graph from the reference map, auto-adding proximity edges."""
+def _route_nx_graph(place: Optional[str]):
+    """The one route graph — the mini-map's (_editor_graph_for: Neo4j walkways +
+    maps/neo4j_links) — as a weighted networkx graph for planning the visit order and
+    the legs, or None. It used to be a second graph that also joined every pair of nodes
+    within 6 m, which in A7 put 18 links straight through the shelves between aisles."""
     import networkx as _nx
-    import math as _m
-    g = _nx.Graph()
-    for nid in ref_map.photos:
-        g.add_node(nid)
-    for edge in ref_map.walkway_edges:
-        w = edge.get("distance_m", 1.0) or 1.0
-        g.add_edge(edge["from"], edge["to"], weight=w)
-    # Auto-connect nearby nodes that aren't already linked (< 6m)
-    nodes = list(ref_map.photos.items())
-    added = 0
-    for i in range(len(nodes)):
-        for j in range(i + 1, len(nodes)):
-            a_id, a = nodes[i]
-            b_id, b = nodes[j]
-            if g.has_edge(a_id, b_id):
-                continue
-            dx = a.pdr_x - b.pdr_x
-            dy = a.pdr_y - b.pdr_y
-            dist = _m.sqrt(dx * dx + dy * dy)
-            if dist < 6.0:
-                g.add_edge(a_id, b_id, weight=max(dist, 0.5))
-                added += 1
-    if added:
-        log.info("Auto-added %d proximity edges (< 6m)", added)
-    return g
+    g = _editor_graph_for(place)
+    if g is None:
+        return None
+    out = _nx.Graph()
+    out.add_nodes_from(g.graph.nodes)
+    for a, b, d in g.graph.edges(data=True):
+        out.add_edge(a, b, weight=d.get("length", 1.0))
+    return out
+
+
+# "Arrived" also needs the map to agree: the fused position or the photo's own best
+# match within this many route metres of the goal node. In the 2026-10-17 test the
+# noodle walk was "arrived" at node 52, ~20 m from the noodle aisle (node 40), after
+# the user answered an unsure-arrival question; the milk walk's fused position was off
+# (58) while the photo itself matched the milk fridge (16) — hence either one counts.
+ARRIVAL_NEAR_M = 6.0
+
+
+def _far_from_goal_question(s, matched_nid: Optional[int], where: Optional[str] = None) -> Optional[str]:
+    """None when an arrival is plausible on the map; otherwise the question to ask
+    instead ("App 認為你在…，離「牛奶」約 20 公尺…"). No map goal for this phase, or no
+    position at all, never blocks an arrival."""
+    import networkx as _nx
+    leg = _phase_leg(s)
+    g = _route_nx_graph(s.place) if leg is not None else None
+    if g is None or leg.to_node not in g:
+        return None
+    image_ev = (s.last_loc_log or {}).get("image_evidence") or {}
+    image_top = int(max(image_ev, key=image_ev.get)) if image_ev else None
+    dists = {}
+    for c in (matched_nid, image_top):
+        if c is not None and c in g and c not in dists:
+            try:
+                dists[c] = _nx.shortest_path_length(g, c, leg.to_node, weight="weight")
+            except _nx.NetworkXNoPath:
+                pass
+    if not dists or min(dists.values()) <= ARRIVAL_NEAR_M:
+        return None
+    if s.phase == "checkout":
+        item = "收銀台"
+    elif s.phase == "exit":
+        item = "出口"
+    else:
+        item = s.target_node_to_item.get(leg.to_node) or (s.target_objects or s.goal_objects or ["目標"])[0]
+    far = dists.get(matched_nid, min(dists.values()))
+    where = where or "目前的位置"
+    return f"App 認為你在{where}，離「{item}」還有約 {far:.0f} 公尺。你已經看到「{item}」了嗎？"
+
+
+_CONFIRM_NO = ("不是", "沒有", "沒看到", "不對", "不確定", "還沒", "繼續", "再找", "否", "no", "nope")
+_CONFIRM_YES = ("是", "對", "到了", "有", "看到", "找到", "yes", "ok", "好")
+
+
+def _confirm_answer(text: str) -> Optional[bool]:
+    """Yes / no to an arrival question; None when the reply is neither (it used to count
+    as yes — "在哪裡？" confirmed an arrival). "不是"/"沒有" are checked first since they
+    contain "是"/"有"."""
+    t = (text or "").strip().lower()
+    if any(k in t for k in _CONFIRM_NO):
+        return False
+    if any(k in t for k in _CONFIRM_YES):
+        return True
+    return None
+
+
+def _replan_from(s, start_nid: int) -> bool:
+    """Re-plan the rest of the walk from ``start_nid`` on the route graph: the targets not
+    yet visited, then checkout (unless already past it) and exit. False when it cannot."""
+    try:
+        from server.path_planner import plan_route as _plan_route
+        g = _route_nx_graph(s.place)
+        if g is None or start_nid not in g:
+            return False
+        remaining = [t for t in (s.target_nodes or []) if t not in (s.visited_targets or set())]
+        if s.phase == "shopping" and not remaining:
+            return False
+        route = _plan_route(
+            g, start_nid, remaining if s.phase == "shopping" else [],
+            checkout=getattr(s, "checkout_node", None) if s.phase in ("shopping", "checkout") else None,
+            exit_node=getattr(s, "exit_node", None),
+        )
+        if not route.legs:
+            return False
+        s.route_plan = route
+        s.current_leg_index = 0
+        return True
+    except Exception as e:
+        log.warning("[session %s] route re-plan failed: %s", s.id, e)
+        return False
+
+
+def _default_start_wp(place: Optional[str]) -> Optional[int]:
+    """Where the visit order is planned from before any photo or chosen start point: the
+    store's entrance, else its first start point, else the node nearest the origin —
+    never an arbitrary node (it used to be the lowest node id, mid-store in A7)."""
+    g = _editor_graph_for(place)
+    if g is None or not g.graph.number_of_nodes():
+        return None
+    if g.entrance == editor_map_mod.ENTRANCE_ID:
+        return g.entrance
+    starts = start_points.load_starts(place, EDITOR_MAP_DIR) if place else []
+    if starts:
+        return editor_map_mod.nearest_waypoint(g, starts[0]["x"], starts[0]["y"])
+    return g.entrance
 
 
 def _is_useless_name(name: str) -> bool:
@@ -738,37 +817,28 @@ def _build_route_context(s, loc_result, detections=None,
         if (localized and ref_map
                 and loc_result.confidence >= _replan_threshold
                 and loc_result.matched_nid not in current_leg.path):
-            try:
-                from server.path_planner import plan_route as _plan_route
-                _g = _build_nav_graph(ref_map)
-                if loc_result.matched_nid in _g:
-                    _remaining_targets = [t for t in (s.target_nodes or [])
-                                          if t not in (s.visited_targets or set())]
-                    if not _remaining_targets and current_leg.purpose == "target":
-                        _remaining_targets = [current_leg.to_node]
-                    new_route = _plan_route(
-                        _g, loc_result.matched_nid, _remaining_targets,
-                        checkout=getattr(s, "checkout_node", None),
-                        exit_node=getattr(s, "exit_node", None),
-                    )
-                    s.route_plan = new_route
-                    s.current_leg_index = 0
-                    leg_idx = 0
-                    current_leg = new_route.legs[0]
-                    log.info("🔄 [session %s] re-planned route from WP%d (was not on leg path %s)",
-                             s.id, loc_result.matched_nid, current_leg.path[:5])
-            except Exception as e:
-                log.warning("[session %s] route re-plan failed: %s", s.id, e)
+            if _replan_from(s, loc_result.matched_nid):
+                leg_idx = 0
+                current_leg = s.route_plan.legs[0]
+                log.info("🔄 [session %s] re-planned route from WP%d (was not on leg path %s)",
+                         s.id, loc_result.matched_nid, current_leg.path[:5])
+
+        # The node the user walks to now: the leg for the current phase, or none (a store
+        # without a detected checkout has no checkout leg — the last shopping leg must
+        # not stand in for it, or "地圖顯示您已在收銀台附近" shows up at the last item).
+        phase_leg = _phase_leg(s)
+        target_nid = phase_leg.to_node if phase_leg is not None else None
 
         # Friendly name for the target area — depends on current phase
         if s.phase == "checkout":
             target_area = "收銀台"
         elif s.phase == "exit":
             target_area = "出口"
+        elif target_nid is not None:
+            target_area = _node_area_name(target_nid, ref_map, goal_keywords=s.goal_objects)
         else:
-            target_area = _node_area_name(current_leg.to_node, ref_map,
-                                          goal_keywords=s.goal_objects)
-        at_target = localized and loc_result.matched_nid == current_leg.to_node
+            target_area = "目標區域"
+        at_target = localized and target_nid is not None and loc_result.matched_nid == target_nid
 
         # Which goal item is at this target? Phase first, then the product word
         # that the target node actually carries. ``target_objects`` is the split
@@ -779,15 +849,15 @@ def _build_route_context(s, loc_result, detections=None,
             goal_item = "收銀台"
         elif s.phase == "exit":
             goal_item = "出口"
-        elif current_leg.purpose in ("checkout", "exit"):
-            goal_item = "收銀台" if current_leg.purpose == "checkout" else "出口"
+        elif target_nid is not None and s.target_node_to_item.get(target_nid):
+            goal_item = s.target_node_to_item[target_nid]     # the item chosen for this node at session start
         else:
-            goal_item = current_leg.purpose
-            if goal_item == "target" and _targets:
+            goal_item = "target"
+            if _targets and target_nid is not None:
                 # Try to find which goal object maps to this target node
                 for g in _targets:
-                    if ref_map and current_leg.to_node in ref_map.photos:
-                        for obj in ref_map.photos[current_leg.to_node].objects:
+                    if ref_map and target_nid in ref_map.photos:
+                        for obj in ref_map.photos[target_nid].objects:
                             if (obj.ocr_text and g.lower() in obj.ocr_text.lower()) or \
                                g.lower() in obj.label.lower():
                                 goal_item = g
@@ -816,11 +886,11 @@ def _build_route_context(s, loc_result, detections=None,
                 f"重要：使用者的照片中已經可以看到目標相關物件（{obj_text}），"
                 f"位於畫面的「{photo_dir_zh}」。請直接引導使用者往那個方向走。\n"
             )
-        elif localized and loc_result.confidence >= 0.45:
+        elif localized and loc_result.confidence >= 0.45 and target_nid is not None:
             # --- Priority 2: infer from directional reference photos (needs reliable localization) ---
             matched_node = ref_map.photos.get(loc_result.matched_nid) if ref_map else None
             dir_zh, dir_slot, dir_landmarks = _infer_target_direction(
-                matched_node, current_leg.to_node, ref_map, loc_result.matched_slot,
+                matched_node, target_nid, ref_map, loc_result.matched_slot,
                 goal_keywords=goal_kws)
 
             if dir_zh:
@@ -845,11 +915,13 @@ def _build_route_context(s, loc_result, detections=None,
                     f"不要提供具體距離，也不要叫使用者自己去找標示。\n"
                 )
         else:
-            # Not localized — can't infer direction from map, but still guide toward target
+            # Not localized (or no map node for this phase's goal) — can't infer direction
+            # from the map, but still guide toward the target
             _clean_target = target_area.replace("「", "").replace("」", "")
             direction_hint = (
-                f"目前尚未精確定位，無法從地圖推斷方向。"
-                f"請根據照片中看得到的物件來引導使用者繼續前進。"
+                (f"目前尚未精確定位，無法從地圖推斷方向。" if not localized
+                 else f"地圖上沒有「{goal_item}」的確切位置，無法從地圖推斷方向。")
+                + f"請根據照片中看得到的物件來引導使用者繼續前進。"
                 f"目標「{goal_item}」在「{_clean_target}」區域。\n"
             )
 
@@ -884,8 +956,7 @@ def _build_route_context(s, loc_result, detections=None,
             # The session's leg first, as the mini-map's /path does, so the steps lead
             # to the node the area name and the arrival check use (泡麵: 40, not the
             # label search's 7); the label search only without a leg for this phase.
-            leg = _phase_leg(s)
-            goal_wp = editor.waypoint_for_neo(leg.to_node) if leg is not None else None
+            goal_wp = editor.waypoint_for_neo(target_nid) if target_nid is not None else None
             if goal_wp is None:
                 goal_wp = editor_map_mod.find_goal_waypoint(editor, goal_item)
             path = (editor_map_mod.plan(editor, start_wp, goal_wp)
@@ -900,11 +971,14 @@ def _build_route_context(s, loc_result, detections=None,
                 next_zh = route.get("next_instruction_zh") or None
                 if len(turns) > 1 and turns[0]["direction"] == RelativeDirection.STRAIGHT:
                     head_steps = 2
-        if not editor_route_found and heading_reliable:
+        if not editor_route_found and heading_reliable and phase_leg is not None:
             node_positions = {nid: (node.pdr_x, node.pdr_y) for nid, node in ref_map.photos.items()}
+            route_graph = _editor_graph_for(s.place)
+            if route_graph is not None:       # the virtual entrance is a waypoint too
+                node_positions.update({n: (d["x"], d["y"]) for n, d in route_graph.graph.nodes(data=True)})
             rel_instructions = convert_leg_to_relative(
                 _path_from_current(ref_map, loc_result.matched_nid,
-                                   current_leg.path, current_leg.to_node),
+                                   phase_leg.path, phase_leg.to_node),
                 node_positions,
                 loc_result.matched_heading,
                 distances=_walkway_distances(ref_map),
@@ -969,9 +1043,9 @@ def _build_route_context(s, loc_result, detections=None,
                 phase_status = f"還有 {len(remaining)} 項商品待尋找"
 
             area_steps = ""
-            if localized and ref_map and current_leg.path and len(current_leg.path) > 1:
+            if localized and ref_map and phase_leg is not None and len(phase_leg.path) > 1:
                 areas_on_route = []
-                for step_nid in current_leg.path[1:6]:
+                for step_nid in phase_leg.path[1:6]:
                     area = _node_area_name(step_nid, ref_map)
                     if area and area not in areas_on_route[-1:]:
                         areas_on_route.append(area)
@@ -1017,14 +1091,20 @@ def _phase_leg(s):
     if not (s.route_plan and getattr(s.route_plan, "legs", None)):
         return None
     leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
-    return leg if leg.purpose == {"checkout": "checkout", "exit": "exit"}.get(s.phase, "target") else None
+    if leg.purpose == {"checkout": "checkout", "exit": "exit"}.get(s.phase, "target"):
+        return leg
+    # Checkout and exit at the same node (A7: node 25) plan as one leg labelled "exit"
+    if s.phase == "checkout" and leg.purpose == "exit" and leg.to_node == getattr(s, "checkout_node", None):
+        return leg
+    return None
 
 
 def _current_goal_node_id(s) -> int | None:
-    """Return the node the user should walk toward right now (for AR arrow)."""
+    """Return the node the user should walk toward right now (for AR arrow): the leg for
+    the current phase; None when the plan has none (e.g. no checkout node on the map)."""
     if s.route_plan and hasattr(s.route_plan, 'legs') and s.route_plan.legs:
-        leg_idx = min(s.current_leg_index, len(s.route_plan.legs) - 1)
-        return s.route_plan.legs[leg_idx].to_node
+        leg = _phase_leg(s)
+        return leg.to_node if leg is not None else None
     return s.goal_node
 
 
@@ -1614,10 +1694,10 @@ def _handle_start_session(req: StartSessionRequest) -> StartSessionResponse:
                     log.warning("🔴 [session %s] NO goal items matched any Neo4j node — route planning SKIPPED", s.id)
                 if target_nodes:
                     log.info("🟢 [session %s] %d goal items matched nodes: %s", s.id, len(target_nodes), target_nodes)
-                    # Build networkx graph from Neo4j walkway edges + proximity
+                    # Plan on the route graph the mini-map and the text steps use
                     from server.path_planner import plan_route as _plan_route
-                    neo4j_graph = _build_nav_graph(ref_map)
-                    if neo4j_graph.number_of_nodes() > 0:
+                    neo4j_graph = _route_nx_graph(selected_place)
+                    if neo4j_graph is not None and neo4j_graph.number_of_nodes() > 0:
                         # Auto-detect checkout and exit nodes (need exit_nid for default start)
                         checkout_nid, exit_nid = _find_checkout_exit_nodes(ref_map)
                         if checkout_nid and checkout_nid not in neo4j_graph:
@@ -1625,15 +1705,16 @@ def _handle_start_session(req: StartSessionRequest) -> StartSessionResponse:
                         if exit_nid and exit_nid not in neo4j_graph:
                             exit_nid = None
 
-                        # Placeholder start — will be re-planned from actual position after first photo
-                        start_nid = 0 if 0 in neo4j_graph else min(neo4j_graph.nodes())
+                        # From the entrance (or the first start point) until a chosen start
+                        # point or the first photo fix re-plans from where the user is
+                        start_nid = _default_start_wp(selected_place)
                         # Filter targets to only nodes that exist in graph
                         valid_targets = [t for t in target_nodes if t in neo4j_graph]
 
                         s.checkout_node = checkout_nid
                         s.exit_node = exit_nid
 
-                        if valid_targets:
+                        if valid_targets and start_nid is not None:
                             route = _plan_route(
                                 neo4j_graph, start_nid, valid_targets,
                                 checkout=checkout_nid, exit_node=exit_nid,
@@ -2153,6 +2234,16 @@ async def _handle_photo(
         log.info("[session %s] verify_arrival: %s → %s | goal_verified=%s ocr_matches=%s",
                  session_id, _raw_action.value, vlm_resp.action.value,
                  goal_verified, bool(ocr_matches))
+    # ...and on the map: far from the goal node, ask instead (with where the map has the user)
+    if _raw_action == VLMAction.ARRIVED:
+        _far_q = _far_from_goal_question(
+            s, _early_loc.matched_nid if _early_loc else None,
+            _ref_location_name(_early_loc) if _early_loc else None)
+        if _far_q:
+            log.info("[session %s] arrival not near the goal node on the map → asking: %s", session_id, _far_q)
+            vlm_resp = VLMResponse(action=VLMAction.ASK, guidance=_far_q, question=_far_q,
+                                   vlm_summary=vlm_resp.vlm_summary)
+            arrival_downgraded = True
     if verified_labels:
         log.info("[session %s] confirmed goal items in this photo: %s", session_id, verified_labels)
 
@@ -2312,6 +2403,7 @@ async def _handle_photo(
         action=vlm_resp.action,
         guidance=_final_guidance,
         question=vlm_resp.question,
+        confirm_question=vlm_resp.action == VLMAction.ASK and arrival_downgraded,
         node_id=nid,
         annotated_photo_url=f"/session/{session_id}/photo/{nid}.jpg",
         retake_hint=_retake_hint,
@@ -2369,10 +2461,18 @@ def _handle_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
 
     # If this is answering a confirm-arrival question, handle directly
     # without re-asking VLM — user says yes/no, that's the answer.
-    _deny_keywords = ("不確定", "繼續", "不是", "沒有", "沒看到", "不對", "再找", "還沒", "no")
     if s.pending_is_confirm:
         nid = s.last_node_id
-        if any(k in req.answer for k in _deny_keywords):
+        _yes = _confirm_answer(req.answer)
+        if _yes is None:
+            log.info("[session %s] Unclear reply to an arrival question → asking again", session_id)
+            vlm_resp = VLMResponse(
+                action=VLMAction.ASK,
+                guidance=f"請回答「是」或「不是」：{prior_question}",
+                question=prior_question,
+                vlm_summary="unclear reply to arrival question",
+            )
+        elif not _yes:
             log.info("[session %s] User denied confirm → continue MOVE", session_id)
             s.pending_question = None
             s.pending_is_confirm = False
@@ -2425,6 +2525,7 @@ def _handle_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
             action=vlm_resp.action,
             guidance=vlm_resp.guidance,
             question=vlm_resp.question,
+            confirm_question=vlm_resp.action == VLMAction.ASK,
             node_id=nid,
             remaining_targets=len(s.remaining_targets) if s.target_nodes else None,
             phase=s.phase,
@@ -2481,6 +2582,13 @@ def _handle_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
         prior_was_confirm=False,
     )
     arrival_downgraded = _raw_action == VLMAction.ARRIVED and vlm_resp.action != VLMAction.ARRIVED
+    if _raw_action == VLMAction.ARRIVED:
+        _far_q = _far_from_goal_question(s, s.last_corrected_nid)
+        if _far_q:
+            log.info("[session %s] arrival not near the goal node on the map → asking: %s", session_id, _far_q)
+            vlm_resp = VLMResponse(action=VLMAction.ASK, guidance=_far_q, question=_far_q,
+                                   vlm_summary=vlm_resp.vlm_summary)
+            arrival_downgraded = True
 
     s.history.append({
         "kind": "answer",
@@ -2506,6 +2614,7 @@ def _handle_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
         action=vlm_resp.action,
         guidance=vlm_resp.guidance,
         question=vlm_resp.question,
+        confirm_question=vlm_resp.action == VLMAction.ASK and arrival_downgraded,
         node_id=s.last_node_id,
         annotated_photo_url=f"/session/{session_id}/photo/{s.last_node_id}.jpg",
         phase=s.phase,
@@ -3087,14 +3196,6 @@ def set_test_config(grid_n: int = Query(default=None), vlm_rounds: int = Query(d
                                                     "fusion_weights": _config.LOC_FUSION_WEIGHTS}}
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# Multi-target route planning endpoints
-# ══════════════════════════════════════════════════════════════════════════
-
-from server.navigator import resolve_targets, plan_multi_target_route, replan_route
-from server.store_map import get_store_topomap
-
-
 # ── Editor-map path following ──────────────────────────────────────────
 _editor_graphs: dict = {}
 
@@ -3228,173 +3329,27 @@ def get_session_path(session_id: str,
     )
 
 
-@app.post("/session/{session_id}/plan-route", response_model=PlanRouteResponse)
-def plan_session_route(session_id: str, req: PlanRouteRequest):
-    """Plan an optimised route for a navigation session.
-
-    Resolves target queries to map nodes, then runs A* + TSP to find the
-    shortest total path:  current_position → [targets in best order] → checkout → exit.
-    """
+@app.post("/session/{session_id}/start")
+def set_session_start(session_id: str, payload: dict = Body(...)):
+    """The user stands at a start point ({"x", "y"} in the map frame, from 「我在起點」):
+    re-plan the visit order from the waypoint there instead of the default start."""
     s = _store.get(session_id)
     if s is None:
         raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
-
-    # Resolve target queries to node IDs
-    resolved = resolve_targets(req.targets)
-    target_nodes = [r["node_id"] for r in resolved if r["node_id"] is not None]
-
-    if not target_nodes:
-        raise HTTPException(status_code=400, detail={
-            "error": "no_targets_resolved",
-            "detail": "None of the target queries could be matched to map locations",
-        })
-
-    # Determine start node: explicit > visual localization > lobby
-    start = req.start_node
-    if start is None:
-        start = getattr(s, "last_corrected_nid", None)
-    if start is None:
-        from server.store_map import NODE_LOBBY
-        start = NODE_LOBBY
-
-    topo = get_store_topomap()
-    route = plan_multi_target_route(
-        topo.graph, start, target_nodes,
-        checkout_node=req.checkout_node,
-        exit_node=req.exit_node,
-    )
-
-    # Save to session
-    s.target_nodes = target_nodes
-    s.visited_targets = set()
-    s.route_plan = route
-    s.current_leg_index = 0
-    s.checkout_node = req.checkout_node
-    s.exit_node = req.exit_node
-
-    log.info("[session %s] Route planned: %d targets, cost=%.1f, order=%s",
-             session_id, len(target_nodes), route.total_cost, route.visit_order)
-
-    return PlanRouteResponse(
-        visit_order=route.visit_order,
-        total_cost=route.total_cost,
-        full_path=route.full_path,
-        legs=[
-            {"from": leg.from_node, "to": leg.to_node, "path": leg.path,
-             "cost": leg.cost, "actions": leg.actions, "purpose": leg.purpose}
-            for leg in route.legs
-        ],
-        resolved_targets=resolved,
-        checkout_node=req.checkout_node,
-        exit_node=req.exit_node,
-    )
-
-
-@app.post("/session/{session_id}/arrive-target")
-def arrive_at_target(session_id: str, node_id: int = Body(..., embed=True)):
-    """Mark a target as reached and re-plan the remaining route.
-
-    Call this when the user arrives at a target node. The route is re-planned
-    from the current position through the remaining targets → checkout → exit.
-    """
-    s = _store.get(session_id)
-    if s is None:
-        raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
-
-    if node_id not in s.target_nodes:
-        raise HTTPException(status_code=400, detail={
-            "error": "not_a_target",
-            "detail": f"Node {node_id} is not in the target list",
-        })
-
-    s.mark_target_visited(node_id)
-
-    remaining = s.remaining_targets
-    log.info("[session %s] Arrived at target node %d. Remaining: %s",
-             session_id, node_id, remaining)
-
-    if not remaining and s.checkout_node is None and s.exit_node is None:
-        # All done
-        return {"status": "complete", "message": "所有目標都已到達！"}
-
-    topo = get_store_topomap()
-    route = replan_route(
-        topo.graph, node_id, remaining,
-        checkout_node=s.checkout_node,
-        exit_node=s.exit_node,
-    )
-    s.route_plan = route
-    s.current_leg_index = 0
-
-    return {
-        "status": "replanned",
-        "visited": list(s.visited_targets),
-        "remaining": remaining,
-        "route": route.to_dict(),
-    }
-
-
-@app.post("/session/{session_id}/modify-route")
-def modify_route(session_id: str, req: ModifyRouteRequest):
-    """Add or remove targets mid-route, then re-plan.
-
-    The user can change their shopping list while walking — this re-runs
-    the full TSP from their current position.
-    """
-    s = _store.get(session_id)
-    if s is None:
-        raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
-
-    added_nodes = []
-    removed_nodes = []
-
-    # Add new targets
-    if req.add:
-        resolved = resolve_targets(req.add)
-        for r in resolved:
-            if r["node_id"] is not None:
-                s.add_target(r["node_id"])
-                added_nodes.append(r)
-
-    # Remove targets
-    if req.remove:
-        resolved = resolve_targets(req.remove)
-        for r in resolved:
-            if r["node_id"] is not None:
-                s.remove_target(r["node_id"])
-                removed_nodes.append(r)
-
-    remaining = s.remaining_targets
-
-    # Determine current position
-    current = getattr(s, "last_corrected_nid", None) or s.last_node_id
-    if current is None:
-        from server.store_map import NODE_LOBBY
-        current = NODE_LOBBY
-
-    topo = get_store_topomap()
-    route = replan_route(
-        topo.graph, current, remaining,
-        checkout_node=s.checkout_node,
-        exit_node=s.exit_node,
-    )
-    s.route_plan = route
-    s.current_leg_index = 0
-
-    log.info("[session %s] Route modified: added=%s removed=%s remaining=%s",
-             session_id,
-             [n["query"] for n in added_nodes],
-             [n["query"] for n in removed_nodes],
-             remaining)
-
-    return {
-        "status": "replanned",
-        "added": added_nodes,
-        "removed": removed_nodes,
-        "remaining": remaining,
-        "visited": list(s.visited_targets),
-        "route": route.to_dict(),
-    }
+    try:
+        x, y = float(payload["x"]), float(payload["y"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="body needs numeric 'x' and 'y'")
+    g = _editor_graph_for(s.place)
+    if g is None:
+        raise HTTPException(status_code=404, detail={"error": "no_editor_map", "detail": f"no route map for {s.place!r}"})
+    wp = editor_map_mod.nearest_waypoint(g, x, y)
+    replanned = _replan_from(s, wp)
+    log.info("[session %s] start point (%.1f, %.1f) → WP%s, re-planned=%s, order=%s",
+             session_id, x, y, wp, replanned, s.route_plan.visit_order if s.route_plan else None)
+    return {"start_node": wp, "replanned": replanned,
+            "visit_order": list(s.route_plan.visit_order) if s.route_plan else [],
+            "goal_node_id": _current_goal_node_id(s)}
 
 
 @app.get("/session/{session_id}/route")

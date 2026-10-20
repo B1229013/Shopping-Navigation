@@ -76,7 +76,7 @@ App 的 AI 購物功能（分類、AI 助手、收據）另外直接連 CGU LLM 
 2. **選起點（可選）** — `POST /session/{id}/start`，從起點出發並重新規劃路線。
 3. **拍照** — `POST /session/{id}/photo`，帶照片和手機的位置／航向：
    1. 照片品質檢查（模糊、太暗、遮擋）
-   2. VLM 感知：物件、商品名、OCR 文字、店內區域（`VLM_ROUNDS`、`VLM_PASS3`）
+   2. VLM 感知：物件、商品名、OCR 文字、店內區域（`VLM_ROUNDS`、`VLM_PASS3`；請在 `.env` 設 `VLM_PASS3=0`，原因見 [backend/README.md](backend/README.md)）
    3. 定位融合：伺服器端 DINOv2 找最像的參考照片，再加物件名稱、OCR、走道吊牌與感測器位置
    4. 依定位結果在 Neo4j 拓樸圖上規劃到目標的路線
    5. VLM 決策：根據照片與路線回傳 MOVE / ASK / ARRIVED 與中文指引

@@ -114,12 +114,6 @@ class MainActivity : ComponentActivity() {
                         composable("sensor_lab") {
                             SensorLabScreen(navController)
                         }
-                        composable("sensor_nav") {
-                            SensorNavHomeScreen(navController)
-                        }
-                        composable("sensor_nav_active") {
-                            SensorNavActiveScreen(navController)
-                        }
                     }
                 }
             }

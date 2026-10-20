@@ -19,6 +19,8 @@
 - iOS 與 Android 共用同一套後端 API（`backend/`）。本倉庫已不再保留 iOS 程式的副本。
 - 舊版分支以 tag 保存：`archive/ranging-metric-distance`、`archive/sensorlab-pdr`、
   `archive/sensor-nav-pdr`、`archive/remove-dead-modules`；整合前的狀態是 `backup/before-consolidate`。
+- 舊版「感測器導航」（App 的 `SensorNav*`、後端 `/snav`）已由主導航取代並移除，程式保存在 `archive/sensor-nav-pdr`
+  與 `backend/legacy/`。
 
 ---
 
@@ -241,7 +243,6 @@ docker build -t shopping-nav-backend .
 | `sensor/PdrTracker.kt` | 計步與航向（Rotation Vector／Game Rotation Vector 北方校正） |
 | `network/NavigationApi.kt` / `BackendConfig.kt` | 導航後端 API 與後端網址設定 |
 | `ui/screens/SensorLabScreen.kt` | Sensor Lab：全螢幕拍照與感測器錄製（背景執行緒、約 50 Hz） |
-| `ui/screens/SensorNavScreen.kt`、`viewmodel/SensorNavViewModel.kt`、`network/SensorNavApi.kt` | 舊版「感測器導航」，呼叫 `/snav` 端點；目前後端已不提供，設定頁的入口無法使用 |
 | `ui/screens/MainContainer.kt` | 主畫面分頁（首頁、清單、食材、預算、歷史、AI），CGU 閘道請求 |
 | `ui/screens/HomeScreen.kt`、`ShoppingListScreen.kt`、`IngredientsScreen.kt`、`HistoryScreen.kt`、`AIScreen.kt`、`LoginScreen.kt`、`SettingsScreen.kt`、`NearbyStoresSheet.kt`、`NearbyStoresAr.kt` | 購物相關頁面 |
 | `ui/utils/CategoryClassifier.kt`、`LlmCategoryClassifier.kt` | 商品分類（例外清單 → LLM → 關鍵字） |

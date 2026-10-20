@@ -5,6 +5,7 @@ import android.content.Context
 import android.text.format.Formatter
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -313,48 +314,8 @@ fun SettingsScreen(navController: NavController) {
                 }
             }
 
-            // ── Sensor Nav ──
-            StaggeredItem(index = 2) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(SurfaceBase)
-                        .padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .background(ChartBlue.copy(alpha = 0.10f), RoundedCornerShape(12.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Navigation, null, tint = ChartBlue, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("感測器導航", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
-                            Text("PDR 計步 + AI 視覺融合建圖導航", style = MaterialTheme.typography.bodySmall, color = TextTertiary)
-                        }
-                    }
-
-                    Button(
-                        onClick = { navController.navigate("sensor_nav") },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = ChartBlue, contentColor = Color.White)
-                    ) {
-                        Icon(Icons.Default.Explore, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("開啟感測器導航", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-
             // ── Backend Connection ──
-            StaggeredItem(index = 3) {
+            StaggeredItem(index = 2) {
                 var showIpDialog by remember { mutableStateOf(false) }
                 var backendUrl by remember { mutableStateOf(BackendConfig.currentUrl) }
 
@@ -419,7 +380,7 @@ fun SettingsScreen(navController: NavController) {
             }
 
             // ── Storage Info ──
-            StaggeredItem(index = 4) {
+            StaggeredItem(index = 3) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -513,3 +474,88 @@ private fun clearCache(context: Context) {
     context.cacheDir.deleteRecursively()
     context.externalCacheDir?.deleteRecursively()
 }
+
+// ── Backend URL dialog ──
+
+@Composable
+fun BackendUrlDialog(
+    currentUrl: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var customIp by remember { mutableStateOf("") }
+    val port = "8000"
+
+    val presetOptions = listOf(
+        "172.20.10.10" to "iPhone 熱點",
+        "192.168.68.107" to "家用 Wi-Fi",
+        "10.0.2.2" to "Android 模擬器",
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("後端伺服器設定", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("選擇或輸入後端 IP：", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+
+                presetOptions.forEach { (ip, label) ->
+                    val url = "http://$ip:$port/"
+                    val isSelected = currentUrl == url
+                    Surface(
+                        color = if (isSelected) Gold.copy(alpha = 0.15f) else SurfaceBase,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onConfirm(url) },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                                Text(ip, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                            }
+                            if (isSelected) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Gold, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+                Text("自訂 IP：", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = customIp,
+                        onValueChange = { customIp = it },
+                        placeholder = { Text("192.168.x.x") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Gold, cursorColor = Gold),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (customIp.isNotBlank()) {
+                                onConfirm("http://$customIp:$port/")
+                            }
+                        },
+                        enabled = customIp.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Gold),
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text("連線")
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+

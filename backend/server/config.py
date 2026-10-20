@@ -214,12 +214,15 @@ VLM_ROUNDS = int(os.environ.get("VLM_ROUNDS", "1"))
 # VLM 3rd pass — extra perception pass focusing on distinctive features
 VLM_PASS3 = os.environ.get("VLM_PASS3", "1") != "0"
 
-# Hybrid embedding similarity (hybrid_max = max(char_sim, embedding_cosine_sim))
+# Hybrid embedding similarity (hybrid_max = max(char_sim, embedding_cosine_sim)) for object
+# labels. The reference map's label vectors are fetched once and kept in EMBEDDING_CACHE_PATH
+# (.npz, or the older .json); a photo's labels are embedded per photo (one small request).
+# Until 2026-10 the cache only existed under REF_PHOTO_ROOT, which deployments do not set, so
+# label matching was character-only (eval/results/weight_sweep_lab1019_*: 44.7% → 48.1%).
 EMBEDDING_ENABLED = os.environ.get("EMBEDDING_ENABLED", "1") != "0"
-EMBEDDING_CACHE_PATH = os.environ.get(
-    "EMBEDDING_CACHE_PATH",
-    str(Path(os.environ.get("REF_PHOTO_ROOT", "")) / "檢索圖片" / "embedding_cache" / "label_embeddings.json")
-) if os.environ.get("REF_PHOTO_ROOT") else ""
+EMBEDDING_CACHE_PATH = os.environ.get("EMBEDDING_CACHE_PATH") or (
+    str(Path(os.environ["REF_PHOTO_ROOT"]) / "檢索圖片" / "embedding_cache" / "label_embeddings.json")
+    if os.environ.get("REF_PHOTO_ROOT") else str(PROJECT_ROOT / "output" / "label_embeddings.npz"))
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 
 # VLM Re-ranking (optional, adds ~10s per photo for improved accuracy)

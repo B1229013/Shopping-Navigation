@@ -32,6 +32,17 @@ def _fresh_route_graph_cache(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_label_embeddings(monkeypatch):
+    """Label embeddings would be fetched from OpenAI (the repo .env has a key) — never in
+    tests. Tests of the embedding path fill visual_localization._emb_cache themselves."""
+    from server import visual_localization as VL
+    monkeypatch.setattr(VL, "_emb_cache", {})
+    monkeypatch.setattr(VL, "_emb_persisted", set())
+    monkeypatch.setattr(VL, "_emb_loaded", True)
+    monkeypatch.setattr(VL, "_emb_on", False)
+
+
+@pytest.fixture(autouse=True)
 def _no_server_dino(monkeypatch):
     """Server-side DINOv2 would load (or download) facebook/dinov2-base for every API
     test photo; tests that cover it turn it back on and fake the embedding."""

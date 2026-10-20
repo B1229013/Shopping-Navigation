@@ -379,6 +379,124 @@ def _call_kind(prompt):
     return "other"
 
 
+def _server_perceive(srv, img):
+    """The perception call _handle_photo makes in mode B, as config says."""
+    from PIL import Image
+    from server import config as C
+    with Image.open(img) as im:
+        w, h = im.size
+    kw = dict(image_path=str(img), goal=VLM_GOAL, goal_objects=VLM_GOAL_OBJECTS, img_w=w, img_h=h)
+    if C.VLM_ROUNDS > 1:
+        perc, debug = srv._vlm_perceive_multi_round(num_rounds=C.VLM_ROUNDS, **kw)
+    elif C.VLM_PASS3:
+        perc, debug = srv._vlm_perceive_three_pass(**kw)
+    else:
+        perc, debug = srv._vlm_perceive_two_pass(**kw)
+    return perc, debug, w, h
+
+
+def _vlm_record(srv, perc, debug, w, h, q, calls, sig, t):
+    """One photo's perception as _handle_photo turns it into detections / OCR results:
+    `label` is what the turn uses, `label_loc` what localization matches (the server's
+    vlm.localization_label — 「中文 English」 since 2026-10)."""
+    from server import photo_quality, vlm
+    from server.ocr import OCRResult
+    from server.perception import Detection
+    dets = [Detection(label=d.label, box=d.bbox, score=d.score, position=d.position) for d in perc.detections]
+    ocr = srv._clean_vlm_ocr([OCRResult(text=t_.text, confidence=t_.score, bbox=t_.bbox) for t_ in perc.ocr_texts], h)
+    occ = photo_quality.assess_occlusion(dets, w, h, goals=VLM_GOAL_OBJECTS)
+    loc = getattr(vlm, "localization_label", lambda d: d.label)
+    return {
+        "size": [w, h], "vlm_sig": sig,
+        "quality": {"sharpness": q.sharpness, "brightness": q.brightness, "hint": q.hint},
+        "detections": [{"label": d.label, "label_loc": loc(v), "box": [float(x) for x in d.box],
+                        "score": float(d.score), "position": d.position} for d, v in zip(dets, perc.detections)],
+        "ocr": [{"text": r.text, "confidence": r.confidence, "bbox": r.bbox} for r in ocr],
+        "ocr_before_clean": len(perc.ocr_texts),
+        "store_zone": perc.store_zone or "", "scene": perc.scene_description,
+        "occlusion": {"fraction": occ.fraction, "useful_objects": occ.useful_objects, "hint": occ.hint},
+        "vlm_passes": debug, "vlm_calls": calls, "t": t,
+    }
+
+
+def replay_vlm(cache, jobs, srv):
+    """Re-run the server's current perception code on the cached raw VLM replies — no API
+    call. vlm._generate answers each pass from the cache, in the order the photo was
+    originally asked; a pass the current code asks for more often than it was asked then
+    (e.g. a retry after a reply the old code could not parse) gets an error, as a failed
+    call would. Returns {id: perception} and how many such misses there were."""
+    from server import vlm
+    out, misses = {}, 0
+    real = vlm._generate
+    try:
+        for k, img in jobs:
+            cached = cache[k]
+            queue = {}
+            for c in cached.get("vlm_calls") or []:
+                queue.setdefault(c["kind"], []).append(c)
+
+            def fake(prompt, image_b64=None, max_tokens=vlm.DECIDE_MAX_TOKENS, queue=queue):
+                nonlocal misses
+                q = queue.get(_call_kind(prompt))
+                if not q:
+                    misses += 1
+                    raise RuntimeError("no cached reply for this call")
+                c = q.pop(0)
+                if "error" in c:
+                    raise RuntimeError(c["error"])
+                return c["text"]
+            vlm._generate = fake
+            perc, debug, w, h = _server_perceive(srv, img)
+            q = SimpleNamespace(**cached["quality"])
+            out[k] = _vlm_record(srv, perc, debug, w, h, q, cached["vlm_calls"], cached.get("vlm_sig"),
+                                 dict(cached["t"]))
+            out[k]["replayed"] = True
+    finally:
+        vlm._generate = real
+    return out, misses
+
+
+def preload_label_embeddings(cache_dir, ref_map, perc_all):
+    """The server now fetches label embeddings from OpenAI (map labels once, photo labels
+    per photo). For a benchmark run, fetch every label once into eval's cache
+    (label_embeddings.npz — paid only for labels never seen) and hand them to the server's
+    cache, so localization makes no API call."""
+    from eval.label_embeddings import LabelEmbeddings
+    from server import config as C, locate_fusion as LF
+    from server import visual_localization as VL
+    if not VL._load_embedding_cache():
+        return 0, None
+    embs = LF._reference_embeddings(ref_map, LF._load_sidecar(C.DINO_SIDECAR_PATH))
+    map_labels = {l for e in LF._index_for(ref_map, embs)["entries"] for l in e["labels"]}
+    photo_labels = {d.get("label_loc") or d["label"] for p in perc_all.values() for d in p["detections"]}
+    emb = LabelEmbeddings(cache_dir / "label_embeddings.npz")
+    fetched = emb.ensure(sorted(map_labels | photo_labels))
+    VL._emb_cache.update({l: emb.matrix([l])[0] for l in map_labels | photo_labels})
+    VL._emb_persisted.update(map_labels)      # nothing for the server to save
+    from eval.weight_sweep import SemanticSim
+    return fetched, SemanticSim("hybrid", emb, sorted(map_labels))
+
+
+class FastLabelSim:
+    """Speed only: visual_localization._hybrid_max_sim answered from one (photo labels ×
+    map labels) matrix per photo instead of ~10⁵ single calls per variant — the same
+    max(character, cosine) values (eval/weight_sweep checks them against _node_score)."""
+
+    def __init__(self, semsim):
+        from server import visual_localization as VL
+        self.VL, self.sim, self.real = VL, semsim, VL._hybrid_max_sim
+        self.ridx = {l: j for j, l in enumerate(semsim.ref_labels)}
+
+    def photo(self, labels):
+        uniq = list(dict.fromkeys(labels))
+        S, qidx, ridx, real = self.sim.matrix(uniq), {l: i for i, l in enumerate(uniq)}, self.ridx, self.real
+
+        def lookup(a, b):
+            i, j = qidx.get(a), ridx.get(b)
+            return float(S[i, j]) if i is not None and j is not None else real(a, b)
+        self.VL._hybrid_max_sim = lookup
+
+
 def perceive_all_vlm(jobs, cache_path, srv, redetect=False):
     """The server's mode B (PERCEPTION_ENABLED=0, OCR_ENABLED=0): quality check, then
     vlm.perceive_three_pass (or two-pass / multi-round, as config says) on the stored
@@ -411,42 +529,17 @@ def perceive_all_vlm(jobs, cache_path, srv, redetect=False):
     vlm._generate = recorder
     try:
         for i, (k, img) in enumerate(todo, 1):
-            from PIL import Image
-            with Image.open(img) as im:
-                w, h = im.size
             calls.clear()
             t0 = time.perf_counter()
             q = photo_quality.assess_image(str(img))
             t1 = time.perf_counter()
-            if C.VLM_ROUNDS > 1:
-                perc, debug = srv._vlm_perceive_multi_round(image_path=str(img), goal=VLM_GOAL,
-                                                            goal_objects=VLM_GOAL_OBJECTS, img_w=w, img_h=h,
-                                                            num_rounds=C.VLM_ROUNDS)
-            elif C.VLM_PASS3:
-                perc, debug = srv._vlm_perceive_three_pass(image_path=str(img), goal=VLM_GOAL,
-                                                           goal_objects=VLM_GOAL_OBJECTS, img_w=w, img_h=h)
-            else:
-                perc, debug = srv._vlm_perceive_two_pass(image_path=str(img), goal=VLM_GOAL,
-                                                         goal_objects=VLM_GOAL_OBJECTS, img_w=w, img_h=h)
+            perc, debug, w, h = _server_perceive(srv, img)
             t2 = time.perf_counter()
             if calls and all("error" in c for c in calls):
                 sys.exit(f"{k}: every VLM call failed ({calls[-1]['error']}) — stopped, nothing cached for it")
-            dets = [Detection(label=d.label, box=d.bbox, score=d.score, position=d.position) for d in perc.detections]
-            ocr = srv._clean_vlm_ocr([OCRResult(text=t.text, confidence=t.score, bbox=t.bbox) for t in perc.ocr_texts], h)
-            occ = photo_quality.assess_occlusion(dets, w, h, goals=VLM_GOAL_OBJECTS)
-            cache[k] = {
-                "size": [w, h], "vlm_sig": sig,
-                "quality": {"sharpness": q.sharpness, "brightness": q.brightness, "hint": q.hint},
-                "detections": [{"label": d.label, "box": [float(v) for v in d.box], "score": float(d.score),
-                                "position": d.position} for d in dets],
-                "ocr": [{"text": r.text, "confidence": r.confidence, "bbox": r.bbox} for r in ocr],
-                "ocr_before_clean": len(perc.ocr_texts),
-                "store_zone": perc.store_zone or "", "scene": perc.scene_description,
-                "occlusion": {"fraction": occ.fraction, "useful_objects": occ.useful_objects, "hint": occ.hint},
-                "vlm_passes": debug, "vlm_calls": list(calls),
-                "t": {"quality": t1 - t0, "vlm": t2 - t1},
-            }
+            cache[k] = _vlm_record(srv, perc, debug, w, h, q, list(calls), sig, {"quality": t1 - t0, "vlm": t2 - t1})
             _save_json(cache_path, cache)
+            dets, ocr = cache[k]["detections"], cache[k]["ocr"]
             kinds = Counter(c["kind"] for c in calls)
             print(f"  VLM {i}/{len(todo)} {k}: {len(dets)} objects, {len(ocr)} texts, "
                   f"{len(calls)} calls {dict(kinds)}, {t2 - t1:.1f}s", file=sys.stderr, flush=True)
@@ -605,7 +698,7 @@ def evidence_detail(ref_map, perc, q_emb, place):
     embs = LF._reference_embeddings(ref_map, LF._load_sidecar(C.DINO_SIDECAR_PATH))
     index = LF._index_for(ref_map, embs)
     E = index["entries"]
-    labels = [d["label"] for d in perc["detections"]]
+    labels = [d.get("label_loc") or d["label"] for d in perc["detections"]]
     q_ocr = {LF._norm_ocr(o["text"]) for o in perc["ocr"]} - {""}
     vis = np.array([float(np.dot(q_emb, e["emb"])) if (q_emb is not None and e["emb"] is not None) else 0.0
                     for e in E])
@@ -630,8 +723,12 @@ def evidence_detail(ref_map, perc, q_emb, place):
         if ocr[k] > n["ocr"]:
             n["ocr"], n["ocr_shared"] = float(ocr[k]), sorted(q_ocr & e["ocrset"])
     w, h = perc["size"]
-    dets = [Detection(label=d["label"], box=d["box"], score=d["score"]) for d in perc["detections"]]
-    items = [{"label": d.label, "box": [d.box[0] / w, d.box[1] / h, d.box[2] / w, d.box[3] / h]} for d in dets]
+    from server import photo_quality
+    dets = [Detection(label=d.get("label_loc") or d["label"], box=d["box"], score=d["score"])
+            for d in perc["detections"]]
+    # as server._build_localization_items: occluders are not part of the map
+    items = [{"label": d.label, "box": [d.box[0] / w, d.box[1] / h, d.box[2] / w, d.box[3] / h]} for d in dets
+             if not photo_quality.is_occluder(d.label)]
     numbers = dict(aisle_signs.numbers_in_items(items))
     for n_, a in aisle_signs.numbers_from_ocr([OCRResult(o["text"], o["confidence"], o["bbox"]) for o in perc["ocr"]],
                                               w, h).items():
@@ -654,7 +751,9 @@ def localize(srv, place, perc, img_path, phone=None):
     from server import aisle_signs
     from server.ocr import OCRResult
     from server.perception import Detection
-    dets = [Detection(label=d["label"], box=d["box"], score=d["score"]) for d in perc["detections"]]
+    # mode B localizes with vlm.localization_label (label_loc); older caches have only label
+    dets = [Detection(label=d.get("label_loc") or d["label"], box=d["box"], score=d["score"])
+            for d in perc["detections"]]
     ocr = [OCRResult(text=o["text"], confidence=o["confidence"], bbox=o["bbox"]) for o in perc["ocr"]]
     w, h = perc["size"]
     s = SimpleNamespace(place=place, last_corrected_nid=None, last_loc_log=None,
@@ -1040,6 +1139,10 @@ def main(argv=None):
                     help="gdino = server mode A (GroundingDINO + EasyOCR); vlm = mode B, what the deployed "
                          ".env runs (PERCEPTION_ENABLED=0): paid OpenAI calls, cached per photo")
     ap.add_argument("--no-annotate", action="store_true", help="skip the annotated photos")
+    ap.add_argument("--vlm-replay", action="store_true",
+                    help="with --perception vlm: re-run the server's current perception code on the cached "
+                         "raw VLM replies (no VLM call) — to test parser / label changes. VLM_PASS3=0 in the "
+                         "environment replays without pass 3")
     args = ap.parse_args(argv)
 
     import logging
@@ -1063,11 +1166,31 @@ def main(argv=None):
         items = items[:args.limit]
 
     vlm_mode = args.perception == "vlm"
-    suffix = ("_vlm" if vlm_mode else "") + (f"_limit{args.limit}" if args.limit else "")
+    if args.vlm_replay and not vlm_mode:
+        sys.exit("--vlm-replay needs --perception vlm")
+    suffix = (("_vlm" if vlm_mode else "") + ("_replay" if args.vlm_replay else "")
+              + ("_nopass3" if args.vlm_replay and not C.VLM_PASS3 else "") + (f"_limit{args.limit}" if args.limit else ""))
     imgs = {it["id"]: preprocess(it, cache / "img") for it in items}
+    replay_misses = None
     if vlm_mode:
-        perc_all = perceive_all_vlm(list(imgs.items()), cache / "perception_vlm.json", srv, args.redetect)
+        if args.vlm_replay:
+            # never through perceive_all_vlm: its cache key includes VLM_PASS3, so a pass-3-off
+            # replay would look stale and be re-asked (paid)
+            cached = _load_json(cache / "perception_vlm.json")
+            missing = [k for k in imgs if not (cached.get(k) or {}).get("vlm_calls")]
+            if missing:
+                sys.exit(f"{len(missing)} photos have no cached VLM replies (e.g. {missing[0]}) — "
+                         f"run without --vlm-replay first")
+            perc_all, replay_misses = replay_vlm(cached, list(imgs.items()), srv)
+        else:
+            perc_all = perceive_all_vlm(list(imgs.items()), cache / "perception_vlm.json", srv, args.redetect)
+        n_emb, semsim = preload_label_embeddings(cache, ref_map, {k: perc_all[k] for k in imgs})
+        if n_emb:
+            print(f"fetched {n_emb} new label embeddings", file=sys.stderr)
+        fast_sim = FastLabelSim(semsim) if semsim is not None else None
     else:
+        fast_sim = None
+    if not vlm_mode:
         perc_all = perceive_all(list(imgs.items()), cache / "perception.json", args.redetect)
     ann_dir = cache / f"annotated_{args.perception}"
     if not args.no_annotate:
@@ -1094,6 +1217,8 @@ def main(argv=None):
     for i, it in enumerate(items, 1):
         img, p = imgs[it["id"]], perc_all[it["id"]]
         embed.key = it["id"]
+        if fast_sim is not None:
+            fast_sim.photo([d.get("label_loc") or d["label"] for d in p["detections"]])
         base = dict(quality_hint=p["quality"]["hint"], occlusion_hint=p["occlusion"]["hint"],
                     occlusion_fraction=p["occlusion"]["fraction"], n_objects=p["occlusion"]["useful_objects"],
                     n_ocr=len(p["ocr"]),
@@ -1167,8 +1292,14 @@ def main(argv=None):
     notes = []
     if vlm_mode:
         sig = vlm_signature()
+        from server import locate_fusion as LF, visual_localization as VL
         notes.append(f"感知＝伺服器模式 B（部署中的 .env：PERCEPTION_ENABLED=0、OCR_ENABLED=0）："
                      f"{'三階段' if sig['pass3'] else '兩階段'} VLM（{sig['model']}），目標用中性的「{VLM_GOAL}」；每張照片只問一次並快取")
+        notes.append(f"融合權重 DINOv2 : 物件 : 文字 = {LF.W_V:g} : {LF.W_N:g} : {LF.W_O:g}；物件相似度"
+                     + ("＝字元與語意向量取較大值" if VL._emb_on else "＝只有字元"))
+        if args.vlm_replay:
+            notes.append(f"重播：用快取的 VLM 原始回覆跑目前的伺服器解析程式（未呼叫 VLM）；"
+                         f"第 3 階段{'開' if C.VLM_PASS3 else '關'}；需要重問但沒有快取回覆的呼叫 {replay_misses} 次（當作失敗）")
     else:
         notes.append("感知＝伺服器模式 A（GroundingDINO＋EasyOCR）；部署中的 .env 其實是模式 B（VLM），見 _vlm 報表")
     if args.set == "field1017":
@@ -1192,7 +1323,8 @@ def main(argv=None):
         "generated": time.strftime("%Y-%m-%d %H:%M"), "commit": _commit(), "machine": _machine(),
         "map": {"place": ref_map.place, "nodes": len(ref_map.photos), "source": map_source,
                 "fingerprint": map_fingerprint(ref_map), "sidecar_sha1": _file_sha(C.DINO_SIDECAR_PATH)},
-        "config": {"locate_fusion_weights": [5.0, 0.5, 0.5], "server_image_k": C.LOC_SERVER_IMAGE_K,
+        "config": {"locate_fusion_weights": [LF.W_V, LF.W_N, LF.W_O],
+                   "server_image_k": C.LOC_SERVER_IMAGE_K,
                    "confident_threshold": CONFIDENT_THRESHOLD,
                    "dino_model": dino_embed._MODEL_NAME,
                    "perception": vlm_signature() if vlm_mode else perception_signatures()},

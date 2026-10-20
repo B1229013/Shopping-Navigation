@@ -135,6 +135,11 @@ class LocalizationResult:
 
     top_candidates: list = None  # [(nid, score, reason), ...] for optional re-ranking
 
+    # Between-node estimation: when top-2 are adjacent and close in score
+    estimated_x: Optional[float] = None
+    estimated_y: Optional[float] = None
+    between_nodes: Optional[tuple] = None  # (nid_a, nid_b) if estimated between
+
 
 # ── Grid-based weighted matching (primary) ────────────────────────────────
 
@@ -329,42 +334,21 @@ def compute_query_spatial(items: List[dict]) -> Dict[tuple, dict]:
     return rels
 
 
-def _spatial_direction_match(q_rel: dict, ref_cell_pairs: str) -> float:
-    """Score how well a query spatial relationship matches reference ADJACENT cell_pairs."""
-    if not ref_cell_pairs:
+def _spatial_direction_match(q_rel: dict, ref_rel: dict) -> float:
+    """Score how well a query spatial relationship matches a reference ADJACENT relationship."""
+    if not ref_rel:
         return 0.0
-    try:
-        pairs = json.loads(ref_cell_pairs) if isinstance(ref_cell_pairs, str) else ref_cell_pairs
-    except (json.JSONDecodeError, TypeError):
-        return 0.0
-    if not pairs:
-        return 0.0
-    ref_dirs: set = set()
-    for p in pairs:
-        d = p.get("dir", "")
-        if "above" in d:
-            ref_dirs.add("above")
-        if "below" in d:
-            ref_dirs.add("below")
-        if "left" in d:
-            ref_dirs.add("left")
-        if "right" in d:
-            ref_dirs.add("right")
-        if d == "overlap":
-            ref_dirs.add("overlap")
     matches = 0.0
     checks = 3
-    if q_rel["v"] == "above" and "above" in ref_dirs:
+    qv = q_rel["v"]
+    if qv in ("above", "below") and qv == ref_rel.get("v_rel"):
         matches += 1
-    elif q_rel["v"] == "below" and "below" in ref_dirs:
+    qh = q_rel["h"]
+    if qh in ("left", "right") and qh == ref_rel.get("h_rel"):
         matches += 1
-    if q_rel["h"] == "left" and "left" in ref_dirs:
+    if q_rel["overlap"] and ref_rel.get("overlap", False):
         matches += 1
-    elif q_rel["h"] == "right" and "right" in ref_dirs:
-        matches += 1
-    if q_rel["overlap"] and "overlap" in ref_dirs:
-        matches += 1
-    elif not q_rel["overlap"] and "overlap" not in ref_dirs:
+    elif not q_rel["overlap"] and not ref_rel.get("overlap", False):
         matches += 0.5
     return matches / checks
 
@@ -492,7 +476,7 @@ def weighted_grid_match(
     rarity_map: Optional[Dict[str, float]] = None,
     grid_n: int = 3,
     query_spatial: Optional[Dict[tuple, dict]] = None,
-    ref_adjacent: Optional[Dict[tuple, str]] = None,
+    ref_adjacent: Optional[Dict[tuple, dict]] = None,
 ) -> tuple[float, int, dict]:
     """Set-based matching: flatten grids, match all query vs all ref objects."""
     sim_func = _hybrid_max_sim if _emb_cache else _semantic_similarity
@@ -540,6 +524,7 @@ def weighted_grid_match(
 
     base_score = total_weighted / max(total_possible, 1.0)
 
+    spatial_bonus = 0.0
     if len(obj_matches) >= 2 and query_spatial and ref_adjacent:
         spatial_hits = 0
         spatial_checks = 0
@@ -562,9 +547,11 @@ def weighted_grid_match(
         if spatial_checks > 0:
             ratio = spatial_hits / spatial_checks
             total_match_weight = sum(m[3] for m in obj_matches)
-            bonus = ratio * SPATIAL_BONUS_COEFF * (
+            spatial_bonus = ratio * SPATIAL_BONUS_COEFF * (
                 spatial_weight / max(total_match_weight, 1.0))
-            base_score += bonus
+            base_score += spatial_bonus
+            log.debug("spatial bonus: checks=%d hits=%d ratio=%.3f bonus=%.4f",
+                       spatial_checks, spatial_hits, ratio, spatial_bonus)
 
     return base_score, landmark_count, {}
 
@@ -799,6 +786,43 @@ def match_by_objects(
     return scores[:top_k]
 
 
+# ── Between-node position estimation ────────────────────────────────────
+
+def _estimate_between_nodes(
+    candidates: list,
+    ref_map: RefMap,
+) -> tuple:
+    """If top-2 candidates are adjacent nodes with similar scores,
+    estimate a position between them weighted by score ratio.
+    Returns (estimated_x, estimated_y, (nid_a, nid_b)) or (None, None, None)."""
+    if len(candidates) < 2:
+        return None, None, None
+
+    nid_a, score_a, _ = candidates[0]
+    nid_b, score_b, _ = candidates[1]
+
+    if score_a <= 0 or score_b <= 0:
+        return None, None, None
+
+    node_a = ref_map.photos.get(nid_a)
+    node_b = ref_map.photos.get(nid_b)
+    if not node_a or not node_b:
+        return None, None, None
+
+    # Check adjacency
+    if nid_b not in node_a.neighbor_nids:
+        return None, None, None
+
+    # Weight toward higher-scoring node
+    total = score_a + score_b
+    w_a = score_a / total
+    w_b = score_b / total
+    est_x = node_a.pdr_x * w_a + node_b.pdr_x * w_b
+    est_y = node_a.pdr_y * w_a + node_b.pdr_y * w_b
+
+    return est_x, est_y, (nid_a, nid_b)
+
+
 # ── Main localization entry point ─────────────────────────────────────────
 
 CONFIDENT_THRESHOLD = 0.15
@@ -978,10 +1002,13 @@ def localize(
     confidence = min(best_score, 1.0)
 
     if best_score < CONFIDENT_THRESHOLD:
+        est_x, est_y, between = _estimate_between_nodes(candidates, ref_map)
         return LocalizationResult(
             matched_nid=None, confidence=confidence, method=match_method,
             reasoning=f"Best score {best_score:.2f} below threshold ({best_reason})",
             runner_up_nid=runner_nid, runner_up_score=runner_score,
+            top_candidates=candidates[:5],
+            estimated_x=est_x, estimated_y=est_y, between_nodes=between,
         )
 
     gap = best_score - runner_score
@@ -996,6 +1023,9 @@ def localize(
     matched_heading, matched_slot, heading_conf = estimate_node_heading(
         matched_ref, detected_labels, ocr_texts, confidence)
 
+    # ── Between-node position estimation ──────────────────────────
+    est_x, est_y, between = _estimate_between_nodes(candidates, ref_map)
+
     return LocalizationResult(
         matched_nid=best_nid,
         confidence=confidence,
@@ -1008,6 +1038,9 @@ def localize(
         matched_slot=matched_slot,
         heading_confidence=heading_conf,
         top_candidates=candidates[:5],
+        estimated_x=est_x,
+        estimated_y=est_y,
+        between_nodes=between,
     )
 
 
@@ -1105,19 +1138,32 @@ def _encode_photo_b64(path: str, max_size: int = 512) -> Optional[str]:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+_subfolder_cache: Dict[str, Dict[str, str]] = {}
+
 def _resolve_ref_photo(neo4j_path: str, ref_photo_root: str) -> Optional[str]:
     if not neo4j_path or not ref_photo_root:
         return None
+    root = Path(ref_photo_root)
     parts = neo4j_path.split("/", 1)
     if len(parts) == 2:
         folder = parts[0].replace("set", "")
-        resolved = Path(ref_photo_root) / folder / parts[1]
+        resolved = root / folder / parts[1]
         if resolved.exists():
             return str(resolved)
-    full = Path(ref_photo_root) / neo4j_path
+    full = root / neo4j_path
     if full.exists():
         return str(full)
-    return None
+    # Search subdirectories for the filename
+    fname = Path(neo4j_path).name
+    if ref_photo_root not in _subfolder_cache:
+        index: Dict[str, str] = {}
+        for sub in root.iterdir():
+            if sub.is_dir():
+                for f in sub.iterdir():
+                    if f.is_file():
+                        index[f.name] = str(f)
+        _subfolder_cache[ref_photo_root] = index
+    return _subfolder_cache[ref_photo_root].get(fname)
 
 
 def ref_photo_coverage(ref_map: RefMap, ref_photo_root: str) -> tuple[int, int, int]:

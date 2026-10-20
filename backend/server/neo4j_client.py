@@ -394,8 +394,48 @@ class Neo4jClient:
 
         log.info("V2: loaded %d walkway edges", len(ref.walkway_edges))
 
-        # 4) ADJACENT spatial relationships — disabled until build_object_graph completes
-        # TODO: re-enable after batch write script finishes populating Object+ADJACENT nodes
+        # 4) ADJACENT spatial relationships (stored as cell_pairs, parsed to v_rel/h_rel)
+        rows = self._query("""
+            MATCH (w:Waypoint {place: $place})-[hp:HAS_PHOTO]->(d:DirPhoto)
+                  -[:DETECTED]->(a:Object)-[r:ADJACENT]->(b:Object)<-[:DETECTED]-(d)
+            RETURN w.nid AS nid, hp.slot AS slot,
+                   a.label_norm AS a_label, b.label_norm AS b_label,
+                   r.cell_pairs AS cell_pairs,
+                   r.overlap AS overlap, r.depth_diff AS depth_diff
+        """, {"place": place})
+
+        for r in rows:
+            key = (r["nid"], r["slot"])
+            if key not in ref.adjacent_map:
+                ref.adjacent_map[key] = {}
+            # Parse cell_pairs directions into simple v_rel/h_rel
+            cp_raw = r["cell_pairs"] or "[]"
+            try:
+                pairs = json.loads(cp_raw) if isinstance(cp_raw, str) else cp_raw
+            except (json.JSONDecodeError, TypeError):
+                pairs = []
+            dirs = set()
+            for p in (pairs or []):
+                d = p.get("dir", "")
+                if "above" in d:
+                    dirs.add("above")
+                if "below" in d:
+                    dirs.add("below")
+                if "left" in d:
+                    dirs.add("left")
+                if "right" in d:
+                    dirs.add("right")
+            v_rel = "above" if "above" in dirs else ("below" if "below" in dirs else "same_row")
+            h_rel = "left" if "left" in dirs else ("right" if "right" in dirs else "same_col")
+            ref.adjacent_map[key][(r["a_label"], r["b_label"])] = {
+                "v_rel": v_rel,
+                "h_rel": h_rel,
+                "overlap": r["overlap"] or False,
+                "depth_diff": r["depth_diff"] or "same_level",
+            }
+
+        log.info("V2: loaded %d ADJACENT groups", len(ref.adjacent_map))
+
         return ref
 
     # ── Schema V1 (legacy): TopoNode:Photo → Object ─────────────────────

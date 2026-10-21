@@ -98,6 +98,20 @@ python -m eval.object_relations_eval --local-model sentence-transformers/paraphr
 七種版本（上下＋左右、只上下、只左右、等權、九宮格粗略版＝現有 ADJACENT、四方向取最高、只重排前 5 名）
 交叉驗證 42.6–44.9%，沒有一種比基準好；所以 `LOC_RELATION_WEIGHT` 預設 0（關閉）。
 
+## 物件關係兩個版本比較（`relations_compare.py`）
+
+同一批照片（lab1019 376 張）跑真正的格子比對 `match_by_grid`，比較地圖 `ADJACENT` 關係的讀法與加分：
+不讀、APPNAV_ios `fe4c851` 原樣（把 cell_pairs 的 dir 當成 a 自己的方向，等於上下左右全部讀反）、
+方向修正（本分支 `neo4j_client.adjacent_relation`）。看格子比對自己，以及手機送 DINOv2 時的融合結果。
+
+```
+python -m eval.relations_compare --local-model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+```
+
+2026-10-21 結果（`eval/results/relations_compare_lab1019.md`）：格子比對 Top-1 不讀 13.6%、原樣 ×0.1 10.4%、
+方向修正 ×0.1 11.2%（加分越大越差）；手機 DINOv2 37.5% → 原樣 37.2%、方向修正 38.3%（3 張，屬於誤差範圍）。
+都沒有比不用關係好，所以 `LOC_ADJACENT` 預設 0。
+
 ## Before / after
 
 Keep a table in `docs/superpowers/specs/2026-05-25-navigation-accuracy-design.md`

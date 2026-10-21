@@ -98,3 +98,47 @@ def test_neo4j_rows_come_in_inverse_pairs():
     got = {(r["a"], r["type"], r["b"]) for r in rows}
     assert got == {("s", "ABOVE", "f"), ("f", "BELOW", "s"), ("f", "LEFT_OF", "s"), ("s", "RIGHT_OF", "f")}
     assert all(r["dx"] >= 0 and r["dy"] >= 0 for r in rows)
+
+
+# ── ADJACENT (map_v2 grid cells) for the grid matcher's spatial bonus ─────────────────
+
+def test_adjacent_dir_is_where_b_is_so_a_is_the_opposite():
+    from server.neo4j_client import adjacent_relation
+    # grid_utils._DIR_NAMES: (1, 0) "below" = b one row lower → a is ABOVE b
+    assert adjacent_relation('[{"a": "top-center", "b": "mid-center", "dir": "below"}]') == \
+        {"v_rel": "above", "h_rel": "same_col"}
+    assert adjacent_relation('[{"a": "mid-center", "b": "mid-right", "dir": "right"},'
+                             ' {"a": "mid-center", "b": "bottom-right", "dir": "below-right"}]') == \
+        {"v_rel": "above", "h_rel": "left"}
+    # spans several cells both ways → that axis says nothing
+    assert adjacent_relation('[{"dir": "above"}, {"dir": "below"}]')["v_rel"] == "same_row"
+    assert adjacent_relation("not json") == {"v_rel": "same_row", "h_rel": "same_col"}
+
+
+def test_add_adjacent_stores_the_inverse_and_drops_conflicts():
+    from server.neo4j_client import add_adjacent
+    rels = {}
+    add_adjacent(rels, "sign", "shelf", {"v_rel": "above", "h_rel": "left", "overlap": False})
+    assert rels[("shelf", "sign")]["v_rel"] == "below" and rels[("shelf", "sign")]["h_rel"] == "right"
+    # a second sign/shelf pair in the same photo, on the other side → 左右 unknown, 上下 kept
+    add_adjacent(rels, "sign", "shelf", {"v_rel": "above", "h_rel": "right", "overlap": False})
+    assert rels[("sign", "shelf")] == {"v_rel": "above", "h_rel": "same_col", "overlap": False}
+
+
+def test_same_layout_matches_the_map_and_flipped_does_not():
+    from server import visual_localization as VL
+    from server.neo4j_client import add_adjacent, adjacent_relation
+    rels = {}
+    add_adjacent(rels, "sign", "shelf", {**adjacent_relation('[{"dir": "below"}]'), "overlap": False})
+    photo = VL.compute_query_spatial([{"label": "sign", "box": SIGN}, {"label": "shelf", "box": SHELF}])
+    upside = VL.compute_query_spatial([{"label": "sign", "box": SHELF}, {"label": "shelf", "box": SIGN}])
+    assert VL._spatial_direction_match(photo[("sign", "shelf")], rels[("sign", "shelf")]) > \
+        VL._spatial_direction_match(upside[("sign", "shelf")], rels[("sign", "shelf")])
+    # the b → a lookup is inverted too: it scores like a → a
+    assert VL._spatial_direction_match(photo[("shelf", "sign")], rels[("shelf", "sign")]) == \
+        VL._spatial_direction_match(photo[("sign", "shelf")], rels[("sign", "shelf")])
+
+
+def test_adjacent_off_by_default():
+    from server import config
+    assert config.LOC_ADJACENT is False

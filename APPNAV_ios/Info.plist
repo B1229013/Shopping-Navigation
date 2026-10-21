@@ -8,6 +8,8 @@
 	<string>$(MAPS_API_KEY)</string>
 	<key>NAVIGATION_BACKEND_URL</key>
 	<string>$(NAVIGATION_BACKEND_URL)</string>
+	<key>ON_DEVICE_DINO</key>
+	<string>$(ON_DEVICE_DINO)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

@@ -46,9 +46,10 @@ iOS 前端（`APPNAV_ios/`、`APPNAV_ios.xcodeproj/`）只在 `ios` 分支修改
 - **選店與起點** — 從 Neo4j 讀出可用的店（`GET /places`）；還沒拍照前可以按「📍 我在入口，從這裡開始」。
 - **拍照定位** — VLM 讀出照片裡的物件、商品名與標示文字，再與店家地圖比對，融合
   **DINOv2 影像相似度 ＋ 物件名稱（中英＋語意向量）＋ OCR 文字 ＋ 手機感測器位置**，算出使用者在哪個節點、面向哪裡。
-  iOS 在手機上用 Core ML 跑 DINOv2（`DINOLocalizationService`），把最像的前幾個節點一起上傳；
-  手機裡的參考照片向量與節點座標只有「A7家樂福（9/16)」（`NodeCoordinateStore.place`），
-  在其他店（例如系辦）或沒有 DINOv2 模型時，手機不上傳 DINOv2，改由後端計算。
+  DINOv2 由後端算（`server/dino_embed.py`、`locate_fusion.py`），和 Android 走同一條路。
+  iOS 手機上的 Core ML DINOv2（`DINOLocalizationService`）還在，但預設關閉：Build Setting `ON_DEVICE_DINO=YES`
+  才會在手機上算並上傳前幾名，而且只在「A7家樂福（9/16)」有效（手機裡的參考向量只有這間，`NodeCoordinateStore.place`）。
+  lab1019 376 張實測（單張、不帶感測器）：後端路線 Top-1 44.7%，手機 DINOv2 路線 37.5%。
 - **用照片校正感測器** — 定位成功的照片會把位置拉回節點，兩張照片之間走直線超過 8 m 時順便校正方向偏差與步長
   （`MapPositionEstimator`）。
 - **路線規劃** — 在 Neo4j 的走道拓樸圖上規劃路線，小地圖與指令走同一張圖。
@@ -77,7 +78,7 @@ iOS 前端（`APPNAV_ios/`、`APPNAV_ios.xcodeproj/`）只在 `ios` 分支修改
 │ iOS App（SwiftUI）          │ ◄───────────► │ FastAPI 後端（backend/server）               │
 │                            │   URLSession  │                                              │
 │ NavigationCameraView 拍照 ──┼── JPEG ─────► │ VLM 感知（OpenAI 相容 API，最多 3 輪）         │
-│ DINOv2（Core ML）前幾名 ─────┼── dino_topk ─► │ 定位融合：DINOv2 ＋ 物件 ＋ OCR ＋ 感測器       │
+│ PhotoQualityChecker 拍前檢查 ┼── 位置、航向 ─► │ 定位融合：DINOv2 ＋ 物件 ＋ OCR ＋ 感測器       │
 │ MapPositionEstimator（PDR） │ ◄─ 指引／路線 ─┤ 路線規劃（Neo4j 拓樸圖）                      │
 │ PathFollower ＋ 小地圖       │               │ VLM 決策 → MOVE / ASK / ARRIVED              │
 └────────────────────────────┘               └───────────────┬──────────────────────────────┘
@@ -167,11 +168,12 @@ pip install numpy pillow torch transformers   # 伺服器端 DINOv2 定位（沒
    | `GROQ_API_KEY` | AI 助手 |
    | `PADDLEOCR_API_URL` / `PADDLEOCR_ACCESS_TOKEN` | 收據 OCR |
    | `MAPS_API_KEY` | 地圖相關功能 |
+   | `ON_DEVICE_DINO` | 設 `YES` 才在手機上跑 DINOv2（預設不設＝關閉，由後端算） |
 
 3. **Firebase**：已附 `APPNAV_ios/GoogleService-Info.plist`；要換自己的專案就覆蓋這個檔案。
-4. **手機上的 DINOv2 模型**：`APPNAV_ios/Models/DINOv2.mlpackage` 太大，沒有放進 git（`.gitignore`），要另外放進去。
-   沒有它 App 照樣能用：手機不上傳 DINOv2 結果，改由後端算（`LOC_SERVER_DINO=1`，需要 torch＋transformers）。
-   參考照片的向量 `dino_ref_embeddings.bin`、`dino_ref_meta.json` 和節點座標 `node_coordinates.json` 都在 `APPNAV_ios/Models/`。
+4. **DINOv2 在後端**：後端要裝 `torch`＋`transformers`（`LOC_SERVER_DINO=1`，預設開），見上方「啟動後端」。
+   只有開 `ON_DEVICE_DINO` 時才需要 `APPNAV_ios/Models/DINOv2.mlpackage`（太大，沒有放進 git，要另外放進去）。
+   節點座標 `node_coordinates.json`（A7，箭頭與「我在入口」用）和手機版參考向量 `dino_ref_embeddings.bin`、`dino_ref_meta.json` 在 `APPNAV_ios/Models/`。
 
 ### Docker（選用，尚未在目前版本驗證）
 
@@ -273,7 +275,7 @@ docker build -t shopping-nav-backend .
 | `Navigation/PathFollower.swift` | 沿路線前進與轉彎提示 |
 | `Navigation/PhotoQualityChecker.swift` | 拍照前檢查模糊、太暗、手機沒拿直 |
 | `Services/NavigationAPI.swift` | 導航後端 API（session、拍照、回答、確認、路線） |
-| `Services/DINOLocalizationService.swift` | 手機上的 DINOv2（Core ML）比對參考照片 |
+| `Services/DINOLocalizationService.swift` | 手機上的 DINOv2（Core ML），預設關閉（`ON_DEVICE_DINO`） |
 | `Services/NodeCoordinateStore.swift` | 節點座標（`Models/node_coordinates.json`） |
 | `Views/Main/*.swift`、`Services/GroqService.swift`、`Services/OCRService.swift`、`Services/AuthService.swift` | 購物相關頁面、AI 助手、收據 OCR、登入 |
 | `Views/Navigation/SensorTestView.swift`、`SensorComboTestView.swift`、`GPSLoggerView.swift`、`TopoMapTestView.swift` | 感測器與地圖測試頁 |
@@ -306,7 +308,6 @@ xcodebuild -project APPNAV_ios.xcodeproj -scheme APPNAV_ios -destination 'generi
 | 選店清單是空的 | 確認 `.env` 的 `NEO4J_URI`／`NEO4J_PASSWORD`；沒有 Neo4j 時只會列出 `NEO4J_PLACE` |
 | 定位只靠物件與文字 | 伺服器端 DINOv2 需要 `torch`＋`transformers` 與 `dino_sidecar.pkl`；`LOC_SERVER_DINO=0` 可關閉 |
 | 不想每張照片多一次 embedding 請求 | 設 `EMBEDDING_ENABLED=0`，物件名稱改回只用字元相似度 |
-| 手機上沒有 DINOv2 | `APPNAV_ios/Models/DINOv2.mlpackage` 沒放進專案；後端會自己算 DINOv2 |
 
 ---
 

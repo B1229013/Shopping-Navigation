@@ -181,16 +181,19 @@ struct NavigationCameraView: View {
             sensorSession.start(place: place)
             Task { await routeModel.load(sessionId: sessionId) }
 
-            // Load DINOv2 model + node coordinates for on-device fusion — only in the store
-            // they were made from. Elsewhere they would name the wrong nodes, so the phone
-            // sends no DINOv2 and the server matches the photo against the right store.
+            // The server runs DINOv2 on the uploaded photo (like Android). The bundled node
+            // coordinates (arrow, entrance start, fix fallback) and — only with
+            // AppConfig.onDeviceDINO — the on-device DINOv2 model are loaded in the store they
+            // were made from; elsewhere they would name the wrong nodes.
             if place == NodeCoordinateStore.place {
                 Task {
-                    let dino = DINOLocalizationService.shared
-                    if !dino.isLoaded { try? dino.load() }
                     let coords = NodeCoordinateStore.shared
                     if !coords.isLoaded { coords.load() }
-                    dinoReady = dino.isLoaded && coords.isLoaded
+                    if AppConfig.onDeviceDINO {
+                        let dino = DINOLocalizationService.shared
+                        if !dino.isLoaded { try? dino.load() }
+                        dinoReady = dino.isLoaded && coords.isLoaded
+                    }
                 }
             } else {
                 DINOLocalizationService.shared.unload()

@@ -21,4 +21,13 @@ enum AppConfig {
     static var navigationBackendURL: String {
         Bundle.main.object(forInfoDictionaryKey: "NAVIGATION_BACKEND_URL") as? String ?? ""
     }
+
+    /// Run DINOv2 on the phone (Core ML) and upload its top matches. Off unless the
+    /// ON_DEVICE_DINO build setting is YES: the server runs DINOv2 on every uploaded photo,
+    /// the same path as Android — better on the lab1019 test walk (Top-1 44.7 % vs 37.5 %),
+    /// in every store, and with no reference data to bundle into the app.
+    static var onDeviceDINO: Bool {
+        let v = (Bundle.main.object(forInfoDictionaryKey: "ON_DEVICE_DINO") as? String ?? "").uppercased()
+        return v == "YES" || v == "1" || v == "TRUE"
+    }
 }

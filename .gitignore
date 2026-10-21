@@ -16,6 +16,15 @@ local.properties
 .env
 .env.local
 
+# Xcode (iOS app)
+xcuserdata/
+DerivedData/
+build/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+.swiftpm/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -55,3 +64,14 @@ backend/legacy/benchmark_results/
 backend/legacy/*.bak-*
 # 61 MB; regenerate with backend/legacy/import_neo4j_to_topomap.py
 backend/legacy/carrefour_a7_imported.json
+
+# CocoaPods / Carthage（若之後採用）
+Pods/
+Carthage/Build/
+
+# Large ML models (use Git LFS or download separately)
+APPNAV_ios/Models/DINOv2.mlpackage/
+
+# Python cache
+__pycache__/
+*.pyc

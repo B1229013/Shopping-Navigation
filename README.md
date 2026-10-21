@@ -1,44 +1,61 @@
-# Shopping Navigation — 室內購物導航系統
+# Shopping Navigation — 室內購物導航系統（iOS 版）
 
-拍照就能在賣場裡導航的 Android App，搭配一個 Python FastAPI 後端。使用者輸入要找的商品後拍照，
+拍照就能在賣場裡導航的 iOS App（SwiftUI），搭配一個 Python FastAPI 後端。使用者輸入要找的商品後拍照，
 後端用 **VLM 看懂照片 → 在店家的拓樸地圖上定位 → 規劃路線**，回傳逐步指引；手機在兩張照片之間
 用 **PDR（計步＋航向）** 持續更新位置。App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
 
-開箱影片連結：https://drive.google.com/file/d/1nU0xep0huSmS2-fzG8ooJqlZE7_wVK6P/view?usp=sharing
+> **這是 `ios` 分支**：iOS App ＋ 和 Android 版（`main` 分支）**同一份**後端 `backend/`。
+> 兩個分支只差在前端；後端請在 `main` 改，再把 `main` 合併進 `ios`（見下方「分支怎麼同步」）。
 
 ---
 
-## 倉庫與版本
+## 倉庫與分支
 
-| 倉庫 | 內容 | 狀態 |
-|------|------|------|
-| **B1229023/APPNAV**（本倉庫，`main`） | Android App ＋ 共用後端 `backend/` | **目前開發主線**（2026-10-20 整合三個倉庫） |
-| B1229013/Shopping-Navigation | 同上，停在 2026-10-07 | 之後會同步成最後的版本 |
-| B1222017/APPNAV_ios | iOS App（Swift） | iOS 繼續在那裡開發；後端改用本倉庫的 `backend/` |
+| 位置 | 內容 |
+|------|------|
+| B1229023/APPNAV `main` | Android App ＋ 共用後端 `backend/` |
+| **B1229023/APPNAV `ios`（本分支）** | iOS App ＋ 同一份後端。2026-10-21 由 B1222017/APPNAV_ios 的 `feature/localization-fusion-v2` 合併進來，iOS 的 commit 紀錄都保留 |
+| B1222017/APPNAV_ios | 原本的 iOS 倉庫（`main` 另有周的 `fe4c851`，已整理進 APPNAV 的 `feat/object-relations`） |
+| B1229013/Shopping-Navigation | Android，停在 2026-10-07 |
 
-- iOS 與 Android 共用同一套後端 API（`backend/`）。本倉庫已不再保留 iOS 程式的副本。
 - 舊版分支以 tag 保存：`archive/ranging-metric-distance`、`archive/sensorlab-pdr`、
   `archive/sensor-nav-pdr`、`archive/remove-dead-modules`；整合前的狀態是 `backup/before-consolidate`。
-- 舊版「感測器導航」（App 的 `SensorNav*`、後端 `/snav`）已由主導航取代並移除，程式保存在 `archive/sensor-nav-pdr`
-  與 `backend/legacy/`。
+
+### 分支怎麼同步
+
+後端只有一份：在 `main`（或從 `main` 開的分支）修改後端，再合併進 `ios`：
+
+```bash
+git switch ios
+git merge main
+# main 上 Android 檔案（app/、Gradle…）有改動時，會出現「deleted in ios, modified in main」衝突：
+git rm -r -q app build.gradle.kts gradle gradle.properties gradlew gradlew.bat settings.gradle.kts google-services.json .idea 2>/dev/null
+git commit
+```
+
+iOS 前端（`APPNAV_ios/`、`APPNAV_ios.xcodeproj/`）只在 `ios` 分支修改。
 
 ---
 
 ## 系統功能
 
-**導航（主功能，「AR 導航」頁）**
+**導航（主功能，「導航」頁）**
 
-- **選店與起點** — 從 Neo4j 讀出可用的店（`GET /places`），可選「我在起點」對準地圖方向開始（`GET /starts`）。
+- **選店與起點** — 從 Neo4j 讀出可用的店（`GET /places`）；還沒拍照前可以按「📍 我在入口，從這裡開始」。
 - **拍照定位** — VLM 讀出照片裡的物件、商品名與標示文字，再與店家地圖比對，融合
   **DINOv2 影像相似度 ＋ 物件名稱（中英＋語意向量）＋ OCR 文字 ＋ 手機感測器位置**，算出使用者在哪個節點、面向哪裡。
+  iOS 在手機上用 Core ML 跑 DINOv2（`DINOLocalizationService`），把最像的前幾個節點一起上傳；
+  沒有 DINOv2 模型時改由後端計算。
+- **用照片校正感測器** — 定位成功的照片會把位置拉回節點，兩張照片之間走直線超過 8 m 時順便校正方向偏差與步長
+  （`MapPositionEstimator`）。
 - **路線規劃** — 在 Neo4j 的走道拓樸圖上規劃路線，小地圖與指令走同一張圖。
-- **逐步指引** — 每張照片回傳 MOVE / ASK / ARRIVED；抵達時需地圖同意，並以「是／不是」按鈕確認。
-- **PDR 即時位置** — 兩張照片之間用計步與航向更新位置、沿路線前進；照片定位後再校正。
-- **照片品質** — 太暗、模糊、被擋住時會請使用者重拍；信心不足時請使用者原地轉身再拍一張。
+- **逐步指引** — 每張照片回傳 MOVE / ASK / ARRIVED。（Android 用「是／不是」按鈕回答抵達問題；iOS 目前以文字回答。）
+- **PDR 即時位置** — 兩張照片之間用計步與航向更新位置、沿路線前進；走超過 12 m 會提醒拍照校正。
+- **照片品質** — 手機先擋模糊、太暗、手機沒拿直；後端再擋被人或推車擋住；信心不足時請使用者原地轉身再拍一張。
 
 **建圖與研究工具**
 
-- **Sensor Lab** — 全螢幕拍照（倍率轉盤、點擊對焦）＋ 8 種感測器錄製與 PDR 紀錄，用來建新店的地圖。
+- **Sensor Lab** — 在 Android App（`main` 分支）裡：全螢幕拍照＋感測器錄製與 PDR 紀錄，用來建新店的地圖。
 - **拓樸地圖建置器**（`/topomap-builder`）— 把 Sensor Lab 的走路紀錄排成地圖，上傳到 Neo4j。
 - **PDR Waypoint 編輯器**（根目錄 `pdr-waypoint-editor.html`）— 在平面圖上點出航點、Grid Snap、匯出座標 JSON。
 - **定位評估**（`backend/eval/`）— 單張影像定位基準、權重掃描、逐張報告、VLM 重播（不呼叫 API）。
@@ -46,7 +63,7 @@
 
 **購物功能**
 
-- 購物清單（自動分類）、預算、歷史紀錄、食材紀錄、AI 助手、附近商店（含 AR 顯示）、收據掃描。
+- 登入（Firebase Auth）、購物清單、預算（收據 OCR）、歷史紀錄、食材紀錄、AI 助手（Groq）。
 
 ---
 
@@ -54,12 +71,12 @@
 
 ```
 ┌────────────────────────────┐   HTTP/JSON   ┌──────────────────────────────────────────────┐
-│ Android App（Kotlin）       │ ◄───────────► │ FastAPI 後端（backend/server）               │
-│                            │   Retrofit    │                                              │
-│ NavigationScreen  拍照 ─────┼── JPEG ─────► │ VLM 感知（OpenAI 相容 API，最多 3 輪）         │
-│ MapPositionEstimator（PDR） │               │ 定位融合：DINOv2 ＋ 物件 ＋ OCR ＋ 感測器       │
-│ PathFollower ＋ 小地圖       │ ◄─ 指引／路線 ─┤ 路線規劃（Neo4j 拓樸圖）                      │
-│ Sensor Lab（建圖用）         │               │ VLM 決策 → MOVE / ASK / ARRIVED              │
+│ iOS App（SwiftUI）          │ ◄───────────► │ FastAPI 後端（backend/server）               │
+│                            │   URLSession  │                                              │
+│ NavigationCameraView 拍照 ──┼── JPEG ─────► │ VLM 感知（OpenAI 相容 API，最多 3 輪）         │
+│ DINOv2（Core ML）前幾名 ─────┼── dino_topk ─► │ 定位融合：DINOv2 ＋ 物件 ＋ OCR ＋ 感測器       │
+│ MapPositionEstimator（PDR） │ ◄─ 指引／路線 ─┤ 路線規劃（Neo4j 拓樸圖）                      │
+│ PathFollower ＋ 小地圖       │               │ VLM 決策 → MOVE / ASK / ARRIVED              │
 └────────────────────────────┘               └───────────────┬──────────────────────────────┘
                                                              │
                           ┌──────────────────────────────────┼─────────────────────┐
@@ -67,7 +84,7 @@
                           │ backend/maps：起點、額外走道邊、編輯器地圖                    │
                           └──────────────────────────────────────────────────────────┘
 
-App 的 AI 購物功能（分類、AI 助手、收據）另外直接連 CGU LLM 閘道，不經過導航後端。
+App 的 AI 助手（Groq）與收據 OCR（PaddleOCR）直接連各自的服務，不經過導航後端。
 ```
 
 ## 導航流程（`/session`）
@@ -87,7 +104,7 @@ App 的 AI 購物功能（分類、AI 助手、收據）另外直接連 CGU LLM 
 
 ## 新店建圖流程
 
-1. 用 App 的 **Sensor Lab** 在店裡走一圈拍照（同時錄 PDR）。
+1. 用 Android App（`main` 分支）的 **Sensor Lab** 在店裡走一圈拍照（同時錄 PDR）。
 2. `python build_map_v2_topomap.py` — 把走路紀錄整理成建圖工作區。
 3. 開 `http://<後端>/topomap-builder` — 排節點、接走道、疊平面圖、確認。
 4. `python upload_map_v2.py` — 上傳成 Neo4j 的 V2 地圖格式（`server/map_v2.py`）。
@@ -103,8 +120,7 @@ App 的 AI 購物功能（分類、AI 助手、收據）另外直接連 CGU LLM 
 
 | 項目 | 版本 |
 |------|------|
-| Android Studio | Ladybug 以上（AGP 9.0.0） |
-| JDK | 17+ |
+| Xcode | 最新穩定版；相機與感測器請用 iPhone 實機測試 |
 | Python | 3.11 |
 | Neo4j Aura | 店家地圖存在這裡（導航必需） |
 
@@ -120,12 +136,6 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=your-password
 PERCEPTION_ENABLED=0               # 1 = 本機 GroundingDINO（需模型權重）
 OCR_ENABLED=0                      # 1 = 本機 EasyOCR
-
-# ── Android App ──
-BACKEND_URL=http://192.168.x.x:8000/
-CGU_API_KEY=your-cgu-key           # 購物清單分類、AI 助手、收據（CGU 閘道）
-CGU_BASE_URL=https://air.cgu.edu.tw/cgullmapi/v1
-MAPS_API_KEY=your-google-maps-key  # 附近商店
 ```
 
 ### 2. 啟動後端
@@ -142,11 +152,23 @@ pip install numpy pillow torch transformers   # 伺服器端 DINOv2 定位（沒
 `start.ps1` 會啟用 venv 並以 `uvicorn server.server:app --port 8000` 啟動。
 瀏覽器開 `http://localhost:8000/docs` 可看到所有端點，`/health` 回傳 `{"status":"ok"}` 代表正常。
 
-### 3. 安裝 App
+### 3. 安裝 App（iOS）
 
-1. 用 Android Studio 開啟專案根目錄，連接手機後 Run。
-2. 後端連線：模擬器預設 `http://10.0.2.2:8000/`；實體手機用 `adb reverse tcp:8000 tcp:8000`，
-   或在 `.env` 設 `BACKEND_URL`，也可在 App 的設定頁切換。
+1. 用 Xcode 開啟 `APPNAV_ios.xcodeproj`，選 iPhone 後 `Cmd+R`。第一次開會自動抓 Swift Package（Firebase）。
+2. **後端網址與金鑰在 Xcode Build Settings**（不在 `.env`，見 `APPNAV_ios/Utils/AppConfig.swift`）：
+   target `APPNAV_ios` → Build Settings → 搜尋變數名稱。
+
+   | 變數 | 用途 |
+   |------|------|
+   | `NAVIGATION_BACKEND_URL` | 導航後端網址；專案裡目前是 `http://172.20.10.3:8000`，請改成你跑後端那台電腦的 IP |
+   | `GROQ_API_KEY` | AI 助手 |
+   | `PADDLEOCR_API_URL` / `PADDLEOCR_ACCESS_TOKEN` | 收據 OCR |
+   | `MAPS_API_KEY` | 地圖相關功能 |
+
+3. **Firebase**：已附 `APPNAV_ios/GoogleService-Info.plist`；要換自己的專案就覆蓋這個檔案。
+4. **手機上的 DINOv2 模型**：`APPNAV_ios/Models/DINOv2.mlpackage` 太大，沒有放進 git（`.gitignore`），要另外放進去。
+   沒有它 App 照樣能用：手機不上傳 DINOv2 結果，改由後端算（`LOC_SERVER_DINO=1`，需要 torch＋transformers）。
+   參考照片的向量 `dino_ref_embeddings.bin`、`dino_ref_meta.json` 和節點座標 `node_coordinates.json` 都在 `APPNAV_ios/Models/`。
 
 ### Docker（選用，尚未在目前版本驗證）
 
@@ -180,7 +202,11 @@ docker build -t shopping-nav-backend .
 
 ```
 .
-├── app/                      Android App（Kotlin、Jetpack Compose）
+├── APPNAV_ios/               iOS App（SwiftUI）
+├── APPNAV_ios.xcodeproj/     Xcode 專案
+├── scripts/
+│   ├── swift_logic_tests/    不需要 Xcode 的 Swift 邏輯測試（MapPositionEstimator、PhotoQualityChecker）
+│   └── vlm_test/             周的 VLM 定位測試、物件關係建圖、報告腳本（研究用）
 ├── backend/
 │   ├── server/               FastAPI 後端（正式使用）
 │   ├── eval/                 定位與導航評估（資料、結果、圖表）
@@ -229,46 +255,25 @@ docker build -t shopping-nav-backend .
 | `store_dino_v2.py` | 計算並儲存每張方向照片的 DINOv2 向量 |
 | `build_store_graph.py`、`build_store_map.py`、`build_html_map.py`、`generate_topomap.py`、`render_clean.py`、`ocr_dump.py` | 早期的拓樸圖產生與繪製工具 |
 
-### Android App（`app/src/main/java/com/example/shopping/`）
+### iOS App（`APPNAV_ios/`）
 
 | 檔案 | 功能 |
 |------|------|
-| `MainActivity.kt` | 進入點與頁面路由（登入、主畫面、AR 導航、設定、Sensor Lab） |
-| `ui/screens/NavigationScreen.kt` | 導航：選店與目標（`TeammateHomeScreen`）、相機、指引、PDR 跟隨 |
-| `ui/screens/NavigationPanels.kt` | 導航畫面元件：狀態卡、上一張照片縮圖、購物清單、小地圖、拍照說明 |
-| `ui/screens/ArGuidanceArrow.kt` | AR 方向箭頭 |
-| `viewmodel/NavigationViewModel.kt` | 導航狀態：session、拍照上傳、定位、路線、抵達確認 |
-| `navigation/MapPositionEstimator.kt` | PDR 在地圖上的位置估計（移植自 iOS） |
-| `navigation/PathFollower.kt` | 沿路線前進與轉彎提示（移植自 iOS） |
-| `sensor/PdrTracker.kt` | 計步與航向（Rotation Vector／Game Rotation Vector 北方校正） |
-| `network/NavigationApi.kt` / `BackendConfig.kt` | 導航後端 API 與後端網址設定 |
-| `ui/screens/SensorLabScreen.kt` | Sensor Lab：全螢幕拍照與感測器錄製（背景執行緒、約 50 Hz） |
-| `ui/screens/MainContainer.kt` | 主畫面分頁（首頁、清單、食材、預算、歷史、AI），CGU 閘道請求 |
-| `ui/screens/HomeScreen.kt`、`ShoppingListScreen.kt`、`IngredientsScreen.kt`、`HistoryScreen.kt`、`AIScreen.kt`、`LoginScreen.kt`、`SettingsScreen.kt`、`NearbyStoresSheet.kt`、`NearbyStoresAr.kt` | 購物相關頁面 |
-| `ui/utils/CategoryClassifier.kt`、`LlmCategoryClassifier.kt` | 商品分類（例外清單 → LLM → 關鍵字） |
-
----
-
-## 商品分類
-
-每個商品屬於一個首頁分類按鈕，再由按鈕換算成預算類別：
-
-| 首頁分類 | 預算類別 |
-|------|------|
-| 蔬果、肉品海鮮、蛋奶、主食、零食、調味料 | 食品（`Food`） |
-| 飲品 | 飲品（`Beverages`） |
-| 清潔用品、廚房用品 | 生活用品（`Groceries`） |
-| 其他 | 其他（`Other`） |
-
-判斷順序：**例外清單 → LLM → 關鍵字備案**。LLM 走 CGU 閘道的 `gpt-5.6-luna`（`CGU_CHAT_MODEL`），
-AI 助手與收據掃描也用同一個模型。
-
-- **何時分類**：手動新增、修改名稱、掃描收據時；App 啟動時把還沒分類的舊商品一次補完。
-  結果存在 `shopping_list.json` 的 `homeCategory` 與 `location`，之後不會重複呼叫 LLM。
-- **LLM 失敗時**：顯示「AI 分類失敗，已改用關鍵字分類」，改用關鍵字分類。
-- **修正誤判**：在 `CategoryClassifier.kt` 的 `productOverrides` 加一行（例如 `"米酒" to HOME_SEASONING`），
-  名稱包含該字串就套用，優先於 LLM。
-- **實際打 LLM 測試**：`RUN_LLM_PROBE=1 ./gradlew :app:testDebugUnitTest --tests com.example.shopping.ui.utils.LlmClassificationProbe`。
+| `App/AppEntry.swift` | 進入點 |
+| `Views/Navigation/NavigationEntryView.swift` | 導航入口：確認要找的商品、建立導航 session |
+| `Views/Navigation/NavigationCameraView.swift` | 導航畫面：相機、拍照上傳、指引、提示橫幅、拍照說明、校正位置 |
+| `Views/Navigation/RouteMapView.swift` | 小地圖與路線跟隨（`RouteFollowerModel`） |
+| `Views/Navigation/DirectionArrowView.swift` | 方向箭頭 |
+| `Navigation/NavigationSessionManager.swift` | 感測器 session：PDR、地圖位置、距離上次校正幾公尺 |
+| `Navigation/MapPositionEstimator.swift` | 地圖上的位置估計；照片定位後校正位置、方向偏差、步長 |
+| `Navigation/MotionPathTracker.swift` | 計步與航向（CoreMotion） |
+| `Navigation/PathFollower.swift` | 沿路線前進與轉彎提示 |
+| `Navigation/PhotoQualityChecker.swift` | 拍照前檢查模糊、太暗、手機沒拿直 |
+| `Services/NavigationAPI.swift` | 導航後端 API（session、拍照、回答、確認、路線） |
+| `Services/DINOLocalizationService.swift` | 手機上的 DINOv2（Core ML）比對參考照片 |
+| `Services/NodeCoordinateStore.swift` | 節點座標（`Models/node_coordinates.json`） |
+| `Views/Main/*.swift`、`Services/GroqService.swift`、`Services/OCRService.swift`、`Services/AuthService.swift` | 購物相關頁面、AI 助手、收據 OCR、登入 |
+| `Views/Navigation/SensorTestView.swift`、`SensorComboTestView.swift`、`GPSLoggerView.swift`、`TopoMapTestView.swift` | 感測器與地圖測試頁 |
 
 ---
 
@@ -279,8 +284,11 @@ AI 助手與收據掃描也用同一個模型。
 cd backend
 .\venv\Scripts\python.exe -m pytest -q
 
-# Android 單元測試
-.\gradlew :app:testDebugUnitTest
+# iOS 定位邏輯（macOS，只要 Swift 命令列工具，不用 Xcode）
+scripts/swift_logic_tests/run.sh
+
+# iOS App 建置／測試（需要 Xcode）
+xcodebuild -project APPNAV_ios.xcodeproj -scheme APPNAV_ios -destination 'generic/platform=iOS Simulator' build
 ```
 
 目前後端 `test_vlm.py` 有 2 個檢查 perception 提示詞文字的測試未通過（整合前就存在）。
@@ -291,11 +299,11 @@ cd backend
 
 | 問題 | 解決方式 |
 |------|----------|
-| 手機連不到後端 | 確認同一 Wi-Fi、IP 正確、防火牆允許 8000；或 `adb reverse tcp:8000 tcp:8000` |
+| 手機連不到後端 | 確認同一 Wi-Fi、`NAVIGATION_BACKEND_URL` 的 IP 正確、防火牆允許 8000 |
 | 選店清單是空的 | 確認 `.env` 的 `NEO4J_URI`／`NEO4J_PASSWORD`；沒有 Neo4j 時只會列出 `NEO4J_PLACE` |
 | 定位只靠物件與文字 | 伺服器端 DINOv2 需要 `torch`＋`transformers` 與 `dino_sidecar.pkl`；`LOC_SERVER_DINO=0` 可關閉 |
 | 不想每張照片多一次 embedding 請求 | 設 `EMBEDDING_ENABLED=0`，物件名稱改回只用字元相似度 |
-| AGP 版本不相容 | `gradle/libs.versions.toml` 中 `agp` 設為 `9.0.0` |
+| 手機上沒有 DINOv2 | `APPNAV_ios/Models/DINOv2.mlpackage` 沒放進專案；後端會自己算 DINOv2 |
 
 ---
 

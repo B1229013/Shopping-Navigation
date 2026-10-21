@@ -4,31 +4,33 @@
 後端用 **VLM 看懂照片 → 在店家的拓樸地圖上定位 → 規劃路線**，回傳逐步指引；手機在兩張照片之間
 用 **PDR（計步＋航向）** 持續更新位置。App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
 
-> **這是 `ios` 分支**：iOS App ＋ 和 Android 版（`main` 分支）**同一份**後端 `backend/`。
-> 兩個分支只差在前端；後端請在 `main` 改，再把 `main` 合併進 `ios`（見下方「分支怎麼同步」）。
+> **這是 `ios` 分支**：iOS App ＋ 和 Android 版（`android` 分支）**同一份**後端 `backend/`。
+> 兩個分支只差在前端；後端請在 `android` 改，再把 `android` 合併進 `ios`（見下方「分支怎麼同步」）。
 
 ---
 
 ## 倉庫與分支
 
-| 位置 | 內容 |
+| 倉庫／分支 | 內容 |
 |------|------|
-| B1229023/APPNAV `main` | Android App ＋ 共用後端 `backend/` |
-| **B1229023/APPNAV `ios`（本分支）** | iOS App ＋ 同一份後端。2026-10-21 由 B1222017/APPNAV_ios 的 `feature/localization-fusion-v2` 合併進來，iOS 的 commit 紀錄都保留 |
-| B1222017/APPNAV_ios | 原本的 iOS 倉庫（`main` 另有周的 `fe4c851`，已整理進 APPNAV 的 `feat/object-relations`） |
+| B1229013/APP-IOS-Android `android` | Android App ＋ 共用後端 `backend/`（內容來自 B1229023/APPNAV `main`） |
+| **B1229013/APP-IOS-Android `ios`（本分支）** | iOS App ＋ 同一份後端。2026-10-21 由 B1222017/APPNAV_ios 的 `feature/localization-fusion-v2` 合併進來，iOS 的 commit 紀錄都保留 |
+| B1229013/APP-IOS-Android `main` | 2026-09-23 的舊版（`android/`、`ios/`、`backend/` 三個資料夾），沒有動 |
+| B1229023/APPNAV | Android ＋ 共用後端的整合倉庫（`android` 分支的來源；物件關係比較在它的 `feat/object-relations`） |
+| B1222017/APPNAV_ios | 原本的 iOS 倉庫 |
 | B1229013/Shopping-Navigation | Android，停在 2026-10-07 |
 
-- 舊版分支以 tag 保存：`archive/ranging-metric-distance`、`archive/sensorlab-pdr`、
+- 舊版分支在 B1229023/APPNAV 以 tag 保存：`archive/ranging-metric-distance`、`archive/sensorlab-pdr`、
   `archive/sensor-nav-pdr`、`archive/remove-dead-modules`；整合前的狀態是 `backup/before-consolidate`。
 
 ### 分支怎麼同步
 
-後端只有一份：在 `main`（或從 `main` 開的分支）修改後端，再合併進 `ios`：
+後端只有一份：在 `android`（或從 `android` 開的分支）修改後端，再合併進 `ios`：
 
 ```bash
 git switch ios
-git merge main
-# main 上 Android 檔案（app/、Gradle…）有改動時，會出現「deleted in ios, modified in main」衝突：
+git merge android
+# android 上 Android 檔案（app/、Gradle…）有改動時，會出現「deleted in ios, modified in android」衝突：
 git rm -r -q app build.gradle.kts gradle gradle.properties gradlew gradlew.bat settings.gradle.kts google-services.json .idea 2>/dev/null
 git commit
 ```
@@ -55,7 +57,7 @@ iOS 前端（`APPNAV_ios/`、`APPNAV_ios.xcodeproj/`）只在 `ios` 分支修改
 
 **建圖與研究工具**
 
-- **Sensor Lab** — 在 Android App（`main` 分支）裡：全螢幕拍照＋感測器錄製與 PDR 紀錄，用來建新店的地圖。
+- **Sensor Lab** — 在 Android App（`android` 分支）裡：全螢幕拍照＋感測器錄製與 PDR 紀錄，用來建新店的地圖。
 - **拓樸地圖建置器**（`/topomap-builder`）— 把 Sensor Lab 的走路紀錄排成地圖，上傳到 Neo4j。
 - **PDR Waypoint 編輯器**（根目錄 `pdr-waypoint-editor.html`）— 在平面圖上點出航點、Grid Snap、匯出座標 JSON。
 - **定位評估**（`backend/eval/`）— 單張影像定位基準、權重掃描、逐張報告、VLM 重播（不呼叫 API）。
@@ -104,7 +106,7 @@ App 的 AI 助手（Groq）與收據 OCR（PaddleOCR）直接連各自的服務�
 
 ## 新店建圖流程
 
-1. 用 Android App（`main` 分支）的 **Sensor Lab** 在店裡走一圈拍照（同時錄 PDR）。
+1. 用 Android App（`android` 分支）的 **Sensor Lab** 在店裡走一圈拍照（同時錄 PDR）。
 2. `python build_map_v2_topomap.py` — 把走路紀錄整理成建圖工作區。
 3. 開 `http://<後端>/topomap-builder` — 排節點、接走道、疊平面圖、確認。
 4. `python upload_map_v2.py` — 上傳成 Neo4j 的 V2 地圖格式（`server/map_v2.py`）。

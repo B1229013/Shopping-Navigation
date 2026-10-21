@@ -198,6 +198,11 @@ DINO_SIDECAR_PATH = os.environ.get("DINO_SIDECAR_PATH",
 # average top-1 68.0 % vs 43.1 % with the phone-evidence k (0.25,4,2) and 65.7 %
 # image-only. k_no_sensor 8 names a node for 98.5 % of first photos (2 → 27.6 %).
 LOC_SERVER_IMAGE_K = os.environ.get("LOC_SERVER_IMAGE_K", "32,64,8")
+# Object-to-object 上下左右 relations (server/object_relations.py) added to the server image
+# evidence: fused_n += W · relation consistency with node n's best directional photo.
+# 0 = off. On the 376 lab1019 photos no weight beat the current server (44.7 % Top-1;
+# 42.6–44.9 % when W is picked on the other walks): eval/results/object_relations_lab1019.md.
+LOC_RELATION_WEIGHT = float(os.environ.get("LOC_RELATION_WEIGHT", "0"))
 
 # Fail at startup, not on every photo, if either k(σ) setting is malformed.
 from server.loc_fusion import parse_image_k as _parse_image_k  # noqa: E402

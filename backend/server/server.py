@@ -1274,15 +1274,18 @@ def _fusion_weights_for(dist_since_fix, n_objects, dino_sims=None):
                             gap=dino_gap(dino_sims or {}), gap_full=_config.LOC_DINO_GAP_FULL)
 
 
-def _server_dino_evidence(session_id, ref_map, image_path, detected_labels, ocr_texts):
+def _server_dino_evidence(session_id, ref_map, image_path, detected_labels, ocr_texts,
+                          detected_items=None):
     """Server-side DINOv2 + object + OCR evidence (ServerImageEvidence) for a phone that
     sent no dino_topk, or None (model / sidecar missing, or embedding failed) → grid
-    matching as before."""
+    matching as before. detected_items (labels + 0..1 boxes) feed the optional
+    上下左右 relation term (config LOC_RELATION_WEIGHT)."""
     from server.locate_fusion import server_image_evidence
     t0 = time.time()
     try:
         ev = server_image_evidence(ref_map, image_path, detected_labels, ocr_texts,
-                                   _config.DINO_SIDECAR_PATH)
+                                   _config.DINO_SIDECAR_PATH, q_items=detected_items,
+                                   relation_weight=_config.LOC_RELATION_WEIGHT)
     except Exception:
         log.exception("[session %s] server DINOv2 evidence failed — using grid matching", session_id)
         return None
@@ -1341,7 +1344,7 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             )
             if not dino_sims and image_path and _config.LOC_SERVER_DINO:
                 server_ev = _server_dino_evidence(session_id, ref_for_v2, image_path,
-                                                  detected_labels, ocr_texts)
+                                                  detected_labels, ocr_texts, detected_items)
                 if server_ev:
                     v2_kwargs.update(server_evidence=server_ev.scores,
                                      server_best_photo=server_ev.best_photo,

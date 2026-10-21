@@ -19,6 +19,7 @@ struct NavigationCameraView: View {
     @State private var hasCameraPermission = false
     @State private var guidance: String
     @State private var pendingQuestion: String?
+    @State private var pendingIsConfirm = false
     @State private var answerText = ""
     @State private var isUploading = false
     @State private var isAnswering = false
@@ -180,13 +181,21 @@ struct NavigationCameraView: View {
             sensorSession.start(place: place)
             Task { await routeModel.load(sessionId: sessionId) }
 
-            // Load DINOv2 model + node coordinates for on-device fusion
-            Task {
-                let dino = DINOLocalizationService.shared
-                if !dino.isLoaded { try? dino.load() }
-                let coords = NodeCoordinateStore.shared
-                if !coords.isLoaded { coords.load() }
-                dinoReady = dino.isLoaded && coords.isLoaded
+            // Load DINOv2 model + node coordinates for on-device fusion — only in the store
+            // they were made from. Elsewhere they would name the wrong nodes, so the phone
+            // sends no DINOv2 and the server matches the photo against the right store.
+            if place == NodeCoordinateStore.place {
+                Task {
+                    let dino = DINOLocalizationService.shared
+                    if !dino.isLoaded { try? dino.load() }
+                    let coords = NodeCoordinateStore.shared
+                    if !coords.isLoaded { coords.load() }
+                    dinoReady = dino.isLoaded && coords.isLoaded
+                }
+            } else {
+                DINOLocalizationService.shared.unload()
+                NodeCoordinateStore.shared.unload()
+                dinoReady = false
             }
         }
         .onDisappear {
@@ -387,20 +396,36 @@ struct NavigationCameraView: View {
                     Text(pendingQuestion)
                         .font(.subheadline.weight(.medium))
                         .foregroundColor(.orange)
-                    HStack {
-                        TextField("輸入回答...", text: $answerText)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit { submitAnswer() }
-                        Button(action: submitAnswer) {
-                            if isAnswering {
-                                ProgressView().tint(.white)
-                            } else {
-                                Image(systemName: "paperplane.fill")
+                    if pendingIsConfirm {
+                        HStack(spacing: 12) {
+                            Button { submitAnswer("有") } label: {
+                                Text("有").frame(maxWidth: .infinity)
                             }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
+                            Button { submitAnswer("沒有") } label: {
+                                Text("沒有").frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.orange)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.orange)
-                        .disabled(answerText.trimmingCharacters(in: .whitespaces).isEmpty || isAnswering)
+                        .disabled(isAnswering)
+                    } else {
+                        HStack {
+                            TextField("輸入回答...", text: $answerText)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit { submitAnswer() }
+                            Button(action: { submitAnswer() }) {
+                                if isAnswering {
+                                    ProgressView().tint(.white)
+                                } else {
+                                    Image(systemName: "paperplane.fill")
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.orange)
+                            .disabled(answerText.trimmingCharacters(in: .whitespaces).isEmpty || isAnswering)
+                        }
                     }
                 }
 
@@ -650,11 +675,14 @@ struct NavigationCameraView: View {
                 pendingArrival = true
             }
             pendingQuestion = nil
+            pendingIsConfirm = false
             targetNodeId = nil
         case "ASK":
             pendingQuestion = response.question
+            pendingIsConfirm = response.confirmQuestion ?? false
         case "MOVE":
             pendingQuestion = nil
+            pendingIsConfirm = false
             pendingArrival = false
         default:
             break
@@ -763,8 +791,9 @@ struct NavigationCameraView: View {
         }
     }
 
-    private func submitAnswer() {
-        let answer = answerText.trimmingCharacters(in: .whitespaces)
+    /// `preset`: the 有／沒有 button pressed; nil = what was typed.
+    private func submitAnswer(_ preset: String? = nil) {
+        let answer = (preset ?? answerText).trimmingCharacters(in: .whitespaces)
         guard !answer.isEmpty, !isAnswering else { return }
         isAnswering = true
         errorMessage = nil

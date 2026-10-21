@@ -31,6 +31,8 @@ struct TurnResponse: Codable {
     let action: String   // "ARRIVED", "MOVE", "ASK"
     let guidance: String
     let question: String?
+    // The question asks "到了嗎？": answer it with 有 / 沒有 buttons (backend _confirm_answer)
+    let confirmQuestion: Bool?
     let nodeId: Int
     let annotatedPhotoUrl: String?
     // Photo unusable (blurred / dark / blocked by people or carts): show this and ask for

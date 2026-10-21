@@ -13,6 +13,12 @@ struct NodeCoordinate: Codable {
 final class NodeCoordinateStore {
     static let shared = NodeCoordinateStore()
 
+    /// The store node_coordinates.json — and the on-device DINOv2 references
+    /// (dino_ref_embeddings.bin / dino_ref_meta.json) — were exported from. Other stores on
+    /// the shared backend reuse the same node numbers (系辦 has 28 of its 36 in common with
+    /// A7), so this data names the wrong nodes anywhere else: use it only in this store.
+    static let place = "A7家樂福（9/16)"
+
     private var coords: [Int: NodeCoordinate] = [:]
     private(set) var isLoaded = false
 

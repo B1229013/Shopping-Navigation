@@ -251,16 +251,50 @@ class ServerImageEvidence:
     best_photo: Dict[int, DirectionalRef]     # nid → its most similar directional photo
 
 
+def add_relation_evidence(
+    best: Dict[int, Tuple[float, dict]],
+    q_items: List[dict],
+    rarity: Dict[str, float],
+    weight: float,
+) -> Dict[int, float]:
+    """{nid: fused + weight · 上下左右 consistency} — the photo's objects against the objects
+    of each node's best directional photo (object_relations.relation_score). q_items:
+    [{"label", "box": [x1, y1, x2, y2] 0..1}]."""
+    from server import object_relations as R
+    scores = {nid: s for nid, (s, _) in best.items()}
+    if weight <= 0 or not q_items:
+        return scores
+    query = [(it.get("label", ""), it.get("box")) for it in q_items]
+    for nid, (s, e) in best.items():
+        dp = e.get("photo")
+        if dp is None:
+            continue
+        ref = [(o.label_norm or o.label, o.bbox) for o in dp.objects]
+        scores[nid] = s + weight * R.relation_score(query, ref, _embedding_sim, rarity=rarity,
+                                                    min_sim=NODE_SIM_THRESHOLD)
+    return scores
+
+
+def _rarity_for(index: dict) -> Dict[str, float]:
+    if "label_rarity" not in index:
+        from server import object_relations as R
+        index["label_rarity"] = R.label_rarity(e["labels"] for e in index["entries"])
+    return index["label_rarity"]
+
+
 def server_image_evidence(
     ref_map: RefMap,
     image_path: str,
     q_labels: List[str],
     q_ocr_tokens: List[str],
     sidecar_path: str,
+    q_items: Optional[List[dict]] = None,
+    relation_weight: float = 0.0,
 ) -> Optional[ServerImageEvidence]:
     """{nid: 0..2} image evidence for every reference node plus the directional photo
     that scored it, or None when the DINOv2 model, the sidecar or the photo's embedding
-    is unavailable (caller falls back)."""
+    is unavailable (caller falls back). relation_weight > 0 adds the objects' 上下左右
+    consistency (q_items carry the boxes) before the rescale."""
     from pathlib import Path
     embs = _reference_embeddings(ref_map, _load_sidecar(sidecar_path))
     if not embs or not ref_map.photos or not Path(image_path).is_file():
@@ -277,7 +311,7 @@ def server_image_evidence(
     best = best_photo_per_node(index, q_emb, q_labels, q_ocr_tokens)
     if not best:
         return None
-    scores = {nid: s for nid, (s, _) in best.items()}
+    scores = add_relation_evidence(best, q_items or [], _rarity_for(index), relation_weight)
     best_photo = {nid: e["photo"] for nid, (_, e) in best.items() if e["photo"] is not None}
     lo, hi = min(scores.values()), max(scores.values())
     if hi - lo < 1e-9:

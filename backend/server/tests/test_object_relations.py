@@ -87,9 +87,9 @@ def test_server_passes_boxes_and_weight():
     assert ev.call_args.kwargs == {"q_items": [{"label": "sign", "box": SIGN}], "relation_weight": 0.2}
 
 
-def test_relation_off_by_default():
+def test_relation_on_by_default():
     from server import config
-    assert config.LOC_RELATION_WEIGHT == 0
+    assert config.LOC_RELATION_WEIGHT == 0.05
 
 
 def test_neo4j_rows_come_in_inverse_pairs():
@@ -139,6 +139,6 @@ def test_same_layout_matches_the_map_and_flipped_does_not():
         VL._spatial_direction_match(photo[("sign", "shelf")], rels[("sign", "shelf")])
 
 
-def test_adjacent_off_by_default():
+def test_adjacent_on_by_default():
     from server import config
-    assert config.LOC_ADJACENT is False
+    assert config.LOC_ADJACENT is True

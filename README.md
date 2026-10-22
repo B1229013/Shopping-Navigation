@@ -16,7 +16,7 @@
 | B1229013/APP-IOS-Android `android` | Android App ＋ 共用後端 `backend/`（內容來自 B1229023/APPNAV `main`） |
 | **B1229013/APP-IOS-Android `ios`（本分支）** | iOS App ＋ 同一份後端。2026-10-21 由 B1222017/APPNAV_ios 的 `feature/localization-fusion-v2` 合併進來，iOS 的 commit 紀錄都保留 |
 | B1229013/APP-IOS-Android `main` | 2026-09-23 的舊版（`android/`、`ios/`、`backend/` 三個資料夾），沒有動 |
-| B1229023/APPNAV | Android ＋ 共用後端的整合倉庫（`android` 分支的來源；它的 `feat/object-relations`（物件關係）已合併進 `android` 與 `ios`，設定 `LOC_ADJACENT`、`LOC_RELATION_WEIGHT` 預設關閉） |
+| B1229023/APPNAV | Android ＋ 共用後端的整合倉庫（`android` 分支的來源；它的 `feat/object-relations`（物件關係）已合併進 `android` 與 `ios`，設定 `LOC_ADJACENT`、`LOC_RELATION_WEIGHT` 預設開啟，設成 0 關閉） |
 | B1222017/APPNAV_ios | 原本的 iOS 倉庫 |
 | B1229013/Shopping-Navigation | Android，停在 2026-10-07 |
 

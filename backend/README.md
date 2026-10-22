@@ -130,8 +130,8 @@ curl -X POST http://localhost:8000/session/<id>/confirm -H "Content-Type: applic
 | `DINO_SIDECAR_PATH` | `dino_sidecar.pkl` | 參考照片的 DINOv2 向量（另有一份存在 Neo4j 的 `DirPhoto.dino`） |
 | `LOC_SERVER_IMAGE_K` / `LOC_PHONE_IMAGE_K` | `32,64,8` / `0.25,4,2` | 影像證據在融合裡的權重 k(σ)：σ≤2 m、σ≥5 m、還沒定位過 |
 | `LOC_FUSION_V2` | `1` | 影像 × 感測器的機率融合 |
-| `LOC_RELATION_WEIGHT` | `0`（關閉） | 物件上下左右關係分數的權重（`server/object_relations.py`，用框算，伺服器端 DINOv2 那條路）；lab1019 實測沒有變好，見 `eval/results/object_relations_lab1019.md` |
-| `LOC_ADJACENT` | `0`（關閉） | 讀地圖的 `ADJACENT`（九宮格相鄰物件）給格子比對加分（`SPATIAL_BONUS_COEFF`，手機送 DINOv2／沒有 DINOv2 的店才會用到）；lab1019 實測格子比對變差，見 `eval/results/relations_compare_lab1019.md` |
+| `LOC_RELATION_WEIGHT` | `0.05`（開） | 物件上下左右關係分數的權重（`server/object_relations.py`，用框算，伺服器端 DINOv2 那條路）；`0` 關閉。lab1019 實測沒有變好，見 `eval/results/object_relations_lab1019.md` |
+| `LOC_ADJACENT` | `1`（開） | 讀地圖的 `ADJACENT`（九宮格相鄰物件）給格子比對加分（`SPATIAL_BONUS_COEFF` 0.10，手機送 DINOv2／沒有 DINOv2 的店才會用到）；`0` 關閉。lab1019 實測格子比對變差，見 `eval/results/relations_compare_lab1019.md` |
 | `EMBEDDING_ENABLED` / `EMBEDDING_MODEL` | `1` / `text-embedding-3-small` | 物件名稱語意相似度；每張照片多一次 embedding 請求 |
 | `EMBEDDING_CACHE_PATH` | `output/label_embeddings.npz` | 地圖標籤向量快取 |
 | `AISLE_SIGN_PLACES` | `NEO4J_PLACE` | 哪些店使用走道吊牌號碼（用 `\|` 分隔） |

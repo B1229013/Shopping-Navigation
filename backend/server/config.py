@@ -200,16 +200,18 @@ DINO_SIDECAR_PATH = os.environ.get("DINO_SIDECAR_PATH",
 LOC_SERVER_IMAGE_K = os.environ.get("LOC_SERVER_IMAGE_K", "32,64,8")
 # Object-to-object 上下左右 relations (server/object_relations.py) added to the server image
 # evidence: fused_n += W · relation consistency with node n's best directional photo.
-# 0 = off. On the 376 lab1019 photos no weight beat the current server (44.7 % Top-1;
-# 42.6–44.9 % when W is picked on the other walks): eval/results/object_relations_lab1019.md.
-LOC_RELATION_WEIGHT = float(os.environ.get("LOC_RELATION_WEIGHT", "0"))
+# On (team decision 2026-10-22) at 0.05, the weight picked on held-out walks; 0 = off.
+# On the 376 lab1019 photos no weight beat the server without it (44.7 % Top-1; 42.6–44.9 %
+# when W is picked on the other walks): eval/results/object_relations_lab1019.md.
+LOC_RELATION_WEIGHT = float(os.environ.get("LOC_RELATION_WEIGHT", "0.05"))
 # Load the map's ADJACENT object pairs (map_v2, 3×3 grid cells) for the grid matcher's
 # spatial bonus (visual_localization.SPATIAL_BONUS_COEFF; from APPNAV_ios fe4c851, with its
 # direction reading fixed). Only the grid path uses it: a phone that sends dino_topk (iOS)
-# and maps without DINOv2; server-side DINOv2 does not. 0 = off: on the 376 lab1019 photos
-# it lowered the grid ranking (Top-1 13.6 → 11.2 % at 0.10) and moved the phone-DINOv2 path
-# by +0.8 pt (37.5 → 38.3 %, 3 photos) — eval/results/relations_compare_lab1019.md.
-LOC_ADJACENT = os.environ.get("LOC_ADJACENT", "0") != "0"
+# and maps without DINOv2; server-side DINOv2 does not. On (team decision 2026-10-22);
+# 0 = off. On the 376 lab1019 photos it lowered the grid ranking (Top-1 13.6 → 11.2 % at
+# 0.10) and moved the phone-DINOv2 path by +0.8 pt (37.5 → 38.3 %, 3 photos) —
+# eval/results/relations_compare_lab1019.md.
+LOC_ADJACENT = os.environ.get("LOC_ADJACENT", "1") != "0"
 
 # Fail at startup, not on every photo, if either k(σ) setting is malformed.
 from server.loc_fusion import parse_image_k as _parse_image_k  # noqa: E402

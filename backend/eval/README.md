@@ -96,7 +96,7 @@ python -m eval.object_relations_eval --local-model sentence-transformers/paraphr
 
 2026-10-21 結果（`eval/results/object_relations_lab1019.md`，本機多語模型配對名稱）：基準 Top-1 44.7%；
 七種版本（上下＋左右、只上下、只左右、等權、九宮格粗略版＝現有 ADJACENT、四方向取最高、只重排前 5 名）
-交叉驗證 42.6–44.9%，沒有一種比基準好；所以 `LOC_RELATION_WEIGHT` 預設 0（關閉）。
+交叉驗證 42.6–44.9%，沒有一種比基準好。2026-10-22 團隊決定開啟，`LOC_RELATION_WEIGHT` 預設 0.05（交叉驗證選到的權重）。
 
 ## 物件關係兩個版本比較（`relations_compare.py`）
 
@@ -110,7 +110,7 @@ python -m eval.relations_compare --local-model sentence-transformers/paraphrase-
 
 2026-10-21 結果（`eval/results/relations_compare_lab1019.md`）：格子比對 Top-1 不讀 13.6%、原樣 ×0.1 10.4%、
 方向修正 ×0.1 11.2%（加分越大越差）；手機 DINOv2 37.5% → 原樣 37.2%、方向修正 38.3%（3 張，屬於誤差範圍）。
-都沒有比不用關係好，所以 `LOC_ADJACENT` 預設 0。
+都沒有比不用關係好。2026-10-22 團隊決定開啟，`LOC_ADJACENT` 預設 1。
 
 ## Before / after
 

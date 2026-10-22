@@ -82,6 +82,36 @@ python -m eval.image_only --set lab1019 --data-root <主 checkout>/backend --sim
 - `eval/results/image_only_<set>_photos.jsonl`：每張照片一行，含所有偵測物件、OCR 文字、每個參考節點的
   DINOv2 cosine／物件／OCR／融合分數、走道號碼、伺服器影像證據、重播的手機輸入，以及每個版本的前五名與誤差。
 
+## 物件上下左右關係（`object_relations_eval.py`）
+
+重播 `image_only_lab1019_vlm_photos.jsonl`（不重跑 VLM、不需要照片），把
+`server/object_relations.relation_score`（查詢照片與每個節點最像那張方向照片的物件，上下、左右排列是否一致）
+以權重 W 加進伺服器的影像分數，比較 Top-1／Top-5／1 hop 內／誤差；W 另外用「兩條路線選、第三條測」交叉驗證。
+先確認不加關係時每張照片的結果和原本那次執行一模一樣才繼續。
+
+```
+python -m eval.object_relations_eval                          # 有 OPENAI_API_KEY：用伺服器的名稱相似度
+python -m eval.object_relations_eval --local-model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+```
+
+2026-10-21 結果（`eval/results/object_relations_lab1019.md`，本機多語模型配對名稱）：基準 Top-1 44.7%；
+七種版本（上下＋左右、只上下、只左右、等權、九宮格粗略版＝現有 ADJACENT、四方向取最高、只重排前 5 名）
+交叉驗證 42.6–44.9%，沒有一種比基準好；所以 `LOC_RELATION_WEIGHT` 預設 0（關閉）。
+
+## 物件關係兩個版本比較（`relations_compare.py`）
+
+同一批照片（lab1019 376 張）跑真正的格子比對 `match_by_grid`，比較地圖 `ADJACENT` 關係的讀法與加分：
+不讀、APPNAV_ios `fe4c851` 原樣（把 cell_pairs 的 dir 當成 a 自己的方向，等於上下左右全部讀反）、
+方向修正（本分支 `neo4j_client.adjacent_relation`）。看格子比對自己，以及手機送 DINOv2 時的融合結果。
+
+```
+python -m eval.relations_compare --local-model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+```
+
+2026-10-21 結果（`eval/results/relations_compare_lab1019.md`）：格子比對 Top-1 不讀 13.6%、原樣 ×0.1 10.4%、
+方向修正 ×0.1 11.2%（加分越大越差）；手機 DINOv2 37.5% → 原樣 37.2%、方向修正 38.3%（3 張，屬於誤差範圍）。
+都沒有比不用關係好，所以 `LOC_ADJACENT` 預設 0。
+
 ## Before / after
 
 Keep a table in `docs/superpowers/specs/2026-05-25-navigation-accuracy-design.md`

@@ -82,6 +82,21 @@ python -m eval.image_only --set lab1019 --data-root <主 checkout>/backend --sim
 - `eval/results/image_only_<set>_photos.jsonl`：每張照片一行，含所有偵測物件、OCR 文字、每個參考節點的
   DINOv2 cosine／物件／OCR／融合分數、走道號碼、伺服器影像證據、重播的手機輸入，以及每個版本的前五名與誤差。
 
+### 計步有沒有在動（`step_check.py`）
+
+```
+python -m eval.step_check <Sensor Lab 匯出資料夾或 sensor_log.csv>...
+python -m eval.step_check --results eval/results/image_only_lab1019_vlm_photos.jsonl
+```
+
+- Sensor Lab 紀錄：每 4 秒一段，|a| 有起伏（std ≥ 0.6 m/s²）又有步伐節奏（0.38–0.83 秒一步）的算「在走」，
+  節奏也給出預期步數。列出「在走卻一步都沒算到」的段落（位置停住），和明顯站著（2 秒 std < 0.3）時算到的步數；
+  App 的計數（total_steps）和手機內建計步器（step_detected）各一份。
+- 定位結果：相鄰兩個測試點距離 > 2 m、步數卻沒變的路段。
+- 2026-10-29：lab1019 有 6/86 段走了 2.4–5 m 卻 0 步；0819 那趟手持紀錄，內建計步器有 8/32 段在走卻沒算到，
+  舊的備援偵測整趟只抓到約 10 步。Android `sensor/StepDetection.kt` 改寫備援偵測後，把同一份紀錄重播進
+  `PdrTracker`：在走卻 0 步的段落 7/32 → 0/32，總步數 143 → 197（依節奏估約 189 步在走的段落），站著時多算 0 步。
+
 ## 物件上下左右關係（`object_relations_eval.py`）
 
 重播 `image_only_lab1019_vlm_photos.jsonl`（不重跑 VLM、不需要照片），把

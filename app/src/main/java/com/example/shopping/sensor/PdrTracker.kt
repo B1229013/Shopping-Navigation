@@ -186,24 +186,15 @@ class PdrTracker(
     /** Event time (ns, SystemClock.elapsedRealtimeNanos base) of the sample onSampleReady reports. */
     @Volatile var lastSampleNs: Long = 0L; private set
 
-    // ── Software step detection (fallback when hardware counter is silent) ──
-    private var filteredMag = 9.81f
-    private var avgMag = 9.81f
-    private var wasAbove = false
-    private var lastSwStepTime = 0L
-    private var lastHwStepTime = 0L
+    // ── Software step detection (while the hardware step detector is quiet) ──
+    private val swDetector = SoftwareStepDetector()
+    private val stepMerger = StepMerger()
     private var swStepCount = 0
     private val swStepEventBuf = mutableListOf<Long>()
     companion object {
-        private const val LP_ALPHA = 0.15f
-        private const val AVG_ALPHA = 0.005f
-        private const val PEAK_THRESHOLD = 1.2f
-        private const val MIN_STEP_MS = 280L
         /** Keep at most one sample per 15 ms of event time: every ~20 ms SENSOR_DELAY_GAME event
          *  passes (≈50 Hz) while a burst of early events is still thinned out. */
         private const val SAMPLE_PERIOD_NS = 15_000_000L
-        private const val MAX_STEP_MS = 2000L
-        private const val HW_SILENT_MS = 2500L
         private const val COMP_ALPHA = 0.98f
         private const val GYRO_CAL_NOISE_THRESHOLD = 0.05f
         private const val MAG_EXPECTED_MIN_UT = 25f
@@ -269,8 +260,7 @@ class PdrTracker(
         accelMagMax = 0f; accelMagMin = Float.MAX_VALUE
         segmentSteps = 0; segmentDistance = 0f
         segmentHeadingSum = 0.0; segmentHeadingSamples = 0
-        filteredMag = 9.81f; avgMag = 9.81f; wasAbove = false
-        lastSwStepTime = 0L; lastHwStepTime = 0L; swStepCount = 0
+        swDetector.reset(); stepMerger.reset(); swStepCount = 0
         compHeadingRad = 0.0; compInitialized = false; lastGyroTimeMs = 0L
         gyroOnlyYawRad = 0.0; gyroOnlyInitialized = false
         gyroCalState = GyroCalState.UNCALIBRATED; gyroCalProgress = 0f; gyroCalNoise = 0f
@@ -413,24 +403,16 @@ class PdrTracker(
                     if (headingDeg < 0) headingDeg += 360f
                 }
 
-                // Software step detection: low-pass filter + peak detection
-                filteredMag = LP_ALPHA * mag + (1 - LP_ALPHA) * filteredMag
-                avgMag = AVG_ALPHA * mag + (1 - AVG_ALPHA) * avgMag
-                val isAbove = filteredMag > avgMag + PEAK_THRESHOLD
-                if (wasAbove && !isAbove) {
-                    val dt = elapsed - lastSwStepTime
-                    if (dt in MIN_STEP_MS..MAX_STEP_MS) {
-                        val hwSilent = elapsed - lastHwStepTime > HW_SILENT_MS
-                        if (hwSilent) {
-                            swStepCount++
-                            swStepEventBuf.add(elapsed)
-                            stepCounterBuf.add(elapsed)
-                            onStepDetected()
-                        }
+                // The hardware step detector goes quiet for seconds at a time while walking
+                // (8 of 32 four-second stretches in a hand-held walk): count from |a| then.
+                for (stepMs in swDetector.ingest(event.timestamp / 1_000_000L, mag)) {
+                    if (stepMerger.software(stepMs)) {
+                        swStepCount++
+                        swStepEventBuf.add(elapsed)
+                        stepCounterBuf.add(elapsed)
+                        onStepDetected()
                     }
-                    lastSwStepTime = elapsed
                 }
-                wasAbove = isAbove
 
                 if (event.timestamp - lastAccelBufNs >= SAMPLE_PERIOD_NS) {
                     accelBuf.add(floatArrayOf(elapsed.toFloat(), event.values[0], event.values[1], event.values[2]))
@@ -571,9 +553,10 @@ class PdrTracker(
             Sensor.TYPE_STEP_DETECTOR -> {
                 stepDetectorCount++
                 stepEventBuf.add(elapsed)
-                stepCounterBuf.add(elapsed)
-                onStepDetected()
-                lastHwStepTime = elapsed
+                if (stepMerger.hardware(event.timestamp / 1_000_000L)) {
+                    stepCounterBuf.add(elapsed)
+                    onStepDetected()
+                }
             }
 
             Sensor.TYPE_STEP_COUNTER -> {
@@ -591,7 +574,7 @@ class PdrTracker(
                         onStepDetected()
                     }
                 }
-                lastHwStepTime = elapsed
+                stepMerger.hardwareAlive(event.timestamp / 1_000_000L)
             }
 
             Sensor.TYPE_GRAVITY -> {

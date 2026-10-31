@@ -8,16 +8,19 @@
 
 ---
 
-## 倉庫與版本
+## 倉庫與分支
 
-| 倉庫 | 內容 | 狀態 |
+| 倉庫／分支 | 內容 | 說明 |
 |------|------|------|
-| **B1229023/APPNAV**（本倉庫，`main`） | Android App ＋ 共用後端 `backend/` | **目前開發主線**（2026-10-20 整合三個倉庫） |
-| B1229013/Shopping-Navigation | 同上，停在 2026-10-07 | 之後會同步成最後的版本 |
-| B1222017/APPNAV_ios | iOS App（Swift） | iOS 繼續在那裡開發；後端改用本倉庫的 `backend/` |
+| **B1229013/APP-IOS-Android `android`**（本分支） | Android App ＋ 共用後端 `backend/` | 2026-10-21 建立，內容來自 B1229023/APPNAV `main`（`32e4a8b`） |
+| B1229013/APP-IOS-Android `ios` | iOS App ＋ 同一份後端 | 前端不同所以分開；後端在 `android` 改，再合併進 `ios`（見 `ios` 分支的 README） |
+| B1229013/APP-IOS-Android `main` | 2026-09-23 的舊版（`android/`、`ios/`、`backend/` 三個資料夾） | 沒有動 |
+| B1229023/APPNAV | Android ＋ 共用後端的整合倉庫 | `android` 分支的來源 |
+| B1222017/APPNAV_ios | 原本的 iOS 倉庫 | `ios` 分支由它的 `feature/localization-fusion-v2` 合併而來 |
+| B1229013/Shopping-Navigation | Android，停在 2026-10-07 | |
 
-- iOS 與 Android 共用同一套後端 API（`backend/`）。本倉庫已不再保留 iOS 程式的副本。
-- 舊版分支以 tag 保存：`archive/ranging-metric-distance`、`archive/sensorlab-pdr`、
+- iOS 與 Android 共用同一套後端 API（`backend/`）；iOS 程式在 `ios` 分支。
+- 舊版分支在 B1229023/APPNAV 以 tag 保存：`archive/ranging-metric-distance`、`archive/sensorlab-pdr`、
   `archive/sensor-nav-pdr`、`archive/remove-dead-modules`；整合前的狀態是 `backup/before-consolidate`。
 - 舊版「感測器導航」（App 的 `SensorNav*`、後端 `/snav`）已由主導航取代並移除，程式保存在 `archive/sensor-nav-pdr`
   與 `backend/legacy/`。

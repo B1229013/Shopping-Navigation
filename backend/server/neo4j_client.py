@@ -87,6 +87,44 @@ class RefMap:
     adjacent_map: Dict[tuple, Dict[tuple, str]] = field(default_factory=dict)
 
 
+_INVERSE = {"above": "below", "below": "above", "same_row": "same_row",
+            "left": "right", "right": "left", "same_col": "same_col"}
+
+
+def adjacent_relation(cell_pairs) -> Dict[str, str]:
+    """ADJACENT.cell_pairs → {"v_rel", "h_rel"}: where object **a** is relative to object **b**,
+    the way visual_localization.compute_query_spatial describes the photo's pairs.
+
+    A cell pair's "dir" says where b's cell is from a's (grid_utils._DIR_NAMES: (1, 0) →
+    "below" = b is one row lower), so "below" means a is ABOVE b. Reading "dir" as a's own
+    position flips every comparison: same layouts score as mismatches, flipped ones as
+    matches. Objects spanning several cells can have both "above" and "below" pairs; that
+    axis then says nothing ("same_row" / "same_col")."""
+    try:
+        pairs = json.loads(cell_pairs) if isinstance(cell_pairs, str) else (cell_pairs or [])
+    except (json.JSONDecodeError, TypeError):
+        pairs = []
+    dirs = {w for p in pairs or [] for w in ("above", "below", "left", "right") if w in p.get("dir", "")}
+    b_v = "same_row" if ("above" in dirs) == ("below" in dirs) else ("below" if "below" in dirs else "above")
+    b_h = "same_col" if ("left" in dirs) == ("right" in dirs) else ("right" if "right" in dirs else "left")
+    return {"v_rel": _INVERSE[b_v], "h_rel": _INVERSE[b_h]}
+
+
+def add_adjacent(rels: Dict[tuple, Dict[str, Any]], a_label: str, b_label: str, rel: Dict[str, Any]) -> None:
+    """Store a → b and the inverse b → a. Two objects with the same labels can appear more
+    than once in a photo (price tags); an axis on which those copies disagree says nothing."""
+    inv = {**rel, "v_rel": _INVERSE[rel["v_rel"]], "h_rel": _INVERSE[rel["h_rel"]]}
+    for key, r in (((a_label, b_label), rel), ((b_label, a_label), inv)):
+        old = rels.get(key)
+        if old is None:
+            rels[key] = dict(r)
+            continue
+        if old["v_rel"] != r["v_rel"]:
+            old["v_rel"] = "same_row"
+        if old["h_rel"] != r["h_rel"]:
+            old["h_rel"] = "same_col"
+
+
 def _link_neighbors(ref: "RefMap", a: int, b: int) -> None:
     """A WALKWAY means a and b are walkable both ways, whichever way it is stored: each
     node lists the other as a neighbour (once, also if the database holds both a→b and b→a)."""
@@ -420,8 +458,25 @@ class Neo4jClient:
 
         log.info("V2: loaded %d walkway edges", len(ref.walkway_edges))
 
-        # 4) ADJACENT spatial relationships — disabled until build_object_graph completes
-        # TODO: re-enable after batch write script finishes populating Object+ADJACENT nodes
+        # 4) ADJACENT spatial relationships (map_v2 / rebuild_objects_v2: objects of one photo
+        #    whose 3×3 grid cells touch) → adjacent_map[(nid, slot)][(label_a, label_b)], used
+        #    by the grid matcher's spatial bonus (visual_localization.weighted_grid_match).
+        from server.config import LOC_ADJACENT
+        if LOC_ADJACENT:
+            rows = self._query("""
+                MATCH (w:Waypoint {place: $place})-[hp:HAS_PHOTO]->(d:DirPhoto)
+                      -[:DETECTED]->(a:Object)-[r:ADJACENT]->(b:Object)<-[:DETECTED]-(d)
+                RETURN w.nid AS nid, hp.slot AS slot,
+                       coalesce(a.label_norm, a.label) AS a_label,
+                       coalesce(b.label_norm, b.label) AS b_label,
+                       r.cell_pairs AS cell_pairs, r.overlap AS overlap, r.depth_diff AS depth_diff
+            """, {"place": place})
+            for r in rows:
+                rel = {**adjacent_relation(r["cell_pairs"]), "overlap": bool(r["overlap"]),
+                       "depth_diff": r["depth_diff"] or "same_level"}
+                add_adjacent(ref.adjacent_map.setdefault((r["nid"], r["slot"]), {}),
+                             r["a_label"] or "", r["b_label"] or "", rel)
+            log.info("V2: loaded %d ADJACENT edges over %d photos", len(rows), len(ref.adjacent_map))
         return ref
 
     # ── Schema V1 (legacy): TopoNode:Photo → Object ─────────────────────

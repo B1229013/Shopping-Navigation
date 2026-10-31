@@ -130,6 +130,8 @@ curl -X POST http://localhost:8000/session/<id>/confirm -H "Content-Type: applic
 | `DINO_SIDECAR_PATH` | `dino_sidecar.pkl` | 參考照片的 DINOv2 向量（另有一份存在 Neo4j 的 `DirPhoto.dino`） |
 | `LOC_SERVER_IMAGE_K` / `LOC_PHONE_IMAGE_K` | `32,64,8` / `0.25,4,2` | 影像證據在融合裡的權重 k(σ)：σ≤2 m、σ≥5 m、還沒定位過 |
 | `LOC_FUSION_V2` | `1` | 影像 × 感測器的機率融合 |
+| `LOC_RELATION_WEIGHT` | `0.05`（開） | 物件上下左右關係分數的權重（`server/object_relations.py`，用框算，伺服器端 DINOv2 那條路）；`0` 關閉。lab1019 實測沒有變好，見 `eval/results/object_relations_lab1019.md` |
+| `LOC_ADJACENT` | `1`（開） | 讀地圖的 `ADJACENT`（九宮格相鄰物件）給格子比對加分（`SPATIAL_BONUS_COEFF` 0.10，手機送 DINOv2／沒有 DINOv2 的店才會用到）；`0` 關閉。lab1019 實測格子比對變差，見 `eval/results/relations_compare_lab1019.md` |
 | `EMBEDDING_ENABLED` / `EMBEDDING_MODEL` | `1` / `text-embedding-3-small` | 物件名稱語意相似度；每張照片多一次 embedding 請求 |
 | `EMBEDDING_CACHE_PATH` | `output/label_embeddings.npz` | 地圖標籤向量快取 |
 | `AISLE_SIGN_PLACES` | `NEO4J_PLACE` | 哪些店使用走道吊牌號碼（用 `\|` 分隔） |
@@ -153,6 +155,7 @@ curl -X POST http://localhost:8000/session/<id>/confirm -H "Content-Type: applic
 | 4. 上傳 | `python upload_map_v2.py --place "<店名>" --dry-run` 先檢查，沒問題再拿掉 `--dry-run` | `Waypoint`、`HAS_PHOTO`、`DirPhoto`、`WALKWAY` |
 | 5. 產生物件 | `python rebuild_objects_v2.py --place "<店名>" --limit 2 --dry-run` 試跑，再完整執行 | `Object`、`DETECTED`、`ADJACENT` |
 | 6. DINOv2 向量 | `python store_dino_v2.py --place "<店名>" --dry-run`，再拿掉 `--dry-run`（`--no-neo4j` 只寫 sidecar） | `dino_sidecar.pkl`、`DirPhoto.dino` |
+| 6b. 物件上下左右（選用） | `python build_object_relations.py --place "<店名>" --dry-run`，再拿掉 `--dry-run`；`--delete` 移除 | `ABOVE`、`BELOW`、`LEFT_OF`、`RIGHT_OF`（同一張照片、每個物件連最近 4 個） |
 | 7. 起點與補充連線 | 建圖頁設定起點（位置、面向、照片）；Neo4j 缺的走道邊寫進 `maps/neo4j_links/<店名>.json`（參考 `系辦.json`） | `maps/neo4j_links/<店名>.json`、`maps/starts/<店名>/` |
 
 - **每間店一個工作資料夾**：`<MAP_BUILD_ROOT>/<店名>/`（預設 `backend/output/mapbuild/<店名>/`；店名裡 Windows 不允許的字元會換成 `_`，例如「A7家樂福（9/16)」→「A7家樂福（9_16)」）。裡面有 `topomap.json`、`topomap_confirmed.json`、各路線照片、`dino_embeddings.pkl`、`floorplan.*`、`imports/`、`vlm_cache/`。建圖頁用頂端的「店家」選單切換，腳本依 `--place` 找資料夾（`--workspace` 可以另外指定）。舊的環境變數 `MAP_BUILD_DIR` 現在代表這個總資料夾。
@@ -176,7 +179,7 @@ curl -X POST http://localhost:8000/session/<id>/confirm -H "Content-Type: applic
   - 編輯進度會自動存在瀏覽器裡，重新整理不會不見；「重設全部」會回到原始資料。
 - **VLM**：使用 `.env` 的 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL`。提示詞與 A7 相同，每張照片預設呼叫 3 次再去重（`--calls`）。結果快取在 `<工作資料夾>/vlm_cache/`，中斷後重跑不會重複付費。
 - **OCR**：使用 EasyOCR，文字會掛到中心點落在其框內的物件上（`ocr_text`）。第一次載入模型較慢，可用 `--no-ocr` 略過。
-- **安全**：本工具建立的 `DirPhoto` / `Object` 帶有 `place` 欄位。`upload_map_v2.py --replace`、`rebuild_objects_v2.py`、`store_dino_v2.py` 只會動這種 place，同學建的 A7 一律拒絕寫入。
+- **安全**：本工具建立的 `DirPhoto` / `Object` 帶有 `place` 欄位。`upload_map_v2.py --replace`、`rebuild_objects_v2.py`、`store_dino_v2.py`、`build_object_relations.py` 只會動這種 place，同學建的 A7 一律拒絕寫入（`build_object_relations.py` 要加 `--allow-foreign` 才會寫）。
 - **沒有 DINOv2 向量的店**：定位會退回只用物件＋OCR（九宮格）比對，所以建完圖記得做第 6 步。
 
 ---
@@ -230,6 +233,7 @@ backend/
 ├── upload_map_v2.py            確認後的地圖 → Neo4j
 ├── rebuild_objects_v2.py       方向照片物件偵測 → Neo4j
 ├── store_dino_v2.py            方向照片 DINOv2 向量 → sidecar／Neo4j
+├── build_object_relations.py   方向照片裡物件的上下左右關係 → Neo4j（ABOVE／BELOW／LEFT_OF／RIGHT_OF）
 ├── dino_sidecar.pkl            參考照片 DINOv2 向量
 ├── build_store_graph.py / build_store_map.py / build_html_map.py / generate_topomap.py / render_clean.py / ocr_dump.py
 │                               早期的拓樸圖產生與繪製工具（GroundingDINO／EasyOCR 建圖）

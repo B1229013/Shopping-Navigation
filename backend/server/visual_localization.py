@@ -411,42 +411,23 @@ def compute_query_spatial(items: List[dict]) -> Dict[tuple, dict]:
     return rels
 
 
-def _spatial_direction_match(q_rel: dict, ref_cell_pairs: str) -> float:
-    """Score how well a query spatial relationship matches reference ADJACENT cell_pairs."""
-    if not ref_cell_pairs:
+def _spatial_direction_match(q_rel: dict, ref_rel: dict) -> float:
+    """How well a photo pair's relation matches the map's ADJACENT one. Both say where
+    object a is relative to b: q_rel from compute_query_spatial, ref_rel from
+    neo4j_client.adjacent_relation ({"v_rel", "h_rel", "overlap"})."""
+    if not ref_rel:
         return 0.0
-    try:
-        pairs = json.loads(ref_cell_pairs) if isinstance(ref_cell_pairs, str) else ref_cell_pairs
-    except (json.JSONDecodeError, TypeError):
-        return 0.0
-    if not pairs:
-        return 0.0
-    ref_dirs: set = set()
-    for p in pairs:
-        d = p.get("dir", "")
-        if "above" in d:
-            ref_dirs.add("above")
-        if "below" in d:
-            ref_dirs.add("below")
-        if "left" in d:
-            ref_dirs.add("left")
-        if "right" in d:
-            ref_dirs.add("right")
-        if d == "overlap":
-            ref_dirs.add("overlap")
     matches = 0.0
     checks = 3
-    if q_rel["v"] == "above" and "above" in ref_dirs:
+    qv = q_rel["v"]
+    if qv in ("above", "below") and qv == ref_rel.get("v_rel"):
         matches += 1
-    elif q_rel["v"] == "below" and "below" in ref_dirs:
+    qh = q_rel["h"]
+    if qh in ("left", "right") and qh == ref_rel.get("h_rel"):
         matches += 1
-    if q_rel["h"] == "left" and "left" in ref_dirs:
+    if q_rel["overlap"] and ref_rel.get("overlap", False):
         matches += 1
-    elif q_rel["h"] == "right" and "right" in ref_dirs:
-        matches += 1
-    if q_rel["overlap"] and "overlap" in ref_dirs:
-        matches += 1
-    elif not q_rel["overlap"] and "overlap" not in ref_dirs:
+    elif not q_rel["overlap"] and not ref_rel.get("overlap", False):
         matches += 0.5
     return matches / checks
 
@@ -584,7 +565,7 @@ def weighted_grid_match(
     rarity_map: Optional[Dict[str, float]] = None,
     grid_n: int = 3,
     query_spatial: Optional[Dict[tuple, dict]] = None,
-    ref_adjacent: Optional[Dict[tuple, str]] = None,
+    ref_adjacent: Optional[Dict[tuple, dict]] = None,
 ) -> tuple[float, int, dict]:
     """Set-based matching: flatten grids, match all query vs all ref objects."""
     sim_func = _hybrid_max_sim if _emb_cache else _semantic_similarity
@@ -648,7 +629,7 @@ def weighted_grid_match(
                 q_rel = query_spatial.get((ql_a, ql_b))
                 if not q_rel:
                     continue
-                ref_cp = ref_adjacent.get((rl_a, rl_b)) or ref_adjacent.get((rl_b, rl_a))
+                ref_cp = ref_adjacent.get((rl_a, rl_b))      # the loader also stores b → a
                 if not ref_cp:
                     continue
                 spatial_checks += 1

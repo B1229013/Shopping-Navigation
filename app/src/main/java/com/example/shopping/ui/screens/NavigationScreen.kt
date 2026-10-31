@@ -162,6 +162,9 @@ fun TeammateHomeScreen(navController: NavController) {
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_goal", goalText)
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_guidance", response.guidance)
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_place", response.place ?: selectedPlace)
+                response.map_north_offset_deg?.let {
+                    navController.currentBackStackEntry?.savedStateHandle?.set("nav_north_offset", it)
+                }
                 navController.navigate("ar_navigation")
             } catch (e: Exception) {
                 Log.e("NavSession", "Failed to create session", e)
@@ -416,9 +419,10 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
     val navGoal = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_goal") ?: ""
     val navGuidance = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_guidance") ?: ""
     val navPlace = navController.previousBackStackEntry?.savedStateHandle?.get<String>("nav_place")
+    val navNorthOffset = navController.previousBackStackEntry?.savedStateHandle?.get<Double>("nav_north_offset")
 
     LaunchedEffect(navSessionId) {
-        vm.init(navSessionId, navGoal, navGuidance, navPlace)
+        vm.init(navSessionId, navGoal, navGuidance, navPlace, navNorthOffset)
     }
 
     var currentLocation by remember { mutableStateOf<Location?>(null) }
@@ -528,7 +532,6 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                     phase = vm.phase,
                     goal = vm.goal,
                     currentTarget = vm.currentTarget,
-                    currentLocation = vm.currentLocation,
                     torchOn = torchOn,
                     torchAvailable = torchAvailable,
                     onToggleTorch = {
@@ -543,13 +546,6 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
             }
             if (vm.goalItems.isNotEmpty()) {
                 ShoppingChecklist(items = vm.goalItems, currentTarget = vm.currentTarget)
-            }
-            if (torchAvailable && !torchOn) {
-                Text(
-                    "光線不足嗎？點擊右上角閃電圖示開啟閃光燈輔助拍照",
-                    color = Color.White.copy(alpha = 0.75f),
-                    fontSize = 11.sp,
-                )
             }
 
             // Middle: camera view area — AR guidance arrow overlay
@@ -580,6 +576,8 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                 vm.secondPhotoHint != null -> NavHintBanner(vm.secondPhotoHint.orEmpty(), Color(0xFF2196F3).copy(alpha = 0.85f))
                 idle && vm.sensorsRunning && !vm.isOnMap && vm.startPoints.isNotEmpty() ->
                     NavHintButton("我在起點，從這裡開始", Color.Black.copy(alpha = 0.6f), onClick = { showStartPicker = true })
+                idle && vm.needsMagCalibration ->
+                    NavHintBanner("請揮動手機畫 8 字校正磁力計", Color(0xFFFF9800).copy(alpha = 0.8f))
                 idle && vm.isOnMap && vm.distanceSinceFix >= NavigationViewModel.PHOTO_REMINDER_M ->
                     NavHintBanner("已走 ${vm.distanceSinceFix.toInt()} m，拍一張照片校正位置", Color.Black.copy(alpha = 0.55f))
                 idle && !isPhoneUpright -> NavHintBanner("手機請拿直、對準走道前方", Color.Black.copy(alpha = 0.55f))

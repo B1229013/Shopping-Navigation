@@ -95,7 +95,6 @@ fun NavStatusCard(
     phase: String,
     goal: String,
     currentTarget: String?,
-    currentLocation: String?,
     torchOn: Boolean,
     torchAvailable: Boolean,
     onToggleTorch: () -> Unit,
@@ -147,9 +146,6 @@ fun NavStatusCard(
                 fontSize = 14.sp,
                 maxLines = 2,
             )
-            currentLocation?.let {
-                Text(it, color = PanelText.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 2)
-            }
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             RoundIconButton(

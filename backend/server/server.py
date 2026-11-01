@@ -2657,13 +2657,59 @@ def _handle_confirm(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
             # Advance route: mark current target as visited and move to next leg
             found_item_name = None
             if s.route_plan and s.target_nodes:
-                current_leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
-                found_item_name = s.target_node_to_item.get(current_leg.to_node)
-                s.mark_target_visited(current_leg.to_node)
-                s.current_leg_index = min(s.current_leg_index + 1, len(s.route_plan.legs) - 1)
+                legs = s.route_plan.legs
+                last = len(legs) - 1
+                planned = legs[min(s.current_leg_index, last)].to_node
+
+                # Credit the stop the user ACTUALLY reached.
+                # _current_goal_objects deliberately offers every remaining item
+                # to the VLM so it can call ARRIVED opportunistically when the
+                # user passes a non-current target. Crediting the planned leg
+                # then marks the WRONG item found: the planned item is never
+                # visited, and the item being stood at stays outstanding.
+                reached = planned
+                if (arrived_node is not None
+                        and arrived_node in s.target_nodes
+                        and arrived_node not in s.visited_targets
+                        and arrived_node != planned):
+                    reached = arrived_node
+                    log.info("[session %s] arrived at WP%d but the plan expected WP%d — "
+                             "crediting the stop actually reached",
+                             session_id, arrived_node, planned)
+
+                found_item_name = s.target_node_to_item.get(reached)
+                s.mark_target_visited(reached)
+
+                replanned = False
+                if reached != planned:
+                    # The visit order was built around reaching `planned` next, so
+                    # the stops behind the user are no longer on any leg. Re-plan
+                    # from where they actually are. Without this the skipped stop
+                    # is unreachable from the stale leg list, and the off-path
+                    # re-plan never fires because the user IS on the path of the
+                    # leg we would otherwise advance to.
+                    replanned = _replan_from(s, reached)
+                    if replanned:
+                        # _replan_from already points current_leg_index at the
+                        # next unvisited target, so do NOT advance past it.
+                        log.info("[session %s] re-planned from WP%d after out-of-order arrival; "
+                                 "order now %s", session_id, reached,
+                                 getattr(s.route_plan, "visit_order", None))
+
+                if not replanned:
+                    # Skip any later leg whose target is already credited, so
+                    # finding an item early does not walk the user back to a
+                    # stop they have already stood at.
+                    nxt = s.current_leg_index + 1
+                    while (nxt < last
+                           and legs[nxt].purpose == "target"
+                           and legs[nxt].to_node in s.visited_targets):
+                        nxt += 1
+                    s.current_leg_index = min(nxt, last)
+                legs = s.route_plan.legs
                 log.info("[session %s] route advanced: visited node #%d, leg %d/%d, remaining=%s",
-                         session_id, current_leg.to_node, s.current_leg_index,
-                         len(s.route_plan.legs), s.remaining_targets)
+                         session_id, reached, s.current_leg_index,
+                         len(legs), s.remaining_targets)
 
             remaining = len(s.remaining_targets) if s.target_nodes else 0
             found_label = found_item_name or "商品"

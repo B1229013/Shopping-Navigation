@@ -2,11 +2,13 @@
 
 **VLM（視覺語言模型）視覺推理**即時室內導航 App。
 使用者拍照上傳，系統透過物件偵測（GroundingDINO）、文字辨識（EasyOCR）與
-VLM（GPT-4o / Gemini / CGU gateway）分析環境，並在拓樸地圖上進行照片定位與
+VLM（GPT-5.4 mini / CGU gateway）分析環境，並在拓樸地圖上進行照片定位與
+
+
 路徑規劃，提供逐步導航指引。
 
 開箱影片連結：https://drive.google.com/file/d/1nU0xep0huSmS2-fzG8ooJqlZE7_wVK6P/view?usp=sharing
-
+情境影片 : https://drive.google.com/file/d/1QCjDgK6mSdlr9qOnIhToC8sy7aE-zHj6/view?usp=sharing
 ---
 
 ## 系統功能綜覽

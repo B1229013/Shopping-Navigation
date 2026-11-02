@@ -5,8 +5,12 @@
 VLM（GPT-5.4 mini / CGU gateway）分析環境，並在拓樸地圖上進行照片定位與路徑規劃，提供逐步導航指引。
 
 
-開箱影片連結：https://drive.google.com/file/d/1nU0xep0huSmS2-fzG8ooJqlZE7_wVK6P/view?usp=sharing
-情境影片 : https://drive.google.com/file/d/1QCjDgK6mSdlr9qOnIhToC8sy7aE-zHj6/view?usp=sharing
+開箱影片連結：https://drive.google.com/file/d/1nU0xep0huSmS2-fzG8ooJqlZE7_wVK6P/view?usp=sharing 
+
+
+情境影片 : https://drive.google.com/file/d/1QCjDgK6mSdlr9qOnIhToC8sy7aE-zHj6/view?usp=sharing 
+
+
 ---
 
 ## 系統功能綜覽

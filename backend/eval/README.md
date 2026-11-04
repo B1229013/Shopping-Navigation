@@ -9,9 +9,13 @@ and after each change and compare the numbers.
 |---|---|---|---|
 | `success_rate` | yes | predicted action == expected action | higher |
 | `false_arrival_rate` | yes | said ARRIVED on a non-goal frame — the worst failure | **lower** |
-| `direction_sanity` | no | MOVE guidance names a side where something was detected | higher |
-| `json_validity_rate` | no | VLM response parsed (no fallback) | higher |
+| `direction_sanity` | no | MOVE guidance names a side (左／右, or left／right) where something was detected (`left` also counts `far-left`) | higher |
+| `json_validity_rate` | no | VLM response parsed (not `vlm._FALLBACK`) | higher |
 | `arrival_corroboration_rate` | no | ARRIVED backed by a detection / OCR match | higher |
+
+With `predict`, `arrival_corroboration_rate` is 100% by construction: `scene.verify_arrival`
+already downgrades every ARRIVED without evidence. It only means something for predictions
+files made some other way.
 
 Every metric is reported with its denominator count (`n=…`) so an empty sample is
 not mistaken for a perfect (or terrible) score.
@@ -34,8 +38,12 @@ not mistaken for a perfect (or terrible) score.
     "detection_sides": ["left"], "json_valid": true, "arrival_corroborated": false}
    ```
 
-   (Live replay via `python -m eval.runner predict …` is enabled once the spatial
-   formatter and arrival verifier land — see `replay.py`.)
+   Or replay the photos through the pipeline (GroundingDINO perception + the VLM decision,
+   paid API calls — see `replay.py`):
+
+   ```
+   python -m eval.runner predict --photos path/to/photos --goal "find the milk" --out preds.json
+   ```
 
 3. **Score it:**
 
@@ -53,13 +61,19 @@ not mistaken for a perfect (or terrible) score.
 python -m eval.image_only --set 0916                       # 268 張 0916 測試照片
 python -m eval.image_only --set field1017                  # 2026-10-17 A7 實測 A 部分 24 張
 python -m eval.image_only --set route1 --photos <測試路線1>  # 走道中間的照片
+python -m eval.image_only --set xiban1015 --perception vlm   # 2026-10-15 系辦 144 張，比對 Neo4j 的「系辦」
 ```
 
-- 照片和標註：`eval/data/0916_labels.csv`、`field1017_labels.csv`、`route1_labels.csv`；
-  照片路徑相對於 `--data-root`（預設 backend/，在 worktree 裡要指到主 checkout 的 backend/）。
-- 輸出 `eval/results/image_only_<set>.json` 與 `.md`：Top-1／Top-5／1 hop 內、誤差（m）、
-  信心 ≥0.3／≥0.6 的涵蓋率與命中率、正式閘門（品質／遮擋退件）、朝向、各階段耗時、失敗分類與
-  最常混淆節點對；`prod` 與 `dino_only`（物件、OCR、走道號碼權重 0）兩組並列。
+- 照片和標註：`eval/data/0916_labels.csv`、`field1017_labels.csv`、`route1_labels.csv`、`xiban1015_labels.csv`；
+  照片路徑相對於 `--data-root`（預設 backend/，在 worktree 裡要指到主 checkout 的 backend/），route1 例外：照片從 `--photos` 讀。
+- `--perception`：`gdino`（預設，本機 GroundingDINO＋EasyOCR）或 `vlm`（和部署的 `.env` 一樣由 VLM 讀物件與文字，
+  要付費，每張照片的回覆會快取）。`eval/results/` 裡 lab1019、xiban1015 的數字都是 `vlm`。
+  `--vlm-replay`（要配 `--perception vlm`）用快取的 VLM 回覆重跑目前的解析程式，不呼叫 VLM；環境設 `VLM_PASS3=0` 就不用第 3 次的回覆。
+- 其他參數：`--limit N`（只跑前 N 張）、`--no-annotate`（不畫標註圖）、`--cache`、`--out`。
+- 輸出 `eval/results/image_only_<set><後綴>.json` 與 `.md`（後綴：`_vlm`、`_replay`、`_nopass3`、`_limitN`）：
+  Top-1／Top-5／1 hop 內、誤差（m）、信心 ≥0.3／≥0.6 的涵蓋率與命中率、正式閘門（品質／遮擋退件）、朝向、
+  各階段耗時、失敗分類與最常混淆節點對；版本有 `prod`、`dino_only`（物件、OCR、走道號碼權重 0），
+  以及四個拆解版本 `no_objects`、`no_text`、`objects_only`、`text_only`。
 - 快取在 `output/eval/image_only/<set>/`：縮圖、`perception.json`（品質、OCR、GroundingDINO、
   遮擋、耗時）、`dino.json`（查詢照片 DINOv2 向量）、`refmap.pkl`（地圖快照）。只改融合 → 直接重跑；
   換 DINOv2 → `--reembed`；改偵測 → `--redetect`；離線 → `--map snapshot`。
@@ -68,18 +82,19 @@ python -m eval.image_only --set route1 --photos <測試路線1>  # 走道中間�
 ### 帶感測器、Sensor Lab 測試資料
 
 ```
-python -m eval.image_only --set lab1019 --data-root <主 checkout>/backend --sim
+python -m eval.image_only --set lab1019 --perception vlm --data-root <主 checkout>/backend --sim
 ```
 
 - `lab1019`：2026-10-19 三趟 Sensor Lab 測試（`output/eval_photos/1019_A7/1,2,3`），94 點（節點 65、中點 29），
   每點四方向，答案在 `eval/data/lab1019_labels.csv`（拍照前設的點位標記，更正寫在 note 欄）。
 - 同一批照片跑「不帶感測器」與「帶感測器」：
-  - `+replay`：`eval/sensorlab.py` 把手機的 `MapPositionEstimator`（Kotlin 版的單元測試已移植成
+  - `+replay`：`eval/sensorlab.py` 把手機的 `MapPositionEstimator`（`android` 分支的
+    `app/src/main/java/com/example/shopping/navigation/MapPositionEstimator.kt`；它的單元測試已移植成
     `eval/tests/test_sensorlab.py`）套在這趟的原始 PDR 上：入口對齊、每點拍完後用正確位置修正一次（oracle），
     送出的 `map_x/y`、`dist_since_fix`、`fix_node` 和導航模式相同。
   - `+simσ`（`--sim`）：手機位置 = 真實位置 + σ = 1、2、4、8 m 的高斯誤差。
 - 報表多了「照片類型 × 感測器」表、同一張照片帶／不帶感測器的配對比較、逐點計分（同一點四張只算一個樣本）。
-- `eval/results/image_only_<set>_photos.jsonl`：每張照片一行，含所有偵測物件、OCR 文字、每個參考節點的
+- `eval/results/image_only_<set><後綴>_photos.jsonl`（例如 `image_only_lab1019_vlm_photos.jsonl`）：每張照片一行，含所有偵測物件、OCR 文字、每個參考節點的
   DINOv2 cosine／物件／OCR／融合分數、走道號碼、伺服器影像證據、重播的手機輸入，以及每個版本的前五名與誤差。
 
 ### 計步有沒有在動（`step_check.py`）
@@ -89,12 +104,12 @@ python -m eval.step_check <Sensor Lab 匯出資料夾或 sensor_log.csv>...
 python -m eval.step_check --results eval/results/image_only_lab1019_vlm_photos.jsonl
 ```
 
-- Sensor Lab 紀錄：每 4 秒一段，|a| 有起伏（std ≥ 0.6 m/s²）又有步伐節奏（0.38–0.83 秒一步）的算「在走」，
+- Sensor Lab 紀錄：每 4 秒一段，|a| 有起伏（std ≥ 0.6 m/s²）又有步伐節奏（0.38–0.82 秒一步）的算「在走」，
   節奏也給出預期步數。列出「在走卻一步都沒算到」的段落（位置停住），和明顯站著（2 秒 std < 0.3）時算到的步數；
   App 的計數（total_steps）和手機內建計步器（step_detected）各一份。
 - 定位結果：相鄰兩個測試點距離 > 2 m、步數卻沒變的路段。
 - 2026-10-29：lab1019 有 6/86 段走了 2.4–5 m 卻 0 步；0819 那趟手持紀錄，內建計步器有 8/32 段在走卻沒算到，
-  舊的備援偵測整趟只抓到約 10 步。Android `sensor/StepDetection.kt` 改寫備援偵測後，把同一份紀錄重播進
+  舊的備援偵測整趟只抓到約 10 步。Android（`android` 分支）`sensor/StepDetection.kt` 改寫備援偵測後，把同一份紀錄重播進
   `PdrTracker`：在走卻 0 步的段落 7/32 → 0/32，總步數 143 → 197（依節奏估約 189 步在走的段落），站著時多算 0 步。
 
 ## 物件上下左右關係（`object_relations_eval.py`）
@@ -111,7 +126,7 @@ python -m eval.object_relations_eval --local-model sentence-transformers/paraphr
 
 2026-10-21 結果（`eval/results/object_relations_lab1019.md`，本機多語模型配對名稱）：基準 Top-1 44.7%；
 七種版本（上下＋左右、只上下、只左右、等權、九宮格粗略版＝現有 ADJACENT、四方向取最高、只重排前 5 名）
-交叉驗證 42.6–44.9%，沒有一種比基準好。2026-10-22 團隊決定開啟，`LOC_RELATION_WEIGHT` 預設 0.05（交叉驗證選到的權重）。
+交叉驗證 42.6–44.9%：最好的「四方向取最高」44.9% 只比基準多對 1 張（376 張裡），1 hop 內和誤差反而變差，沒有明顯變好。2026-10-22 團隊決定開啟，`LOC_RELATION_WEIGHT` 預設 0.05（交叉驗證選到的權重）。
 
 ## 物件關係兩個版本比較（`relations_compare.py`）
 
@@ -127,7 +142,21 @@ python -m eval.relations_compare --local-model sentence-transformers/paraphrase-
 方向修正 ×0.1 11.2%（加分越大越差）；手機 DINOv2 37.5% → 原樣 37.2%、方向修正 38.3%（3 張，屬於誤差範圍）。
 都沒有比不用關係好。2026-10-22 團隊決定開啟，`LOC_ADJACENT` 預設 1。
 
+## 其他評估腳本
+
+| 腳本 | 用途 |
+|---|---|
+| `weight_sweep.py` | 掃 `locate_fusion` 的 DINOv2 : 物件 : 文字權重（`results/weight_sweep_lab1019_*.md`） |
+| `fusion_sweep.py` | 在參考地圖上逐張留一，掃 DINOv2 : 感測器 : 格子的融合權重 |
+| `fusion_v2.py` | 用模擬走路情境評估 `loc_fusion` 的 v2 融合 |
+| `whatif.py` | 用 image_only 的快取只改一項輸入重跑（`results/whatif_lab1019_bilingual_labels.md`） |
+| `photo_report.py` | 逐張說明每張照片為什麼定位到那裡（`results/*_matches*.jsonl`） |
+| `dump_for_web.py` / `export_graph.py` | 產生定位比較網頁用的結果 JSON 與地圖節點、邊（`results/*_graph.json`） |
+| `dino_batch_localize.py` | 只用 DINOv2 批次定位（不需要 VLM 或 API 金鑰） |
+| `real_photos.py` / `route1_eval.py` | 真實走路照片（例如測試路線 1）的定位準確率；route1 比較 DINOv2 與走道吊牌 |
+| `report_figures.py` | 報告用的結果圖（`figures/`） |
+| `label_embeddings.py` | 物件名稱的 embedding 快取（和伺服器同一個服務與模型） |
+
 ## Before / after
 
-Keep a table in `docs/superpowers/specs/2026-05-25-navigation-accuracy-design.md`
-recording each metric before and after every change in the plan.
+每次改動前後各跑一次，結果寫在 `eval/results/`（每次執行都會產生自己的 `.md`），比較同一個指標。

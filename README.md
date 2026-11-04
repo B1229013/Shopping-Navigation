@@ -84,7 +84,7 @@ App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
 **導航**
 * **拍照定位**：融合 **DINOv2 影像相似度 ＋ 物件名稱（中英＋語意向量）＋ OCR 文字 ＋ 走道吊牌號碼 ＋ 手機感測器位置**，
   算出使用者在哪個節點、面向哪裡（權重 DINOv2 : 物件 : OCR = 1 : 0.1 : 0.3；走道吊牌只用在 `AISLE_SIGN_PLACES` 設定的店，預設 A7）。
-  在 lab1019 的 376 張測試照片上（單張照片、不帶感測器），Top-1 正確率 44.7%。
+  在 lab1019 的 376 張測試照片上（單張照片、不帶感測器），Top-1 正確率 47.6%（`VLM_PASS3=0` 時 48.1%）。
 * **路線規劃**：在 Neo4j 的走道拓樸圖上用 A* 規劃；多個商品用 Held-Karp 排出最短的拜訪順序，最後帶到收銀台和出口（地圖上有標的話）。
 * **逐步指引**：每張照片回傳 MOVE（繼續走）、ASK（提問）或 ARRIVED（到了）。到了要按「確認到達」；App 問「看到了嗎？」時用「有／沒有」按鈕回答。
 * **PDR 即時位置**：兩張照片之間用計步與方向沿著路線前進；Android 的內建計步器沒反應時，改用加速度計自己判斷步伐。
@@ -136,7 +136,7 @@ App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
 |------|------|
 | Python | 3.11 |
 | Neo4j Aura | 店家地圖存在這裡（導航必需） |
-| OpenAI 相容的 API 金鑰 | VLM 與物件名稱的語意向量 |
+| OpenAI 相容的 API 金鑰 | VLM 與物件名稱的語意向量（閘道沒有 `/embeddings` 時，語意向量另外設 `EMBEDDING_BASE_URL`／`EMBEDDING_API_KEY`） |
 | Android Studio ＋ JDK 17 | 只有要編譯 Android App 時（`android` 分支） |
 | Xcode | 只有要編譯 iOS App 時（`ios` 分支） |
 
@@ -166,6 +166,8 @@ App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
    NEO4J_USER=neo4j
    NEO4J_PASSWORD=your-password
    VLM_PASS3=0                         # 原因見 backend/README.md
+   # EMBEDDING_BASE_URL=https://api.openai.com/v1   # 選用：物件名稱語意向量改用 OpenAI（預設和上面同一個服務）
+   # EMBEDDING_API_KEY=your-openai-key
    ```
    **不要把金鑰 commit 進 git**，`.env` 已在 `.gitignore` 裡。
 4. 啟動
@@ -177,13 +179,14 @@ App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
 #### 2. Android App（`android` 分支）
 
 1. `git switch android`，用 Android Studio 開啟專案根目錄，連接手機後 Run。
-2. 後端網址：模擬器預設 `http://10.0.2.2:8000/`；實體手機用 `adb reverse tcp:8000 tcp:8000`，
-   或在 `.env` 設 `BACKEND_URL=http://<你電腦的 IP>:8000/`，也可以在 App 的設定頁切換。
+2. 後端網址：模擬器預設 `http://10.0.2.2:8000/`。實體手機在 `.env` 設 `BACKEND_URL=http://<你電腦的 IP>:8000/`，
+   也可以在 App 的設定頁切換；用 USB 時也可以 `adb reverse tcp:8000 tcp:8000`，再把網址設成 `http://127.0.0.1:8000/`。
 
 #### 3. iOS App（`ios` 分支）
 
 1. `git switch ios`，用 Xcode 開啟 `APPNAV_ios.xcodeproj`，選 iPhone 後 `Cmd+R`。
-2. 後端網址：target `APPNAV_ios` → Build Settings → `NAVIGATION_BACKEND_URL`，改成你跑後端那台電腦的 IP。
+2. 後端網址：target `APPNAV_ios` → Build Settings → `NAVIGATION_BACKEND_URL`，改成你跑後端那台電腦的 IP；
+   或在 App 的「設定」→「導航後端網址」直接改（優先於 Build Setting，不用重新編譯）。
 3. AI 功能的 OpenAI 金鑰：在 App 的「設定」→「OpenAI API 金鑰」輸入（只存在手機上）。**不要寫進程式碼。**
 
 <p align="right">(<a href="#readme-top">回到頂端</a>)</p>
@@ -216,17 +219,20 @@ App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
 ### 替新店建圖
 
 1. 用 Android App 的 **Sensor Lab** 在店裡走一圈拍照（同時錄 PDR）。
-2. `python build_map_v2_topomap.py`：把走路紀錄整理成建圖工作區。
-3. 開 `http://<後端>/topomap-builder`：排節點、接走道、疊平面圖。
-4. `python upload_map_v2.py` 上傳到 Neo4j，再跑 `rebuild_objects_v2.py`（偵測物件）和 `store_dino_v2.py`（DINOv2 向量）。
+2. `python build_map_v2_topomap.py --place "<店名>" walk1.zip walk2.zip …`：把走路紀錄整理成建圖工作區（也可以在建圖頁按「重建地圖」）。
+3. 開 `http://<後端>/topomap-builder?place=<店名>`：排節點、接走道、疊平面圖，按「確認並儲存」。
+4. `python upload_map_v2.py --place "<店名>"` 上傳到 Neo4j，再跑 `rebuild_objects_v2.py --place "<店名>"`（偵測物件）和
+   `store_dino_v2.py --place "<店名>"`（DINOv2 向量）。每一步都可以先加 `--dry-run` 檢查，細節見 [backend/README.md](backend/README.md)。
 
 ### 評估
 
 ```sh
 cd backend
-python -m eval.image_only --set lab1019            # 單張照片定位正確率
-python -m eval.step_check <Sensor Lab 匯出資料夾>    # 走路時計步有沒有停住
+python -m eval.image_only --set lab1019 --perception vlm --vlm-replay   # 單張照片定位正確率（用快取的 VLM 回覆，不呼叫 API）
+python -m eval.step_check <Sensor Lab 匯出資料夾>                        # 走路時計步有沒有停住
 ```
+
+測試照片（`output/eval_photos/1019_A7/`）和快取（`output/eval/image_only/`）都不在 git 裡；沒有的話可以先看 `backend/eval/results/` 裡已經跑好的結果。
 
 說明與結果見 [`backend/eval/README.md`](backend/eval/README.md)。
 
@@ -305,7 +311,7 @@ scripts/swift_logic_tests/run.sh
 - [x] 多商品路線：最短拜訪順序、收銀台、出口
 - [x] 物件之間的上下左右關係（實測沒有明顯變好，預設權重 0.05）
 - [x] Android 內建計步器沒反應時，用加速度計補判斷步伐
-- [ ] 拍照方向（指南針）輔助判斷：手機方向誤差還太大（中位數 56°），要先修好感測器方向
+- [ ] 拍照方向（指南針）輔助判斷：手機回報的方向誤差還太大，要先修好感測器方向
 - [ ] 分開統計「正常角度」與「非正常角度」照片的定位正確率
 - [ ] 正確、鄰近、錯誤的判斷標準與一致的測試報告
 

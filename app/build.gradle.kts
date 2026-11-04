@@ -18,7 +18,6 @@ fun secret(name: String): String =
 
 val mapsApiKey: String = secret("MAPS_API_KEY")
 val geminiApiKey: String = secret("GEMINI_API_KEY")
-val groqApiKey: String = secret("GROQ_API_KEY")
 val openaiApiKey: String = secret("OPENAI_API_KEY")
 // The app's own LLM calls (shopping-list classification, receipt OCR/parsing, AI screen) go through
 // the CGU gateway; OPENAI_API_KEY / OPENAI_BASE_URL in the same .env belong to the navigation backend.
@@ -42,7 +41,6 @@ android {
 
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
-        buildConfigField("String", "GROQ_API_KEY", "\"$groqApiKey\"")
         buildConfigField("String", "OPENAI_API_KEY", "\"$openaiApiKey\"")
         buildConfigField("String", "CGU_API_KEY", "\"$cguApiKey\"")
         buildConfigField("String", "CGU_BASE_URL", "\"$cguBaseUrl\"")
@@ -109,7 +107,7 @@ dependencies {
     // Places SDK for Android (New)
     implementation(libs.places)
 
-    // Gemini (Keep for now, but will use Groq instead)
+    // Gemini (Google AI SDK)
     implementation(libs.generativeai)
 
     testImplementation(libs.junit)

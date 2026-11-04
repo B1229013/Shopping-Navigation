@@ -51,7 +51,10 @@ class ConfirmArrivalRequest(BaseModel):
     # (which just resume the same MOVE search), this tells the backend the current
     # strategy keeps failing, so it should change approach (e.g. ask the user a
     # clarifying question about the item's appearance instead of just retrying).
-    kind: Literal["confirmed", "false_positive", "wrong_instance", "repeated_misidentification"]
+    # "confirmed_pdr": the phone's step tracking reached the current stop (no ARRIVED from the
+    # server to confirm) — the user confirms they are there.
+    kind: Literal["confirmed", "confirmed_pdr", "false_positive", "wrong_instance",
+                  "repeated_misidentification"]
 
 
 class TurnResponse(BaseModel):

@@ -549,6 +549,7 @@ def perceive_all_vlm(jobs, cache_path, srv, redetect=False):
         return text
 
     vlm._generate = recorder
+    skipped = []
     try:
         for i, (k, img) in enumerate(todo, 1):
             calls.clear()
@@ -563,11 +564,11 @@ def perceive_all_vlm(jobs, cache_path, srv, redetect=False):
                     print(f"  ⚠ {k}: rate limited — waiting 60s then retrying…", file=sys.stderr, flush=True)
                     time.sleep(60)
                     calls.clear()
-                    t0b = time.perf_counter()
                     perc, debug, w, h = _server_perceive(srv, img)
                     t2 = time.perf_counter()
                     if calls and all("error" in c for c in calls):
                         print(f"  ⚠ {k}: still failing after retry — skipping", file=sys.stderr, flush=True)
+                        skipped.append(k)
                         continue
                 else:
                     sys.exit(f"{k}: every VLM call failed ({err}) — stopped, nothing cached for it")
@@ -579,6 +580,9 @@ def perceive_all_vlm(jobs, cache_path, srv, redetect=False):
                   f"{len(calls)} calls {dict(kinds)}, {t2 - t1:.1f}s", file=sys.stderr, flush=True)
     finally:
         vlm._generate = real
+    if skipped:
+        sys.exit(f"{len(skipped)} photos still rate limited (e.g. {skipped[0]}) — the others are cached; "
+                 f"run the same command again to fill these in")
     return cache
 
 

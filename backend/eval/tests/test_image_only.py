@@ -96,3 +96,26 @@ def test_variant_restores_weights():
     with io.variant("text_only"):
         assert LF.W_V == LF.W_N == 0 and LF.W_O == before[2] and C.AISLE_SIGN_PLACES == before[3]
     assert (LF.W_V, LF.W_N, LF.W_O, C.AISLE_SIGN_PLACES) == before
+
+
+def test_photos_still_rate_limited_stop_the_run_with_a_clear_message(tmp_path):
+    # before: the photo was skipped and main() later crashed with KeyError on perc_all[k]
+    from unittest.mock import patch
+
+    import pytest
+    from server import config, photo_quality, vlm
+
+    def perceive(srv, img):          # one VLM call, as _server_perceive makes them
+        try:
+            vlm._generate("prompt")
+        except Exception:
+            pass
+        return None, {}, 0, 0
+
+    with patch.object(config, "OPENAI_API_KEY", "k"), \
+         patch.object(vlm, "_generate", side_effect=Exception("429 Too Many Requests")), \
+         patch.object(io, "_server_perceive", perceive), \
+         patch.object(photo_quality, "assess_image", return_value=None), \
+         patch.object(io.time, "sleep"), \
+         pytest.raises(SystemExit, match="run the same command again"):
+        io.perceive_all_vlm([("a", tmp_path / "a.jpg")], tmp_path / "cache.json", srv=None)

@@ -22,7 +22,7 @@ from PIL import Image
 from server import scene
 from server.config import (
     OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL,
-    VLM_TIMEOUT_S, VLM_ROUNDS,
+    VLM_TIMEOUT_S, VLM_ROUNDS, VLM_RATE_LIMIT_WAIT_S,
 )
 from server.models import VLMAction, VLMResponse
 from server.prompts import (
@@ -255,6 +255,14 @@ def warm_up() -> None:
         log.warning("VLM warm-up failed (continuing): %s", e)
 
 
+def _wait_if_rate_limited(e: Exception, attempt: int, attempts: int = 2) -> None:
+    """After an HTTP 429 (rate limited), wait VLM_RATE_LIMIT_WAIT_S before the next attempt —
+    never after the last one. The photo request runs on the server's event loop, so a long
+    sleep here freezes every session; long waits belong to batch tools (eval.image_only)."""
+    if attempt < attempts and "429" in str(e):
+        time.sleep(VLM_RATE_LIMIT_WAIT_S)
+
+
 def decide(
     image_path: str,
     goal: str,
@@ -298,8 +306,7 @@ def decide(
             text = _generate(prompt, image_b64=img_b64)
         except Exception as e:
             log.warning("VLM call failed (attempt %d/2): %s", attempt, e)
-            if "429" in str(e):
-                time.sleep(30 * attempt)
+            _wait_if_rate_limited(e, attempt)
             continue
         parsed = _parse(text)
         if parsed is not None:
@@ -463,8 +470,7 @@ def perceive(
             text = _generate(prompt, image_b64=img_b64, max_tokens=PERCEIVE_MAX_TOKENS)
         except Exception as e:
             log.warning("VLM perception call failed (attempt %d/2): %s", attempt, e)
-            if "429" in str(e):
-                time.sleep(30 * attempt)
+            _wait_if_rate_limited(e, attempt)
             continue
         parsed = _parse_perception(text, img_w, img_h)
         if parsed is not None:
@@ -521,8 +527,7 @@ def perceive_two_pass(
             text = _generate(prompt1, image_b64=img_b64)
         except Exception as e:
             log.warning("VLM pass1 failed (attempt %d/2): %s", attempt, e)
-            if "429" in str(e):
-                time.sleep(30 * attempt)
+            _wait_if_rate_limited(e, attempt)
             continue
         parsed = _parse_perception(text, img_w, img_h)
         if parsed is not None:
@@ -547,8 +552,7 @@ def perceive_two_pass(
             text = _generate(prompt2, image_b64=img_b64)
         except Exception as e:
             log.warning("VLM pass2 failed (attempt %d/2): %s", attempt, e)
-            if "429" in str(e):
-                time.sleep(30 * attempt)
+            _wait_if_rate_limited(e, attempt)
             continue
         parsed = _parse_perception(text, img_w, img_h)
         if parsed is not None:
@@ -643,8 +647,7 @@ def perceive_three_pass(
             text = _generate(prompt3, image_b64=img_b64)
         except Exception as e:
             log.warning("VLM pass3 failed (attempt %d/2): %s", attempt, e)
-            if "429" in str(e):
-                time.sleep(30 * attempt)
+            _wait_if_rate_limited(e, attempt)
             continue
         parsed = _parse_perception(text, img_w, img_h)
         if parsed is not None:

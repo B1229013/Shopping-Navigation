@@ -674,10 +674,11 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
             // ── Bottom: Action buttons ──
             if (vm.pendingArrival) {
                 if (vm.arrivalFromPdr) {
-                    // PDR proximity: simple confirm / dismiss
+                    // PDR proximity: simple confirm / dismiss. "confirmed_pdr": the server
+                    // never said ARRIVED, so a plain "confirmed" would be refused (409).
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            onClick = { vm.confirmArrival("confirmed") },
+                            onClick = { vm.confirmArrival("confirmed_pdr") },
                             enabled = !vm.isConfirming,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White),
                             shape = RoundedCornerShape(24.dp),

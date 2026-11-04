@@ -247,6 +247,9 @@ RERANK_GAP_THRESHOLD = float(os.environ.get("RERANK_GAP_THRESHOLD", "0.05"))
 
 # Timeouts
 VLM_TIMEOUT_S = int(os.environ.get("VLM_TIMEOUT_S", "120"))
+# Seconds to wait after an HTTP 429 (rate limited) before the one retry. Short: the photo
+# request runs on the server's event loop, so the wait stalls every session.
+VLM_RATE_LIMIT_WAIT_S = float(os.environ.get("VLM_RATE_LIMIT_WAIT_S", "5"))
 GOAL_DECOMPOSE_TIMEOUT_S = 30
 
 

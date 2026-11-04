@@ -2697,6 +2697,17 @@ def _handle_confirm(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
     s = _store.get(session_id)
     if s is None:
         raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
+    if req.kind == "confirmed_pdr":
+        # The phone's step tracking put the user at the current stop; the server never
+        # decided ARRIVED. Confirm the stop of the leg being walked.
+        if s.arrived:
+            raise HTTPException(status_code=409, detail={"error": "already_arrived", "detail": "session is complete"})
+        leg = _phase_leg(s)
+        s.goal_node = leg.to_node if leg else s.last_node_id
+        if s.goal_node is None:
+            raise HTTPException(status_code=409, detail={"error": "no_current_stop", "detail": "no stop to confirm"})
+        s.pending_arrival = True
+        req = ConfirmArrivalRequest(kind="confirmed")
     if not s.pending_arrival:
         raise HTTPException(status_code=409, detail={"error": "no_pending_arrival", "detail": "no ARRIVED to confirm"})
 

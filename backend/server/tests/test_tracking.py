@@ -28,3 +28,12 @@ def test_tracking_without_neo4j_still_answers():
 
 def test_tracking_unknown_session():
     assert _get(None, None).status_code == 404
+
+
+def test_tracking_page_escapes_what_the_phone_sent():
+    # goal / place / session ids come from whoever created the session: into innerHTML only via esc()
+    from pathlib import Path
+    html = (Path(srv.__file__).parent / "tracking.html").read_text(encoding="utf-8")
+    for field in ("data.goal", "data.place", "s.goal_objects", "s.id"):
+        assert "${" + field not in html
+    assert "onclick=" not in html

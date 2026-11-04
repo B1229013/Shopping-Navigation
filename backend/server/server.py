@@ -1817,7 +1817,7 @@ def _handle_start_session(req: StartSessionRequest) -> StartSessionResponse:
     north_offset = start_points.load_north_offset(selected_place, EDITOR_MAP_DIR) if selected_place else None
     return StartSessionResponse(
         session_id=s.id,
-        guidance="Upload a starting photo so I can see where you are.",
+        guidance="請拍一張照片，讓我知道你現在的位置。",
         goal_objects=goal_objects,
         place=selected_place,
         goal_node_id=_current_goal_node_id(s),

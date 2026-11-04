@@ -1,6 +1,10 @@
 """Pass-3 replies are parsed; localization gets 「中文 English」 names; label embeddings are
 fetched, cached on disk and used by the label similarity."""
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -42,6 +46,7 @@ def _fake_post(dim=8):
 
     def post(url, json=None, headers=None, timeout=None):
         calls.append(list(json["input"]))
+        post.last = (url, headers["Authorization"])
 
         class R:
             def raise_for_status(self):
@@ -58,7 +63,7 @@ def test_embeddings_are_fetched_persisted_and_reloaded(tmp_path, monkeypatch):
     from server import config
     path = tmp_path / "label_embeddings.npz"
     monkeypatch.setattr(config, "EMBEDDING_CACHE_PATH", str(path))
-    monkeypatch.setattr(config, "OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(config, "EMBEDDING_API_KEY", "test-key")
     monkeypatch.setattr(VL, "_emb_loaded", False)
     post, calls = _fake_post()
     monkeypatch.setattr(VL.requests, "post", post)
@@ -74,6 +79,28 @@ def test_embeddings_are_fetched_persisted_and_reloaded(tmp_path, monkeypatch):
     monkeypatch.setattr(VL, "_emb_loaded", False)
     assert VL._load_embedding_cache()
     assert set(VL._emb_cache) == {"地圖物件 a", "地圖物件 b"}
+
+
+def test_embeddings_go_to_the_configured_service(tmp_path, monkeypatch):
+    # A CGU-gateway key must go to the gateway, never to api.openai.com.
+    from server import config
+    monkeypatch.setattr(config, "EMBEDDING_CACHE_PATH", str(tmp_path / "e.npz"))
+    monkeypatch.setattr(config, "EMBEDDING_BASE_URL", "https://gateway.example/v1")
+    monkeypatch.setattr(config, "EMBEDDING_API_KEY", "gateway-key")
+    monkeypatch.setattr(VL, "_emb_loaded", False)
+    post, _ = _fake_post()
+    monkeypatch.setattr(VL.requests, "post", post)
+    assert VL.ensure_label_embeddings(["貨架"]) == 1
+    assert post.last == ("https://gateway.example/v1/embeddings", "Bearer gateway-key")
+
+
+def test_embedding_service_defaults_to_the_vlm_service():
+    env = {**os.environ, "OPENAI_BASE_URL": "https://gateway.example/v1/", "OPENAI_API_KEY": "gateway-key",
+           "EMBEDDING_BASE_URL": "", "EMBEDDING_API_KEY": ""}     # empty = unset, even if .env sets them
+    out = subprocess.run(
+        [sys.executable, "-c", "from server import config as c; print(c.EMBEDDING_BASE_URL, c.EMBEDDING_API_KEY)"],
+        cwd=Path(__file__).resolve().parents[2], env=env, capture_output=True, text=True, check=True).stdout
+    assert out.split() == ["https://gateway.example/v1", "gateway-key"]
 
 
 def test_hybrid_similarity_uses_the_vectors(monkeypatch):

@@ -34,6 +34,8 @@ class PathFollower {
         const val OFF_ROUTE_THRESHOLD_M = 6.0
         /** Within this distance of the end the target counts as reached. */
         const val ARRIVAL_RADIUS_M = 3.0
+        /** Progress may run this far ahead of the distance actually walked since the last update. */
+        const val PROGRESS_SLACK_M = 3.0
         /** A turn is "now" inside this distance, "soon" up to ANNOUNCE_TURN_M. */
         const val TURN_NOW_M = 3.0
         const val ANNOUNCE_TURN_M = 12.0
@@ -71,6 +73,8 @@ class PathFollower {
     private var cumulative: List<Double> = emptyList()
     private var turnsAlongRoute: List<Pair<Double, String>> = emptyList()
     private var segmentIndex = 0
+    private var lastProgress = 0.0
+    private var lastPos: Vec2? = null
     private var anchorMap = Vec2(0.0, 0.0)
     private var anchorPdr = Vec2(0.0, 0.0)
     var hasRoute = false; private set
@@ -90,6 +94,8 @@ class PathFollower {
             .map { (at, dir) -> cumulative[nearestVertexIndex(at, polyline)] to dir }
             .sortedBy { it.first }
         segmentIndex = 0
+        lastProgress = 0.0      // a new route starts where the user is
+        lastPos = null
         hasRoute = polyline.isNotEmpty()
         if (!keepAnchor && polyline.isNotEmpty()) anchor(polyline.first(), pdr)
     }
@@ -111,20 +117,26 @@ class PathFollower {
                 needsReplan = false, arrived = d <= ARRIVAL_RADIUS_M, lookAhead = polyline[0])
         }
 
-        // Project onto the route, looking only a few segments ahead so a route that
-        // doubles back on itself can't teleport the marker backwards.
+        // Project onto the route, looking only a few segments ahead, and never further
+        // along than the user can have walked since the last update: on a route that
+        // doubles back, the return leg can be nearer than the leg being walked.
         val lo = max(0, segmentIndex - 1)
         val hi = min(polyline.size - 2, segmentIndex + 3)
-        var bestSeg = lo
+        val maxProgress = lastProgress + (lastPos?.let { (pos - it).length } ?: 0.0) + PROGRESS_SLACK_M
+        var bestSeg = segmentIndex
         var bestT = 0.0
         var bestCross = Double.MAX_VALUE
         for (seg in lo..hi) {
             val (t, cross) = project(pos, polyline[seg], polyline[seg + 1])
+            val along = cumulative[seg] + t * (cumulative[seg + 1] - cumulative[seg])
+            if (along > maxProgress && seg != segmentIndex) continue
             if (cross < bestCross) { bestSeg = seg; bestT = t; bestCross = cross }
         }
         segmentIndex = bestSeg
         val segLen = cumulative[bestSeg + 1] - cumulative[bestSeg]
         val progress = cumulative[bestSeg] + bestT * segLen
+        lastProgress = progress
+        lastPos = pos
         val toTarget = (polyline.last() - pos).length
         val remaining = max(totalLengthM - progress, toTarget)
 

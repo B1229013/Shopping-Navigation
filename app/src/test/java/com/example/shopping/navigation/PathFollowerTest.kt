@@ -82,4 +82,32 @@ class PathFollowerTest {
         assertEquals(20.0, s.lookAhead!!.y, 1e-9)
         assertEquals(10.0, f.pointAt(100.0)!!.x, 1e-9)       // clamped to the end
     }
+
+    // U-shaped route: out along x = 0, back along x = 1.5 — the return leg is nearer than the
+    // leg being walked (0.7 m vs 0.8 m) but must not be jumped to (#3)
+    private val uRoute = listOf(Vec2(0.0, 0.0), Vec2(0.0, 10.0), Vec2(1.5, 10.0), Vec2(1.5, 0.0))
+
+    @Test
+    fun doesNotJumpToTheReturnLegOfAUTurn() {
+        val f = PathFollower().apply { setRoute(uRoute, emptyList(), Vec2(0.0, 0.0)) }
+        var s: FollowState? = null
+        for (i in 0..6) s = f.update(Vec2(0.8, i * 0.5), 0.0)
+        assertEquals(3.0, s!!.progressM, 1e-9)
+    }
+
+    @Test
+    fun walksAUTurnToTheEnd() {
+        val f = PathFollower().apply { setRoute(uRoute, emptyList(), Vec2(0.0, 0.0)) }
+        val walk = (0..20).map { Vec2(0.0, it * 0.5) } + listOf(Vec2(0.75, 10.0), Vec2(1.5, 10.0)) +
+            (19 downTo 0).map { Vec2(1.5, it * 0.5) }
+        var prev = 0.0
+        var s: FollowState? = null
+        for (p in walk) {
+            s = f.update(p, 0.0)
+            assertTrue("progress went back at $p", s!!.progressM >= prev - 1e-9)
+            prev = s.progressM
+        }
+        assertEquals(21.5, s!!.progressM, 1e-9)
+        assertTrue(s.arrived)
+    }
 }

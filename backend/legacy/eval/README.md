@@ -1,7 +1,14 @@
-# Navigation accuracy evaluation harness
+# Navigation accuracy evaluation harness（`/snav` 後端用）
 
-Measures whether changes to the navigation pipeline actually help. Run it before
-and after each change and compare the numbers.
+和 [`backend/eval/`](../../eval/README.md) 的動作準確率 harness 是同一套程式（`runner.py`、`metrics.py`、
+`replay.py`），差別只在 `import server...` 拿到哪個後端：在 `backend/legacy` 底下執行，量的是
+`backend/legacy/server/`（`/snav` 後端）；在 `backend/` 底下執行，量的是目前的導航後端。
+
+```
+cd backend/legacy
+python -m eval.runner …
+python -m pytest eval/tests -q
+```
 
 ## Metrics
 
@@ -9,12 +16,16 @@ and after each change and compare the numbers.
 |---|---|---|---|
 | `success_rate` | yes | predicted action == expected action | higher |
 | `false_arrival_rate` | yes | said ARRIVED on a non-goal frame — the worst failure | **lower** |
-| `direction_sanity` | no | MOVE guidance names a side where something was detected | higher |
-| `json_validity_rate` | no | VLM response parsed (no fallback) | higher |
+| `direction_sanity` | no | MOVE guidance names a side (左／右, or left／right) where something was detected (`left` also counts `far-left`) | higher |
+| `json_validity_rate` | no | VLM response parsed (not `vlm._FALLBACK`) | higher |
 | `arrival_corroboration_rate` | no | ARRIVED backed by a detection / OCR match | higher |
 
 Every metric is reported with its denominator count (`n=…`) so an empty sample is
 not mistaken for a perfect (or terrible) score.
+
+With `predict`, `arrival_corroboration_rate` is 100% by construction: `scene.verify_arrival`
+already downgrades every ARRIVED without evidence. It only means something for predictions
+files made some other way.
 
 ## Workflow
 
@@ -34,8 +45,12 @@ not mistaken for a perfect (or terrible) score.
     "detection_sides": ["left"], "json_valid": true, "arrival_corroborated": false}
    ```
 
-   (Live replay via `python -m eval.runner predict …` is enabled once the spatial
-   formatter and arrival verifier land — see `replay.py`.)
+   Or replay the photos through the pipeline (GroundingDINO perception, EasyOCR when
+   `OCR_ENABLED`, and the VLM decision — paid API calls; see `replay.py`):
+
+   ```
+   python -m eval.runner predict --photos path/to/photos --goal "find the milk" --out preds.json
+   ```
 
 3. **Score it:**
 
@@ -45,5 +60,4 @@ not mistaken for a perfect (or terrible) score.
 
 ## Before / after
 
-Keep a table in `docs/superpowers/specs/2026-05-25-navigation-accuracy-design.md`
-recording each metric before and after every change in the plan.
+每次改動前後各跑一次，比較同一個指標。

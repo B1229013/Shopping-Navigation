@@ -26,11 +26,20 @@ struct BudgetView: View {
     // Photo picker
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var showCamera = false
+    @State private var showManualAdd = false
+    @State private var editingExpense: ShoppingItem? = nil
 
     // API keys — Settings' @AppStorage overrides take priority over the Info.plist default
-    private let groqApiKey = UserDefaults.standard.string(forKey: "groqApiKey") ?? AppConfig.groqApiKey
-    private let paddleOcrApiUrl = UserDefaults.standard.string(forKey: "paddleOcrApiUrl") ?? AppConfig.paddleOcrApiUrl
-    private let paddleOcrToken = UserDefaults.standard.string(forKey: "paddleOcrToken") ?? AppConfig.paddleOcrToken
+    // Forced to the in-app key for the demo (ignore any stale value saved in Settings).
+    private var groqApiKey: String { AppConfig.groqApiKey }
+    private var paddleOcrApiUrl: String {
+        if let v = UserDefaults.standard.string(forKey: "paddleOcrApiUrl"), !v.isEmpty { return v }
+        return AppConfig.paddleOcrApiUrl
+    }
+    private var paddleOcrToken: String {
+        if let v = UserDefaults.standard.string(forKey: "paddleOcrToken"), !v.isEmpty { return v }
+        return AppConfig.paddleOcrToken
+    }
 
     private var purchasedItems: [ShoppingItem] { shoppingItems.filter { $0.isChecked } }
     private var totalSpent: Int { purchasedItems.reduce(0) { $0 + $1.price * $1.qty } }
@@ -64,7 +73,7 @@ struct BudgetView: View {
         }
         .sheet(isPresented: $showAddSheet) {
             addOptionsSheet
-                .presentationDetents([.height(200)])
+                .presentationDetents([.height(300)])
         }
         .photosPicker(isPresented: .constant(false), selection: $selectedPhotoItem, matching: .images)
         .onChange(of: selectedPhotoItem) { newItem in
@@ -76,6 +85,16 @@ struct BudgetView: View {
             }
         }
         .sheet(isPresented: $showBudgetDialog) { budgetSheet }
+        .sheet(isPresented: $showManualAdd) {
+            ManualExpenseSheet(existing: nil) { shoppingItems.append($0) }
+        }
+        .sheet(item: $editingExpense) { item in
+            ManualExpenseSheet(existing: item) { updated in
+                if let idx = shoppingItems.firstIndex(where: { $0.id == updated.id }) {
+                    shoppingItems[idx] = updated
+                }
+            }
+        }
     }
 
     // MARK: - Header
@@ -174,18 +193,16 @@ struct BudgetView: View {
             ForEach(dashboardCategories) { cat in
                 let catItems = purchasedItems.filter { $0.location == cat.catId }
                 let catSpent = catItems.reduce(0) { $0 + $1.price * $1.qty }
-                let catBudget = budgetValue > 0 ? budgetValue / dashboardCategories.count : 0
-                let catLeft = catBudget - catSpent
                 let isExpanded = expandedId == cat.catId
 
                 CategoryBudgetRow(
                     category: cat,
                     spent: catSpent,
-                    left: catLeft,
-                    budgetPerCategory: catBudget,
                     isExpanded: isExpanded,
                     items: catItems,
-                    onToggle: { withAnimation { expandedId = isExpanded ? nil : cat.catId } }
+                    onToggle: { withAnimation { expandedId = isExpanded ? nil : cat.catId } },
+                    onEditItem: { editingExpense = $0 },
+                    onDeleteItem: { item in shoppingItems.removeAll { $0.id == item.id } }
                 )
             }
         }
@@ -223,7 +240,7 @@ struct BudgetView: View {
                     ) {
                         withAnimation { expandedId = isExpanded ? nil : groupId }
                     } content: {
-                        ForEach(groupItems) { item in ItemDetailRow(item: item) }
+                        ForEach(groupItems) { item in ItemDetailRow(item: item, onEdit: { editingExpense = item }, onDelete: { shoppingItems.removeAll { $0.id == item.id } }) }
                     }
                 }
             }
@@ -258,7 +275,7 @@ struct BudgetView: View {
                     ) {
                         withAnimation { expandedId = isExpanded ? nil : dayKey }
                     } content: {
-                        ForEach(dayItems) { item in ItemDetailRow(item: item) }
+                        ForEach(dayItems) { item in ItemDetailRow(item: item, onEdit: { editingExpense = item }, onDelete: { shoppingItems.removeAll { $0.id == item.id } }) }
                     }
                 }
             }
@@ -293,7 +310,7 @@ struct BudgetView: View {
                     ) {
                         withAnimation { expandedId = isExpanded ? nil : monthKey }
                     } content: {
-                        ForEach(monthItems) { item in ItemDetailRow(item: item) }
+                        ForEach(monthItems) { item in ItemDetailRow(item: item, onEdit: { editingExpense = item }, onDelete: { shoppingItems.removeAll { $0.id == item.id } }) }
                     }
                 }
             }
@@ -312,6 +329,14 @@ struct BudgetView: View {
             } label: {
                 Label("掃描收據", systemImage: "camera.fill")
                     .frame(maxWidth: .infinity).padding().background(Color.appGold).foregroundColor(.black).cornerRadius(14)
+            }
+            Button {
+                showAddSheet = false
+                showManualAdd = true
+            } label: {
+                Label("手動輸入支出", systemImage: "square.and.pencil")
+                    .frame(maxWidth: .infinity).padding().background(Color.appSurface).foregroundColor(.appTextPrimary).cornerRadius(14)
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.appBorder, lineWidth: 1))
             }
             PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                 Label("從相簿選取", systemImage: "photo.on.rectangle")
@@ -332,11 +357,15 @@ struct BudgetView: View {
                     .font(.subheadline)
                     .foregroundColor(.appTextSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                TextField("預算金額", text: $tempBudget)
-                    .keyboardType(.numberPad)
-                    .padding(14)
-                    .background(Color.appBg)
-                    .cornerRadius(14)
+                ZStack(alignment: .leading) {
+                    if tempBudget.isEmpty { Text("預算金額").foregroundColor(.appTextSecondary).padding(14) }
+                    TextField("", text: $tempBudget)
+                        .keyboardType(.numberPad)
+                        .foregroundColor(.appTextPrimary)
+                        .padding(14)
+                }
+                .background(Color.appBg)
+                .cornerRadius(14)
                 Spacer()
             }
             .padding()
@@ -413,11 +442,30 @@ struct BudgetView: View {
 
         Task {
             do {
-                let rawText = try await OCRService.shared.recognizeText(from: image)
+                // Prefer PaddleOCR (better on mixed Chinese/English receipts) when configured;
+                // fall back to on-device Vision OCR when unset or on failure.
+                var rawText = ""
+                if !paddleOcrApiUrl.isEmpty {
+                    do {
+                        rawText = try await OCRService.shared.callPaddleOCR(image: image, apiUrl: paddleOcrApiUrl, accessToken: paddleOcrToken)
+                    } catch {
+                        rawText = (try? await OCRService.shared.recognizeText(from: image)) ?? ""
+                    }
+                } else {
+                    rawText = try await OCRService.shared.recognizeText(from: image)
+                }
                 guard !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     await MainActor.run {
                         isProcessing = false
-                        processingError = "未能從圖片中識別文字"
+                        processingError = "未能從圖片中識別文字，請確認照片清晰或稍後再試"
+                    }
+                    return
+                }
+
+                guard !groqApiKey.isEmpty else {
+                    await MainActor.run {
+                        isProcessing = false
+                        processingError = "尚未設定 Groq API Key，請到「設定」頁貼上後再掃描"
                     }
                     return
                 }
@@ -440,7 +488,8 @@ struct BudgetView: View {
                         purchasedAt: receiptMs,
                         storeName: entry.store,
                         location: normalizeCategory(line.cat, line.name),
-                        receiptId: receiptId
+                        receiptId: receiptId,
+                        source: "receipt"
                     )
                 }
 
@@ -484,6 +533,7 @@ struct DonutChartView: View {
                 }
             }
         }
+        .padding(8)
         .onAppear { withAnimation(.easeOut(duration: 0.9)) { animated = true } }
     }
 
@@ -510,17 +560,13 @@ struct DonutChartView: View {
 struct CategoryBudgetRow: View {
     let category: CategoryInfo
     let spent: Int
-    let left: Int
-    let budgetPerCategory: Int
     let isExpanded: Bool
     let items: [ShoppingItem]
     let onToggle: () -> Void
+    let onEditItem: (ShoppingItem) -> Void
+    let onDeleteItem: (ShoppingItem) -> Void
 
     private var catColor: Color { Color(hex: category.colorHex) }
-    private var progress: CGFloat {
-        guard budgetPerCategory > 0 else { return 0 }
-        return min(CGFloat(spent) / CGFloat(budgetPerCategory), 1.0)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -546,28 +592,15 @@ struct CategoryBudgetRow: View {
                     Text("$\(spent.formattedWithCommas)")
                         .font(.headline)
                         .foregroundColor(.appTextPrimary)
-                    Text(left >= 0 ? "$\(left) 剩餘" : "$\(-left) 超支")
+                    Text("\(items.count) 筆")
                         .font(.caption)
-                        .foregroundColor(left >= 0 ? .appSuccess : .appDanger)
+                        .foregroundColor(.appTextTertiary)
                 }
                 Image(systemName: "chevron.down")
                     .foregroundColor(.appTextTertiary)
                     .font(.caption)
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
                     .animation(.spring(response: 0.3), value: isExpanded)
-            }
-
-            if budgetPerCategory > 0 {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2).fill(Color.appBorder).frame(height: 4)
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(left >= 0 ? catColor : Color.appDanger)
-                            .frame(width: geo.size.width * progress, height: 4)
-                    }
-                }
-                .frame(height: 4)
-                .padding(.top, 10)
             }
 
             if isExpanded {
@@ -579,7 +612,9 @@ struct CategoryBudgetRow: View {
                             .foregroundColor(.appTextTertiary)
                             .padding(.vertical, 8)
                     } else {
-                        ForEach(items) { item in ItemDetailRow(item: item) }
+                        ForEach(items) { item in
+                            ItemDetailRow(item: item, onEdit: { onEditItem(item) }, onDelete: { onDeleteItem(item) })
+                        }
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -649,6 +684,8 @@ struct ExpandableCard<Content: View>: View {
 
 struct ItemDetailRow: View {
     let item: ShoppingItem
+    var onEdit: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
     private var catColor: Color {
         Color(hex: dashboardCategories.first(where: { $0.catId == item.location })?.colorHex ?? 0x94A3B8)
     }
@@ -664,6 +701,16 @@ struct ItemDetailRow: View {
             Text("$\((item.price * item.qty).formattedWithCommas)")
                 .font(.subheadline.bold())
                 .foregroundColor(.appTextPrimary)
+            if onEdit != nil || onDelete != nil {
+                Button { onEdit?() } label: {
+                    Image(systemName: "pencil").font(.caption2).foregroundColor(.appTextSecondary)
+                        .padding(5).background(Color.appBg).cornerRadius(6)
+                }
+                Button { onDelete?() } label: {
+                    Image(systemName: "trash").font(.caption2).foregroundColor(.appDanger)
+                        .padding(5).background(Color.appDanger.opacity(0.1)).cornerRadius(6)
+                }
+            }
         }
         .padding(.vertical, 5)
     }
@@ -683,6 +730,87 @@ struct EmptyBudgetState: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
+    }
+}
+
+// MARK: - Manual Expense Entry
+struct ManualExpenseSheet: View {
+    let existing: ShoppingItem?
+    let onSave: (ShoppingItem) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name: String
+    @State private var price: String
+    @State private var qty: String
+    @State private var store: String
+    @State private var date: Date
+    @State private var category: String
+
+    private let keepId: String
+    private let keepSource: String?
+    private let keepReceiptId: String?
+
+    init(existing: ShoppingItem?, onSave: @escaping (ShoppingItem) -> Void) {
+        self.existing = existing
+        self.onSave = onSave
+        self.keepId = existing?.id ?? UUID().uuidString
+        self.keepSource = existing?.source ?? "budget"
+        self.keepReceiptId = existing?.receiptId
+        _name = State(initialValue: existing?.name ?? "")
+        _price = State(initialValue: existing.map { String($0.price) } ?? "")
+        _qty = State(initialValue: existing.map { String($0.qty) } ?? "1")
+        _store = State(initialValue: existing?.storeName ?? "")
+        _date = State(initialValue: existing.map { Date.from(milliseconds: $0.purchasedAt ?? $0.createdAt) } ?? Date())
+        _category = State(initialValue: existing?.location ?? "Food")
+    }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("支出項目") {
+                    TextField("品項名稱", text: $name)
+                    HStack {
+                        Text("金額"); Spacer()
+                        TextField("0", text: $price).keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                    }
+                    HStack {
+                        Text("數量"); Spacer()
+                        TextField("1", text: $qty).keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                    }
+                    Picker("分類", selection: $category) {
+                        ForEach(dashboardCategories) { Text($0.name).tag($0.catId) }
+                    }
+                    TextField("門市（選填）", text: $store)
+                    DatePicker("日期", selection: $date, displayedComponents: .date)
+                }
+            }
+            .navigationTitle(existing == nil ? "手動新增支出" : "編輯支出")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("儲存") {
+                        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                        let ms = date.millisecondsSince1970
+                        let item = ShoppingItem(
+                            id: keepId,
+                            name: name,
+                            qty: Int(qty) ?? 1,
+                            price: Int(price) ?? 0,
+                            isChecked: true,
+                            createdAt: ms,
+                            purchasedAt: ms,
+                            storeName: store.isEmpty ? nil : store,
+                            location: category == "Other" ? normalizeCategory("", name) : category,
+                            receiptId: keepReceiptId,
+                            source: keepSource
+                        )
+                        onSave(item)
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+            }
+        }
     }
 }
 

@@ -1,5 +1,9 @@
 import SwiftUI
 
+enum ListRange: String, CaseIterable {
+    case day = "當日", week = "本週", month = "一個月"
+}
+
 struct ShoppingListView: View {
     @Binding var items: [ShoppingItem]
 
@@ -10,30 +14,65 @@ struct ShoppingListView: View {
     @State private var editName = ""
     @State private var editQty = ""
     @State private var editPrice = ""
-    @State private var showAddSection = false
+    @State private var range: ListRange = .day
+    @State private var newDueDate = Date()
+    @State private var editDueDate = Date()
 
     private let accent = Color.appAccent
     private let surface = Color.appSurface
 
+    // Pending items always shown first (newest first).
+    private var pendingItems: [ShoppingItem] {
+        let now = Date().millisecondsSince1970
+        return items.filter { !$0.isChecked && ($0.source ?? "list") == "list" }
+            .sorted { a, b in
+                let da = a.dueDate ?? now
+                let db = b.dueDate ?? now
+                if da != db { return da < db }   // nearer purchase date first
+                return a.createdAt > b.createdAt
+            }
+    }
+
+    // Purchased items within the selected time range (by purchase date, else added date).
+    private var purchasedItems: [ShoppingItem] {
+        items.filter { $0.isChecked && ($0.source ?? "list") == "list" }
+            .filter { inRange(Date.from(milliseconds: $0.purchasedAt ?? $0.createdAt)) }
+            .sorted { ($0.purchasedAt ?? $0.createdAt) > ($1.purchasedAt ?? $1.createdAt) }
+    }
+
+    private func inRange(_ d: Date) -> Bool {
+        switch range {
+        case .day: return d.isToday
+        case .week: return d.isThisWeek
+        case .month: return d.isThisMonth
+        }
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                // Add item panel
-                addPanel
-                    .padding(.horizontal, 20)
+                addPanel.padding(.horizontal, 20)
 
-                // Item list
                 if items.isEmpty {
                     emptyState
                 } else {
-                    ForEach(items) { item in
-                        if editingId == item.id {
-                            editRow(item: item)
-                                .padding(.horizontal, 20)
-                        } else {
-                            itemRow(item: item)
-                                .padding(.horizontal, 20)
-                        }
+                    // 待購（永遠置頂）
+                    if !pendingItems.isEmpty {
+                        sectionHeader("待購", count: pendingItems.count).padding(.horizontal, 20)
+                        ForEach(pendingItems) { item in rowOrEdit(item) }
+                    }
+
+                    // 已購（依時間區間）
+                    rangeToggle.padding(.horizontal, 20).padding(.top, 4)
+                    sectionHeader("已購 · \(range.rawValue)", count: purchasedItems.count).padding(.horizontal, 20)
+                    if purchasedItems.isEmpty {
+                        Text("此區間沒有已購商品")
+                            .font(.caption)
+                            .foregroundColor(.appTextTertiary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    } else {
+                        ForEach(purchasedItems) { item in rowOrEdit(item) }
                     }
                 }
             }
@@ -44,36 +83,63 @@ struct ShoppingListView: View {
         .background(Color.appBg)
     }
 
+    @ViewBuilder
+    private func rowOrEdit(_ item: ShoppingItem) -> some View {
+        if editingId == item.id {
+            editRow(item: item).padding(.horizontal, 20)
+        } else {
+            itemRow(item: item).padding(.horizontal, 20)
+        }
+    }
+
+    private func sectionHeader(_ title: String, count: Int) -> some View {
+        HStack {
+            Text(title).font(.subheadline.bold()).foregroundColor(.appTextSecondary)
+            Spacer()
+            Text("\(count)").font(.caption).foregroundColor(.appTextTertiary)
+        }
+    }
+
+    private var rangeToggle: some View {
+        Picker("", selection: $range) {
+            ForEach(ListRange.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+    }
+
     // MARK: - Add Panel
     private var addPanel: some View {
         VStack(spacing: 10) {
             HStack {
-                TextField("商品名稱", text: $newName)
-                    .foregroundColor(.appTextPrimary)
-                    .padding(10)
-                    .background(Color.appBg)
-                    .cornerRadius(10)
-                    .frame(maxWidth: .infinity)
-                TextField("價格", text: $newPrice)
-                    .keyboardType(.numberPad)
-                    .foregroundColor(.appTextPrimary)
-                    .padding(10)
-                    .background(Color.appBg)
-                    .cornerRadius(10)
-                    .frame(width: 80)
-                TextField("數量", text: $newQty)
-                    .keyboardType(.numberPad)
-                    .foregroundColor(.appTextPrimary)
-                    .padding(10)
-                    .background(Color.appBg)
-                    .cornerRadius(10)
-                    .frame(width: 60)
+                ZStack(alignment: .leading) {
+                    if newName.isEmpty { Text("商品名稱").foregroundColor(.appTextSecondary) }
+                    TextField("", text: $newName).foregroundColor(.appTextPrimary)
+                }
+                .padding(10).background(Color.appBg).cornerRadius(10).frame(maxWidth: .infinity)
+
+                ZStack(alignment: .leading) {
+                    if newPrice.isEmpty { Text("價格").foregroundColor(.appTextSecondary) }
+                    TextField("", text: $newPrice).keyboardType(.numberPad).foregroundColor(.appTextPrimary)
+                }
+                .padding(10).background(Color.appBg).cornerRadius(10).frame(width: 80)
+
+                ZStack(alignment: .leading) {
+                    if newQty.isEmpty { Text("數量").foregroundColor(.appTextSecondary) }
+                    TextField("", text: $newQty).keyboardType(.numberPad).foregroundColor(.appTextPrimary)
+                }
+                .padding(10).background(Color.appBg).cornerRadius(10).frame(width: 60)
             }
+            HStack {
+                Text("購買日期").font(.subheadline).foregroundColor(.appTextSecondary)
+                Spacer()
+                DatePicker("", selection: $newDueDate, displayedComponents: .date)
+                    .labelsHidden()
+            }
+            .padding(.vertical, 2)
             Button(action: addItem) {
                 HStack {
                     Image(systemName: "plus.circle.fill")
-                    Text("新增商品")
-                        .fontWeight(.semibold)
+                    Text("新增商品").fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
@@ -105,11 +171,9 @@ struct ShoppingListView: View {
                     .strikethrough(item.isChecked)
                     .foregroundColor(item.isChecked ? .appTextTertiary : .appTextPrimary)
                 HStack(spacing: 6) {
-                    if let loc = item.location {
-                        Text(loc)
-                            .font(.caption2)
-                            .foregroundColor(.appTextTertiary)
-                    }
+                    Text(dateLabel(item))
+                        .font(.caption2)
+                        .foregroundColor((!item.isChecked && item.dueDate != nil) ? .appAccent : .appTextTertiary)
                     Text("×\(item.qty)")
                         .font(.caption)
                         .foregroundColor(.appTextSecondary)
@@ -157,37 +221,28 @@ struct ShoppingListView: View {
             HStack(spacing: 8) {
                 TextField("名稱", text: $editName)
                     .foregroundColor(.appTextPrimary)
-                    .padding(10)
-                    .background(Color.appBg)
-                    .cornerRadius(10)
+                    .padding(10).background(Color.appBg).cornerRadius(10)
                 TextField("價格", text: $editPrice)
                     .keyboardType(.numberPad)
                     .foregroundColor(.appTextPrimary)
-                    .padding(10)
-                    .background(Color.appBg)
-                    .cornerRadius(10)
-                    .frame(width: 80)
+                    .padding(10).background(Color.appBg).cornerRadius(10).frame(width: 80)
                 TextField("數量", text: $editQty)
                     .keyboardType(.numberPad)
                     .foregroundColor(.appTextPrimary)
-                    .padding(10)
-                    .background(Color.appBg)
-                    .cornerRadius(10)
-                    .frame(width: 60)
+                    .padding(10).background(Color.appBg).cornerRadius(10).frame(width: 60)
+            }
+            HStack {
+                Text("購買日期").font(.subheadline).foregroundColor(.appTextSecondary)
+                Spacer()
+                DatePicker("", selection: $editDueDate, displayedComponents: .date).labelsHidden()
             }
             HStack(spacing: 8) {
                 Button("取消") { editingId = nil }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Color.appBg)
-                    .foregroundColor(.appTextSecondary)
-                    .cornerRadius(10)
+                    .frame(maxWidth: .infinity).padding(.vertical, 10)
+                    .background(Color.appBg).foregroundColor(.appTextSecondary).cornerRadius(10)
                 Button("儲存") { saveEdit(id: item.id) }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(accent)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
+                    .frame(maxWidth: .infinity).padding(.vertical, 10)
+                    .background(accent).foregroundColor(.white).cornerRadius(10)
             }
         }
         .padding(14)
@@ -201,17 +256,22 @@ struct ShoppingListView: View {
             Image(systemName: "cart")
                 .font(.system(size: 48))
                 .foregroundColor(Color.appBorder)
-            Text("購物清單是空的")
-                .foregroundColor(.appTextTertiary)
+            Text("購物清單是空的").foregroundColor(.appTextTertiary)
             Text("在上方輸入商品來新增")
-                .font(.caption)
-                .foregroundColor(.appTextTertiary)
+                .font(.caption).foregroundColor(.appTextTertiary)
         }
         .padding(.top, 60)
         .frame(maxWidth: .infinity)
     }
 
     // MARK: - Actions
+    private func dateLabel(_ item: ShoppingItem) -> String {
+        if !item.isChecked, let due = item.dueDate {
+            return "預計 " + Date.from(milliseconds: due).shortDateString
+        }
+        return Date.from(milliseconds: item.purchasedAt ?? item.createdAt).shortDateString
+    }
+
     private func addItem() {
         let trimmed = newName.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
@@ -219,10 +279,25 @@ struct ShoppingListView: View {
             name: trimmed,
             qty: Int(newQty) ?? 1,
             price: Int(newPrice) ?? 0,
+            dueDate: newDueDate.millisecondsSince1970,
             location: guessCategory(from: trimmed)
         )
         withAnimation { items.insert(item, at: 0) }
+        refineCategory(id: item.id, name: trimmed)
         newName = ""; newQty = "1"; newPrice = ""
+        newDueDate = Date()
+    }
+
+    /// If keyword matching couldn't place the item (Other), ask the LLM to classify it.
+    private func refineCategory(id: String, name: String) {
+        guard guessCategory(from: name) == "Other" else { return }
+        Task {
+            if let cat = try? await GroqService.shared.classifyItem(name: name, apiKey: AppConfig.groqApiKey), cat != "Other" {
+                await MainActor.run {
+                    if let idx = items.firstIndex(where: { $0.id == id }) { items[idx].location = cat }
+                }
+            }
+        }
     }
 
     private func toggleCheck(_ item: ShoppingItem) {
@@ -243,6 +318,7 @@ struct ShoppingListView: View {
         editName = item.name
         editQty = "\(item.qty)"
         editPrice = "\(item.price)"
+        editDueDate = Date.from(milliseconds: item.dueDate ?? item.createdAt)
     }
 
     private func saveEdit(id: String) {
@@ -251,7 +327,9 @@ struct ShoppingListView: View {
             items[idx].qty = Int(editQty) ?? 1
             items[idx].price = Int(editPrice) ?? 0
             items[idx].location = guessCategory(from: editName)
+            items[idx].dueDate = editDueDate.millisecondsSince1970
         }
+        refineCategory(id: id, name: editName)
         editingId = nil
     }
 }

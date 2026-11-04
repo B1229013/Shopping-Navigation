@@ -118,9 +118,13 @@ struct RouteMapView: View {
             let sx = (size.width - 2 * pad) / max(bounds.width, 1)
             let sy = (size.height - 2 * pad) / max(bounds.height, 1)
             let scale = min(sx, sy)
+            let contentW = bounds.width * scale
+            let contentH = bounds.height * scale
+            let offsetX = (size.width - 2 * pad - contentW) / 2
+            let offsetY = (size.height - 2 * pad - contentH) / 2
             func toScreen(_ p: CGPoint) -> CGPoint {
-                CGPoint(x: pad + (p.x - bounds.minX) * scale,
-                        y: size.height - pad - (p.y - bounds.minY) * scale)
+                CGPoint(x: pad + offsetX + (p.x - bounds.minX) * scale,
+                        y: size.height - pad - offsetY - (p.y - bounds.minY) * scale)
             }
 
             // walkable edges + waypoints

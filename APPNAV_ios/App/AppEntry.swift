@@ -38,6 +38,9 @@ struct RootView: View {
                 .transition(.opacity)
             }
         }
+        .onTapGesture {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
         .onReceive(auth.$isLoggedIn) { loggedIn in
             if !loggedIn { isLoggedIn = false }
         }

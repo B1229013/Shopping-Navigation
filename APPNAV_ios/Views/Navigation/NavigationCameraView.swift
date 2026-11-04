@@ -99,7 +99,7 @@ struct NavigationCameraView: View {
                 }
                 Spacer()
                 if let retakeHint {
-                    Text("📷 \(retakeHint)")
+                    Text(retakeHint)
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
@@ -107,7 +107,7 @@ struct NavigationCameraView: View {
                         .background(Color.orange.opacity(0.9))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else if let secondPhotoHint {
-                    Text("📷 \(secondPhotoHint)")
+                    Text(secondPhotoHint)
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
@@ -116,7 +116,7 @@ struct NavigationCameraView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else if !hasArrived, !pendingArrival, pendingQuestion == nil, sensorSession.mapPosition == nil {
                     Button(action: startAtEntrance) {
-                        Text("📍 我在入口，從這裡開始")
+                        Text("我在入口，從這裡開始")
                             .font(.caption.weight(.semibold))
                             .foregroundColor(.white)
                             .padding(.horizontal, 12)
@@ -126,15 +126,7 @@ struct NavigationCameraView: View {
                     }
                 } else if !hasArrived, !pendingArrival, pendingQuestion == nil,
                           sensorSession.distanceSinceFix >= Self.photoReminderM {
-                    Text("📍 已走 \(Int(sensorSession.distanceSinceFix)) m，拍一張照片校正位置")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.55))
-                        .clipShape(Capsule())
-                } else if !hasArrived, !pendingArrival, pendingQuestion == nil, !isPhoneUpright {
-                    Text("📱 手機請拿直、對準走道前方")
+                    Text("已走 \(Int(sensorSession.distanceSinceFix)) m，拍一張照片校正位置")
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
@@ -164,6 +156,10 @@ struct NavigationCameraView: View {
         }
         .onChange(of: isPhoneUpright) { upright in
             if upright, retakeHint == PhotoQualityChecker.tiltHint { retakeHint = nil }
+        }
+        .onReceive(routeModel.$route) { route in
+            guard let route, targetNodeId == nil, let neoNid = route.target.neoNid else { return }
+            targetNodeId = neoNid
         }
         .sheet(isPresented: $showPhotoGuide) {
             PhotoGuideView { showPhotoGuide = false; photoGuideSeen = true }
@@ -228,7 +224,7 @@ struct NavigationCameraView: View {
     private var statusTitle: String {
         if hasArrived { return navPhase == "done" ? "導航完成！" : "已到達！" }
         if pendingArrival { return "請確認是否到達" }
-        return "導航中"
+        return "尋找目標中"
     }
 
     private var statusCard: some View {
@@ -260,7 +256,7 @@ struct NavigationCameraView: View {
                 // The localization result (with match confidence) is only shown here —
                 // the guidance text no longer repeats it.
                 if let currentLocation {
-                    Text("📍 \(currentLocation)")
+                    Text(currentLocation)
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.7))
                         .lineLimit(2)
@@ -350,9 +346,9 @@ struct NavigationCameraView: View {
     @ViewBuilder
     private var routePanel: some View {
         if let route = routeModel.route {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(spacing: 6) {
                 HStack {
-                    Text("🧭 \(routeModel.state?.prompt ?? "定位中…")")
+                    Text(routeModel.state?.prompt ?? "定位中…")
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.white)
                     Spacer()
@@ -363,14 +359,16 @@ struct NavigationCameraView: View {
                     }
                 }
                 RouteMapView(route: route, state: routeModel.state)
+                    .frame(maxWidth: .infinity)
                     .frame(height: 150)
                     .onTapGesture { showFullMap = true }
             }
             .padding(10)
             .background(Color.cyan.opacity(0.18))
             .clipShape(RoundedRectangle(cornerRadius: 14))
+            .frame(maxWidth: .infinity)
         } else if let msg = routeModel.statusMessage {
-            Text("🗺 \(msg)")
+            Text(msg)
                 .font(.caption)
                 .foregroundColor(.white.opacity(0.8))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -390,7 +388,7 @@ struct NavigationCameraView: View {
                     .foregroundColor(.white)
 
                 if let mapInstruction {
-                    Text("🗺 \(mapInstruction)")
+                    Text(mapInstruction)
                         .font(.subheadline.weight(.medium))
                         .foregroundColor(.cyan)
                 }
@@ -505,20 +503,96 @@ struct NavigationCameraView: View {
 
     // MARK: - AR arrow computed properties
 
-    /// Bearing the arrow should display.
-    /// Before localization (no target node): points north (compensates for phone heading).
-    /// After localization: points toward the target node.
+    /// Look-ahead distance on the polyline — the arrow points toward this far ahead.
+    private static let arrowLookAheadM = 5.0
+
+    /// Bearing the arrow should display relative to the phone's heading.
+    /// Gray (not localized): fixed pointing up (returns 0).
+    /// Blue (localized): points along the route polyline toward the next segment.
     private var arrowBearing: Double {
-        guard let nodeId = targetNodeId,
-              let targetCoord = NodeCoordinateStore.shared.coordinate(for: nodeId),
-              let pos = sensorSession.mapPosition else {
-            return 0 // Not calibrated — fixed pointing up
+        guard sensorSession.mapPosition != nil else { return 0 }
+        let pos = sensorSession.mapPosition!
+
+        let target: (x: Double, y: Double)
+        if let route = routeModel.route, route.polyline.count >= 2 {
+            target = Self.lookAhead(on: route.polyline, from: pos, distance: Self.arrowLookAheadM)
+        } else if let nodeId = targetNodeId,
+                  let coord = NodeCoordinateStore.shared.coordinate(for: nodeId) {
+            target = coord
+        } else {
+            return 0
         }
-        let bearing = NodeCoordinateStore.shared.bearing(from: pos, to: targetCoord)
+
+        let dx = target.x - pos.x
+        let dy = target.y - pos.y
+        guard dx * dx + dy * dy > 0.25 else { return 0 }
+        var bearing = atan2(dx, dy) * 180.0 / .pi
+        if bearing < 0 { bearing += 360 }
         var relative = bearing - sensorSession.mapHeading
         while relative > 180 { relative -= 360 }
         while relative < -180 { relative += 360 }
         return relative
+    }
+
+    /// Find a point on the polyline that is `distance` metres ahead of the nearest
+    /// projection of `from` onto the polyline. Returns the final point when the
+    /// remaining polyline is shorter than `distance`.
+    private static func lookAhead(on polyline: [[Double]],
+                                  from pos: (x: Double, y: Double),
+                                  distance: Double) -> (x: Double, y: Double) {
+        // 1. Find nearest segment and project pos onto it
+        var bestSeg = 0
+        var bestDist = Double.infinity
+        var bestT = 0.0
+        for i in 0..<(polyline.count - 1) {
+            let ax = polyline[i][0],   ay = polyline[i][1]
+            let bx = polyline[i+1][0], by = polyline[i+1][1]
+            let (t, d) = projectOnSegment(px: pos.x, py: pos.y, ax: ax, ay: ay, bx: bx, by: by)
+            if d < bestDist { bestDist = d; bestSeg = i; bestT = t }
+        }
+
+        // 2. Walk forward from projection point along the polyline
+        let ax = polyline[bestSeg][0],   ay = polyline[bestSeg][1]
+        let bx = polyline[bestSeg+1][0], by = polyline[bestSeg+1][1]
+        let projX = ax + bestT * (bx - ax)
+        let projY = ay + bestT * (by - ay)
+
+        var remaining = distance
+        // Distance from projection to end of current segment
+        let toEnd = hypot(bx - projX, by - projY)
+        if toEnd >= remaining && toEnd > 1e-6 {
+            let r = remaining / toEnd
+            return (projX + r * (bx - projX), projY + r * (by - projY))
+        }
+        remaining -= toEnd
+
+        // Walk through subsequent segments
+        for i in (bestSeg + 1)..<(polyline.count - 1) {
+            let sx = polyline[i][0],   sy = polyline[i][1]
+            let ex = polyline[i+1][0], ey = polyline[i+1][1]
+            let segLen = hypot(ex - sx, ey - sy)
+            if segLen >= remaining && segLen > 1e-6 {
+                let r = remaining / segLen
+                return (sx + r * (ex - sx), sy + r * (ey - sy))
+            }
+            remaining -= segLen
+        }
+        // Reached the end — point to the last polyline point
+        let last = polyline[polyline.count - 1]
+        return (last[0], last[1])
+    }
+
+    /// Project point (px,py) onto segment (ax,ay)→(bx,by).
+    /// Returns (t, distance) where t ∈ [0,1] is the parameter along the segment.
+    private static func projectOnSegment(px: Double, py: Double,
+                                         ax: Double, ay: Double,
+                                         bx: Double, by: Double) -> (t: Double, dist: Double) {
+        let dx = bx - ax, dy = by - ay
+        let lenSq = dx * dx + dy * dy
+        guard lenSq > 1e-10 else { return (0, hypot(px - ax, py - ay)) }
+        let t = max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq))
+        let projX = ax + t * dx, projY = ay + t * dy
+        return (t, hypot(px - projX, py - projY))
     }
 
     /// On-device DINOv2 result for one photo: the top-K nodes the server fuses
@@ -550,6 +624,10 @@ struct NavigationCameraView: View {
     private func startAtEntrance() {
         let entrance = NodeCoordinateStore.shared.nearestNode(to: (0, 0))
         sensorSession.startAtEntrance(nodeId: entrance?.nodeId)
+        // Set arrow target from the loaded route so the arrow points toward the goal
+        if targetNodeId == nil, let neoNid = routeModel.route?.target.neoNid {
+            targetNodeId = neoNid
+        }
     }
 
     private var isPhoneUpright: Bool {
@@ -607,6 +685,7 @@ struct NavigationCameraView: View {
         // When the server is unsure and asks for a second photo, wait for the combined answer.
         var fixNote = response.secondPhotoHint != nil ? "，等第二張照片再校正" : ""
         var fixAccepted = false
+        print("[applyTurn] correctedNodeId=\(response.correctedNodeId as Any) conf=\(response.correctedConfidence as Any) rawAtCapture=\(rawAtCapture as Any) retakeHint=\(response.retakeHint as Any) secondPhotoHint=\(response.secondPhotoHint as Any)")
         if response.retakeHint == nil, response.secondPhotoHint == nil,
            let locNodeId = response.correctedNodeId, let raw = rawAtCapture {
             let node: (x: Double, y: Double)?
@@ -616,8 +695,10 @@ struct NavigationCameraView: View {
                 node = NodeCoordinateStore.shared.coordinate(for: locNodeId)
             }
             if let node {
-                switch sensorSession.applyPhotoFix(node: node, nodeId: locNodeId,
-                                                   confidence: response.correctedConfidence ?? 0, raw: raw) {
+                let fixResult = sensorSession.applyPhotoFix(node: node, nodeId: locNodeId,
+                                                   confidence: response.correctedConfidence ?? 0, raw: raw)
+                print("[applyTurn] fixResult=\(fixResult) node=\(node) mapPosition=\(sensorSession.mapPosition as Any)")
+                switch fixResult {
                 case .accepted:
                     fixAccepted = true
                     // move the route-map dot now, not on the next step

@@ -36,6 +36,7 @@ struct MainContainerView: View {
             .tag(5)
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        .onAppear { KeyboardDismisser.install() }
         // safeAreaInset measures each bar's own height and reserves exactly that much
         // space above/below the TabView content — it automatically adapts to every
         // device's notch/Dynamic Island/home-indicator, so no magic-number padding

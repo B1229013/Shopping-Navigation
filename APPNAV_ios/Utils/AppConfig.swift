@@ -3,7 +3,18 @@ import Foundation
 // Read API keys from Info.plist (set via Xcode build settings or xcconfig)
 enum AppConfig {
     static var groqApiKey: String {
-        Bundle.main.object(forInfoDictionaryKey: "GROQ_API_KEY") as? String ?? ""
+        // Forced OpenAI key for the demo (ignore build settings / Info.plist). Rotate/remove before any public push.
+        return "REDACTED-OPENAI-KEY"
+    }
+
+    /// OpenAI-compatible chat-completions endpoint for every LLM call (CGU gateway).
+    static var llmBaseURL: String {
+        "https://api.openai.com/v1/chat/completions"
+    }
+
+    /// Model id on the gateway. Change just this line to switch models.
+    static var llmModel: String {
+        "gpt-5.4-mini"
     }
 
     static var paddleOcrApiUrl: String {

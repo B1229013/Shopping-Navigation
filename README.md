@@ -77,6 +77,10 @@ Shopping Navigation 讓使用者**只要拍照**就能導航：
 
 App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。Android 與 iOS 兩個 App 共用同一個後端。
 
+> **App 分成 2 個分支**：[`android`](https://github.com/B1229013/Shopping-Navigation/tree/android)（Android App）和
+> [`ios`](https://github.com/B1229013/Shopping-Navigation/tree/ios)（iOS App），兩個分支都附上同一份後端；
+> `main` 只有後端與文件。詳見[分支說明](#分支說明)。
+
 <p align="right">(<a href="#readme-top">回到頂端</a>)</p>
 
 ### 主要功能
@@ -359,8 +363,7 @@ iOS 前端（`APPNAV_ios/`）只在 `ios` 修改，Android 前端（`app/`）只
 ## 聯絡方式
 
 專案成員（GitHub）：[@B1229013](https://github.com/B1229013)、[@B1229023](https://github.com/B1229023)、
-[@B1222017](https://github.com/B1222017)、[@B1229020](https://github.com/B1229020)、
-[@kathchen-art](https://github.com/kathchen-art)、[@selfable01](https://github.com/selfable01)
+[@B1222017](https://github.com/B1222017)、[@B1229020](https://github.com/B1229020)
 
 專案連結：[https://github.com/B1229013/Shopping-Navigation](https://github.com/B1229013/Shopping-Navigation)
 

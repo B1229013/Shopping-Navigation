@@ -3,8 +3,8 @@ predictions file the harness can score.
 
 Each photo is evaluated as an independent first-turn decision (no topomap
 carry-over) so the score reflects per-frame perception + reasoning quality.
-Requires the model stack (GroundingDINO, EasyOCR, Ollama) — run in the project
-env, not the pure-Python interpreter.
+Requires the model stack (GroundingDINO, EasyOCR when OCR_ENABLED, and the VLM API)
+— run in the project env, not the pure-Python interpreter.
 """
 from __future__ import annotations
 
@@ -17,7 +17,12 @@ from PIL import Image
 log = logging.getLogger(__name__)
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
-_FALLBACK_MARKER = "I had trouble understanding"
+
+
+def _parsed(resp) -> bool:
+    """False when decide() gave up on the model's reply and returned vlm._FALLBACK."""
+    from server.vlm import _FALLBACK
+    return resp.guidance != _FALLBACK.guidance
 
 
 def predict_over_photos(photo_dir: str, goal: str) -> list[dict]:
@@ -75,7 +80,7 @@ def predict_over_photos(photo_dir: str, goal: str) -> list[dict]:
             "predicted_action": resp.action.value,
             "guidance": resp.guidance,
             "detection_sides": scene.detection_sides(detections, img_w),
-            "json_valid": _FALLBACK_MARKER not in resp.guidance,
+            "json_valid": _parsed(resp),
             "arrival_corroborated": resp.action == VLMAction.ARRIVED,
         })
         log.info("%s -> %s", os.path.basename(path), resp.action.value)

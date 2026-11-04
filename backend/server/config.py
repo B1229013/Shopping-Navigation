@@ -189,7 +189,7 @@ AISLE_SIGN_PLACES = {p.strip() for p in os.environ.get("AISLE_SIGN_PLACES", NEO4
 # Server-side DINOv2 image evidence (server/locate_fusion.server_image_evidence), for
 # phones that do not run DINOv2 themselves (Android): when a photo arrives without
 # dino_topk, the server embeds it (facebook/dinov2-base, needs torch + transformers)
-# and fuses DINOv2 : objects : OCR at 5 : 0.5 : 0.5 against DINO_SIDECAR_PATH (one
+# and fuses DINOv2 : objects : OCR at 1 : 0.1 : 0.3 (locate_fusion.W_V/W_N/W_O) against DINO_SIDECAR_PATH (one
 # 768-d vector per reference photo, keyed by photo file name). Missing model or
 # sidecar → falls back to grid matching as before.
 LOC_SERVER_DINO = os.environ.get("LOC_SERVER_DINO", "1") != "0"

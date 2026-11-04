@@ -90,10 +90,10 @@ MAP_BUILD_REF_PLACE = os.environ.get("MAP_BUILD_REF_PLACE", "").strip()
 MAP_BUILD_SOURCES = [Path(p) for p in os.environ.get("MAP_BUILD_SOURCES", "").split(os.pathsep) if p.strip()] \
     or [PROJECT_ROOT / "legacy" / "testPDR", PROJECT_ROOT / "testPDR"]
 
-# LLM service — OpenAI GPT-4o
+# LLM service — any OpenAI-compatible chat API (OpenAI, or the CGU gateway via OPENAI_BASE_URL)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 # gpt-5.4-mini: the model the team runs (CGU gateway). Any OpenAI-compatible model works;
-# vlm._generate sends temperature 0.2. The 2026-10 eval results (lab1019, 0916) used gpt-4o.
+# vlm._generate sends temperature 0.2. The VLM eval results (eval/results/*_vlm*.json) used it too.
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
@@ -203,8 +203,9 @@ LOC_SERVER_IMAGE_K = os.environ.get("LOC_SERVER_IMAGE_K", "32,64,8")
 # Object-to-object 上下左右 relations (server/object_relations.py) added to the server image
 # evidence: fused_n += W · relation consistency with node n's best directional photo.
 # On (team decision 2026-10-22) at 0.05, the weight picked on held-out walks; 0 = off.
-# On the 376 lab1019 photos no weight beat the server without it (44.7 % Top-1; 42.6–44.9 %
-# when W is picked on the other walks): eval/results/object_relations_lab1019.md.
+# On the 376 lab1019 photos it is not a clear gain: 44.7 % Top-1 without it, 42.6–44.9 % when W
+# is picked on the other walks (best +1 photo, with worse 1-hop and error):
+# eval/results/object_relations_lab1019.md.
 LOC_RELATION_WEIGHT = float(os.environ.get("LOC_RELATION_WEIGHT", "0.05"))
 # Load the map's ADJACENT object pairs (map_v2, 3×3 grid cells) for the grid matcher's
 # spatial bonus (visual_localization.SPATIAL_BONUS_COEFF; from APPNAV_ios fe4c851, with its
@@ -240,6 +241,12 @@ EMBEDDING_CACHE_PATH = os.environ.get("EMBEDDING_CACHE_PATH") or (
     str(Path(os.environ["REF_PHOTO_ROOT"]) / "檢索圖片" / "embedding_cache" / "label_embeddings.json")
     if os.environ.get("REF_PHOTO_ROOT") else str(PROJECT_ROOT / "output" / "label_embeddings.npz"))
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+# Where the vectors come from: by default the VLM's own service and key (OPENAI_BASE_URL /
+# OPENAI_API_KEY), so a CGU-gateway key is never sent to api.openai.com. If that service has
+# no /embeddings endpoint, point these two at OpenAI; a failed request leaves the labels on
+# character similarity only.
+EMBEDDING_BASE_URL = (os.environ.get("EMBEDDING_BASE_URL") or OPENAI_BASE_URL).rstrip("/")
+EMBEDDING_API_KEY = os.environ.get("EMBEDDING_API_KEY") or OPENAI_API_KEY
 
 # VLM Re-ranking (optional, adds ~10s per photo for improved accuracy)
 RERANK_ENABLED = os.environ.get("RERANK_ENABLED", "0") != "0"

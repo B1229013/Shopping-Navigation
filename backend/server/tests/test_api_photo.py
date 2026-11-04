@@ -20,6 +20,13 @@ def _start_session(client) -> str:
     return r.json()["session_id"]
 
 
+def test_new_session_asks_for_a_photo_in_chinese():
+    # Both apps show this as the first guidance line.
+    with patch("server.server.decompose_goal", return_value=["milk"]):
+        body = TestClient(app).post("/session", json={"goal": "find the milk", "place": ""}).json()
+    assert body["action"] == "TAKE_PHOTO" and "拍" in body["guidance"]
+
+
 def test_post_photo_returns_move(tmp_path):
     client = TestClient(app)
     sid = _start_session(client)

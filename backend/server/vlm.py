@@ -1,4 +1,5 @@
-"""VLM 客戶端：把「照片 + 提示詞」送給 OpenAI GPT-4o，並解析出結構化的導航決策。
+"""VLM 客戶端：把「照片 + 提示詞」送給 OpenAI 相容的視覺模型（預設 gpt-5.4-mini，
+見 config.OPENAI_MODEL），並解析出結構化的導航決策。
 
 採用「結構化決策」模式 —— 要求模型回傳單行 JSON
 （action / guidance / question / vlm_summary），server.py 的導航狀態機
@@ -196,7 +197,7 @@ def _validate_guidance(resp: VLMResponse, detections_summary: str,
     )
 
 
-# ── OpenAI GPT-4o ──────────────────────────────────────────────────────
+# ── OpenAI-compatible chat API ─────────────────────────────────────────
 
 # Token budgets. The decide reply is one short JSON object; the perceive reply
 # lists every object and sign in the photo and easily runs past 512 tokens on a

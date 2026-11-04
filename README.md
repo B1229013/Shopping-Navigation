@@ -83,21 +83,21 @@ App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
 
 **導航**
 * **拍照定位**：融合 **DINOv2 影像相似度 ＋ 物件名稱（中英＋語意向量）＋ OCR 文字 ＋ 走道吊牌號碼 ＋ 手機感測器位置**，
-  算出使用者在哪個節點、面向哪裡（權重 DINOv2 : 物件 : OCR = 1 : 0.1 : 0.3）。
+  算出使用者在哪個節點、面向哪裡（權重 DINOv2 : 物件 : OCR = 1 : 0.1 : 0.3；走道吊牌只用在 `AISLE_SIGN_PLACES` 設定的店，預設 A7）。
   在 lab1019 的 376 張測試照片上（單張照片、不帶感測器），Top-1 正確率 44.7%。
-* **路線規劃**：在 Neo4j 的走道拓樸圖上用 A* 規劃，多個商品會排出最短的拜訪順序，最後帶到收銀台和出口。
-* **逐步指引**：每張照片回傳 MOVE（繼續走）、ASK（提問）或 ARRIVED（到了），到達時用「有／沒有」按鈕確認。
+* **路線規劃**：在 Neo4j 的走道拓樸圖上用 A* 規劃；多個商品用 Held-Karp 排出最短的拜訪順序，最後帶到收銀台和出口（地圖上有標的話）。
+* **逐步指引**：每張照片回傳 MOVE（繼續走）、ASK（提問）或 ARRIVED（到了）。到了要按「確認到達」；App 問「看到了嗎？」時用「有／沒有」按鈕回答。
 * **PDR 即時位置**：兩張照片之間用計步與方向沿著路線前進；Android 的內建計步器沒反應時，改用加速度計自己判斷步伐。
-* **照片品質檢查**：太暗、模糊、手機沒拿直、被人或推車擋住時，會請使用者重拍；位置不確定時請使用者原地轉身再拍一張。
+* **照片品質檢查**：太暗、模糊、手機沒拿直（iOS）、被人或推車擋住時，會請使用者重拍；位置不確定時請使用者原地向左轉 90° 再拍一張。
 
 **建圖與研究工具**
-* **Sensor Lab**（Android）：拍照＋錄 8 種感測器，用來替新店建圖。
-* **拓樸地圖建置器**（`/topomap-builder`）：把走路紀錄排成地圖並上傳到 Neo4j。
+* **Sensor Lab**（Android）：拍照，同時錄 11 種感測器（加速度、陀螺儀、磁力、計步、旋轉向量、重力、氣壓、光線…）和 GPS，用來替新店建圖。
+* **拓樸地圖建置器**（`/topomap-builder`）：把走路紀錄排成地圖；確認後用 `upload_map_v2.py` 上傳到 Neo4j。
 * **定位評估**（`backend/eval/`）：單張影像定位基準、權重掃描、物件關係比較、計步檢查等，可重播已存的 VLM 結果不必重新付費。
 * **監看與診斷頁**：`/dashboard`、`/tracking`、`/localize-test-page`、`/session/{id}/debug-page`。
 
 **購物功能**
-* 購物清單（自動分類）、預算、歷史紀錄、食材與營養標示辨識、AI 助手、收據掃描、附近商店。
+* 購物清單（自動分類）、預算、歷史紀錄、食材與營養標示辨識、AI 助手、收據掃描、附近商店（Android）。
 
 <p align="right">(<a href="#readme-top">回到頂端</a>)</p>
 
@@ -106,7 +106,7 @@ App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
 * [![Python][Python-badge]][Python-url] [![FastAPI][FastAPI-badge]][FastAPI-url] 後端 API
 * [![Neo4j][Neo4j-badge]][Neo4j-url] 店家地圖（節點、走道、方向照片、物件、DINOv2 向量）
 * [![PyTorch][PyTorch-badge]][PyTorch-url] DINOv2（`facebook/dinov2-base`）影像比對
-* [![OpenAI][OpenAI-badge]][OpenAI-url] VLM 看照片、做導航決策（任何 OpenAI 相容 API，用 `OPENAI_MODEL` 設定模型）
+* [![OpenAI][OpenAI-badge]][OpenAI-url] VLM 看照片、做導航決策（任何 OpenAI 相容 API；預設 `gpt-5.4-mini`，團隊透過 CGU LLM gateway 使用）
 * [![Kotlin][Kotlin-badge]][Kotlin-url] [![Jetpack Compose][Compose-badge]][Compose-url] Android App
 * [![Swift][Swift-badge]][Swift-url] SwiftUI、CoreMotion：iOS App
 
@@ -155,13 +155,13 @@ App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
    python -m venv venv
    source venv/bin/activate          # Windows：.\venv\Scripts\Activate.ps1
    pip install -r requirements-server.txt
-   pip install torch transformers    # 伺服器端 DINOv2 定位；沒裝會退回只用物件＋OCR
+   pip install transformers          # 伺服器端 DINOv2 定位（torch 會隨 easyocr 一起裝）；沒裝會退回只用物件＋OCR
    ```
 3. 在專案根目錄建立 `.env`（可複製 `.env.example`）
    ```env
    OPENAI_API_KEY=your-key
-   OPENAI_BASE_URL=https://api.openai.com/v1   # 可改成任何 OpenAI 相容閘道
-   OPENAI_MODEL=gpt-4o
+   OPENAI_BASE_URL=https://api.openai.com/v1   # 用 CGU gateway 時改成 https://air.cgu.edu.tw/cgullmapi/v1
+   OPENAI_MODEL=gpt-5.4-mini
    NEO4J_URI=neo4j+s://xxxx.databases.neo4j.io
    NEO4J_USER=neo4j
    NEO4J_PASSWORD=your-password
@@ -172,7 +172,7 @@ App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
    ```sh
    uvicorn server.server:app --host 0.0.0.0 --port 8000   # Windows 也可以用 .\start.ps1
    ```
-   瀏覽器開 `http://localhost:8000/health` 看到 `{"status":"ok"}` 就代表正常，`/docs` 可看到所有 API。
+   瀏覽器開 `http://localhost:8000/health`，看到 `{"status":"ok","neo4j":"connected"}` 就代表後端和 Neo4j 都正常；`/docs` 可看到所有 API。
 
 #### 2. Android App（`android` 分支）
 
@@ -196,7 +196,7 @@ App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
 ### 導航
 
 1. 在 App 選店、輸入要找的商品，按開始。
-2. 站在入口可以按「我在入口，從這裡開始」，讓 App 直接知道你的位置和方向。
+2. 還沒拍照前可以先告訴 App 你在哪：Android 按「我在起點，從這裡開始」，選起點後轉身面向起點照片的方向；iOS 按「我在入口，從這裡開始」。
 3. 對著走道前方拍一張照片，依指引走；箭頭和小地圖會跟著你的步伐更新。
 4. App 問「看到了嗎？」時按「有／沒有」；全部找到後會帶你到收銀台和出口。
 

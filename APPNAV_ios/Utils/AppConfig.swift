@@ -10,7 +10,7 @@ enum AppConfig {
         return Bundle.main.object(forInfoDictionaryKey: "GROQ_API_KEY") as? String ?? ""
     }
 
-    /// OpenAI-compatible chat-completions endpoint for every LLM call (CGU gateway).
+    /// OpenAI chat-completions endpoint for every LLM call.
     static var llmBaseURL: String {
         "https://api.openai.com/v1/chat/completions"
     }

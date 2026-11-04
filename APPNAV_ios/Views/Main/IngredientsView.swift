@@ -258,6 +258,7 @@ struct AddDietRecordSheet: View {
     @State private var category: String
     @State private var showCamera = false
     @State private var isOCRProcessing = false
+    @State private var ocrMessage: String?
 
     private let keepId: String
     private let categories = ["全榖雜糧", "豆魚蛋肉", "乳品類", "蔬菜類", "水果類", "油脂類", "其他"]
@@ -320,6 +321,9 @@ struct AddDietRecordSheet: View {
                         }
                     }
                     .disabled(isOCRProcessing)
+                    if let ocrMessage {
+                        Text(ocrMessage).font(.caption).foregroundColor(.appDanger)
+                    }
                     if !detectedAllergens.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.appDanger)
@@ -380,13 +384,25 @@ struct AddDietRecordSheet: View {
 
     private func runOCR(_ image: UIImage) {
         isOCRProcessing = true
+        ocrMessage = nil
         Task {
-            let raw = (try? await OCRService.shared.recognizeText(from: image)) ?? ""
+            var raw = ""
+            var failure: String?
+            do {
+                raw = try await OCRService.shared.recognizeText(from: image)
+            } catch {
+                failure = "文字辨識失敗：\(error.localizedDescription)"
+            }
             var parsed: NutritionParse? = nil
             if !raw.isEmpty {
-                parsed = try? await GroqService.shared.parseNutritionLabel(ocrText: raw, apiKey: AppConfig.groqApiKey)
+                do {
+                    parsed = try await GroqService.shared.parseNutritionLabel(ocrText: raw, apiKey: AppConfig.groqApiKey)
+                } catch {
+                    failure = GroqService.userMessage(for: error) + "，已先填入辨識到的文字"
+                }
             }
             await MainActor.run {
+                ocrMessage = failure
                 if let p = parsed {
                     if var v = p.ingredients, !v.isEmpty {
                         if let r = v.range(of: "^.*?(成分|成份|原料)\\s*[：:]\\s*", options: .regularExpression) { v.removeSubrange(r) }

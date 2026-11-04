@@ -81,7 +81,7 @@ private let foodKeywords = [
     "鳳梨", "酪梨", "藍莓", "奇異果", "桃", "梨", "櫻桃", "柚子", "柚", "文旦", "榴槤", "榴蓮", "火龍果", "芭樂", "蓮霧", "木瓜", "哈密瓜", "龍眼", "荔枝", "山竹", "果",
     "apple", "banana", "orange", "grape", "watermelon", "mango", "strawberry", "lemon", "pineapple", "avocado", "blueberry", "kiwi", "peach", "pear", "cherry", "fruit",
     // snacks / sweets
-    "餅乾", "巧克力", "蛋糕", "甜甜圈", "冰淇淋", "洋芋片", "糖果", "布丁", "麻糬", "軟糖",
+    "餅乾", "巧克力", "蛋糕", "甜甜圈", "冰淇淋", "洋芋片", "糖果", "布丁", "麻糬", "軟糖", "奶糖", "奶油",
     "cookie", "biscuit", "chocolate", "cake", "donut", "icecream", "chips", "candy", "pudding",
     // dishes
     "沙拉", "壽司", "披薩", "漢堡", "薯條", "三明治", "湯", "火鍋", "咖哩", "便當", "義大利",
@@ -109,24 +109,32 @@ private let groceriesKeywords = [
 private let validCategoryIds: Set<String> = [CAT_FOOD, CAT_BEVERAGES, CAT_GROCERIES, CAT_OTHER]
 
 /// Best-effort keyword classification into Food / Beverages / Groceries / Other.
-/// Matches are substring, case-insensitive. Beverage check runs first so "奶茶"
-/// doesn't get grabbed by the generic 茶/奶 food tokens.
+/// Of all keywords found in the name (case-insensitive), the one ending last wins — a
+/// compound name's head comes last (茶葉「蛋」, 抹茶「餅乾」, 菜瓜「布」, watermelon) — then
+/// the longest one (番茄醬 over 番茄); ties go Beverages, Food, Groceries.
 func guessCategory(from name: String) -> String {
-    if name.trimmingCharacters(in: .whitespaces).isEmpty { return CAT_OTHER }
-    let n = name.lowercased()
-    if beverageKeywords.contains(where: { n.contains($0.lowercased()) }) { return CAT_BEVERAGES }
-    if foodKeywords.contains(where: { n.contains($0.lowercased()) }) { return CAT_FOOD }
-    if groceriesKeywords.contains(where: { n.contains($0.lowercased()) }) { return CAT_GROCERIES }
-    return CAT_OTHER
+    let n = name.trimmingCharacters(in: .whitespaces).lowercased()
+    if n.isEmpty { return CAT_OTHER }
+    var best: (end: Int, length: Int, category: String)?
+    for (category, keywords) in [(CAT_BEVERAGES, beverageKeywords), (CAT_FOOD, foodKeywords),
+                                 (CAT_GROCERIES, groceriesKeywords)] {
+        for k in keywords {
+            let kw = k.lowercased()
+            guard let r = n.range(of: kw, options: .backwards) else { continue }
+            let end = n.distance(from: n.startIndex, to: r.upperBound)
+            if let b = best, (end, kw.count) <= (b.end, b.length) { continue }
+            best = (end, kw.count, category)
+        }
+    }
+    return best?.category ?? CAT_OTHER
 }
 
 /// Normalize a raw category hint (e.g. an LLM response saying "食品" / "food" / blank)
 /// into one of the canonical catIds, falling back to keyword guessing on the name.
 func normalizeCategory(_ rawCategory: String, _ itemName: String) -> String {
     // Beverage names are easy to misclassify — the receipt-tidying LLM often puts
-    // milk / juice into Food. If the name clearly reads as a drink, override.
-    let nameLower = itemName.lowercased()
-    if beverageKeywords.contains(where: { nameLower.contains($0.lowercased()) }) { return CAT_BEVERAGES }
+    // milk / juice into Food. If the name reads as a drink, override.
+    if guessCategory(from: itemName) == CAT_BEVERAGES { return CAT_BEVERAGES }
 
     let raw = rawCategory.trimmingCharacters(in: .whitespaces).lowercased()
     if raw.isEmpty { return guessCategory(from: itemName) }

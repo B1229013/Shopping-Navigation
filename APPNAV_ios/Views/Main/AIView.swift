@@ -49,7 +49,7 @@ struct AIView: View {
                 Text("AI 購物助理")
                     .font(.headline.bold())
                     .foregroundColor(.appTextPrimary)
-                Text("Powered by Groq LLaMA")
+                Text("Powered by OpenAI \(AppConfig.llmModel)")
                     .font(.caption2)
                     .foregroundColor(.appTextTertiary)
             }
@@ -174,7 +174,7 @@ struct AIView: View {
 
         guard !groqApiKey.isEmpty else {
             messages.append(ChatMessage(role: "user", content: trimmed))
-            messages.append(ChatMessage(role: "assistant", content: "尚未設定 Groq API Key，請先到「設定」頁貼上你的 Key 後再試一次。"))
+            messages.append(ChatMessage(role: "assistant", content: "尚未設定 API 金鑰，請先到「設定」頁輸入後再試一次。"))
             inputText = ""
             return
         }

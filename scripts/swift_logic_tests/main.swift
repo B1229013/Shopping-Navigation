@@ -198,5 +198,93 @@ do {  // tilt
     check(!PhotoQualityChecker.isUpright(gravity: (0, -0.5, -0.87)), "60° (pointing at floor) is not")
 }
 
+// MARK: - PathFollower look-ahead (#3: the arrow on a route that doubles back)
+
+do {  // U-shaped route: out along x = 0, back along x = 1.5
+    let f = PathFollower()
+    let route = [CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 10), CGPoint(x: 1.5, y: 10), CGPoint(x: 1.5, y: 0)]
+    f.setRoute(polyline: route, turns: [], pdr: .zero, keepAnchor: false)
+    f.anchor(mapPoint: .zero, pdr: .zero)
+    var st: FollowState?
+    for y in stride(from: 0.0, through: 3.0, by: 0.5) {   // walk out, 0.8 m right of the line
+        st = f.update(pdr: CGPoint(x: 0.8, y: y), headingDegrees: 0)
+    }
+    let ahead = f.point(atProgress: st!.progressM + 5)!
+    check(approx(ahead.x, 0) && approx(ahead.y, 8), "look-ahead stays on the outbound leg (got \(ahead))")
+    check(f.point(atProgress: 11.5 + 4)! == CGPoint(x: 1.5, y: 6), "4 m into the return leg")
+    check(f.point(atProgress: 99)! == route.last!, "past the end clamps to the last point")
+    check(f.point(atProgress: -3)! == route.first!, "before the start clamps to the first point")
+}
+
+do {  // walking the whole U still advances through both turns to the end
+    let f = PathFollower()
+    let route = [CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 10), CGPoint(x: 1.5, y: 10), CGPoint(x: 1.5, y: 0)]
+    f.setRoute(polyline: route, turns: [], pdr: .zero, keepAnchor: false)
+    var walk: [CGPoint] = stride(from: 0.0, through: 10.0, by: 0.5).map { CGPoint(x: 0, y: $0) }
+    walk += [CGPoint(x: 0.75, y: 10), CGPoint(x: 1.5, y: 10)]
+    walk += stride(from: 9.5, through: 0.0, by: -0.5).map { CGPoint(x: 1.5, y: $0) }
+    var st: FollowState?
+    var monotonic = true
+    for p in walk {
+        let prev = st?.progressM ?? 0
+        st = f.update(pdr: p, headingDegrees: 0)
+        if st!.progressM + 1e-9 < prev { monotonic = false }
+    }
+    check(monotonic, "progress never goes backwards on the way round")
+    check(approx(st!.progressM, 21.5) && st!.arrived, "reaches the end (progress \(st!.progressM))")
+}
+
+// MARK: - Budget tab expense edits (#4)
+
+do {  // editing a shopping-list item keeps it on the list
+    var listItem = ShoppingItem(name: "牛奶", qty: 1, price: 0, isChecked: true, createdAt: 1000)
+    listItem.dueDate = 5000
+    let edited = ShoppingItem.expense(editing: listItem, name: "鮮奶", qty: 2, price: 95,
+                                      store: "", purchasedAt: 3000, category: "Other")
+    check(edited.source == nil && edited.id == listItem.id, "still a shopping-list item")
+    check(edited.dueDate == 5000 && edited.createdAt == 1000, "keeps due date and creation time")
+    check(edited.name == "鮮奶" && edited.qty == 2 && edited.price == 95 && edited.purchasedAt == 3000,
+          "takes the edited fields")
+    check(edited.location == "Other", "the user's own category, Other included")
+    let new = ShoppingItem.expense(editing: nil, name: "餅乾", qty: 1, price: 30,
+                                   store: "全聯", purchasedAt: 3000, category: "Food")
+    check(new.source == "budget" && new.storeName == "全聯" && new.createdAt == 3000, "a new expense is a budget item")
+}
+
+// MARK: - CategoryClassifier (#5: the head of the name decides, not any substring)
+
+do {
+    let cases: [(String, String)] = [
+        ("watermelon", CAT_FOOD), ("茶葉蛋", CAT_FOOD), ("抹茶餅乾", CAT_FOOD), ("可樂果", CAT_FOOD),
+        ("牛奶糖", CAT_FOOD), ("鮮奶油", CAT_FOOD),
+        ("菜瓜布", CAT_GROCERIES), ("麵粉", CAT_GROCERIES), ("番茄醬", CAT_GROCERIES), ("沙拉油", CAT_GROCERIES),
+        ("牛奶", CAT_BEVERAGES), ("珍珠奶茶", CAT_BEVERAGES), ("香蕉牛奶", CAT_BEVERAGES), ("蘋果汁", CAT_BEVERAGES),
+        ("礦泉水", CAT_BEVERAGES), ("water", CAT_BEVERAGES), ("麥茶", CAT_BEVERAGES),
+        ("牛奶餅乾", CAT_FOOD), ("雞肉便當", CAT_FOOD), ("衛生紙", CAT_GROCERIES), ("螺絲起子", CAT_OTHER),
+    ]
+    for (name, want) in cases {
+        check(guessCategory(from: name) == want, "\(name) → \(want), got \(guessCategory(from: name))")
+    }
+    // the receipt LLM's category stands unless the name really reads as a drink
+    check(normalizeCategory("Food", "茶葉蛋") == CAT_FOOD, "LLM Food kept for 茶葉蛋")
+    check(normalizeCategory("Food", "鮮奶") == CAT_BEVERAGES, "milk filed as Food is still a drink")
+}
+
+// MARK: - LLM errors the user can read (#6)
+
+do {
+    UserDefaults.standard.removeObject(forKey: "groqApiKey")
+    let noKey = GroqService.userMessage(for: URLError(.userAuthenticationRequired))
+    check(noKey.contains("設定"), "no key → points to Settings (\(noKey))")
+    UserDefaults.standard.set("test-key", forKey: "groqApiKey")
+    let failed = GroqService.userMessage(for: NSError(domain: "LLM", code: 429,
+                                                     userInfo: [NSLocalizedDescriptionKey: "HTTP 429"]))
+    check(failed.contains("HTTP 429"), "other errors say what happened (\(failed))")
+    UserDefaults.standard.removeObject(forKey: "groqApiKey")
+    // a refusal comes back with "content": null — it must still decode
+    let json = #"{"choices":[{"message":{"role":"assistant","content":null}}]}"#.data(using: .utf8)!
+    check((try? JSONDecoder().decode(GroqResponse.self, from: json)) != nil, "null content decodes")
+}
+
 print("\(passed) passed, \(failures) failed")
 exit(failures == 0 ? 0 : 1)

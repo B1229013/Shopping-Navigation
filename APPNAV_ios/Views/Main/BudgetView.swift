@@ -465,7 +465,7 @@ struct BudgetView: View {
                 guard !groqApiKey.isEmpty else {
                     await MainActor.run {
                         isProcessing = false
-                        processingError = "尚未設定 Groq API Key，請到「設定」頁貼上後再掃描"
+                        processingError = "尚未設定 API 金鑰，請到「設定」頁輸入後再掃描"
                     }
                     return
                 }
@@ -746,16 +746,9 @@ struct ManualExpenseSheet: View {
     @State private var date: Date
     @State private var category: String
 
-    private let keepId: String
-    private let keepSource: String?
-    private let keepReceiptId: String?
-
     init(existing: ShoppingItem?, onSave: @escaping (ShoppingItem) -> Void) {
         self.existing = existing
         self.onSave = onSave
-        self.keepId = existing?.id ?? UUID().uuidString
-        self.keepSource = existing?.source ?? "budget"
-        self.keepReceiptId = existing?.receiptId
         _name = State(initialValue: existing?.name ?? "")
         _price = State(initialValue: existing.map { String($0.price) } ?? "")
         _qty = State(initialValue: existing.map { String($0.qty) } ?? "1")
@@ -790,20 +783,9 @@ struct ManualExpenseSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("儲存") {
                         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                        let ms = date.millisecondsSince1970
-                        let item = ShoppingItem(
-                            id: keepId,
-                            name: name,
-                            qty: Int(qty) ?? 1,
-                            price: Int(price) ?? 0,
-                            isChecked: true,
-                            createdAt: ms,
-                            purchasedAt: ms,
-                            storeName: store.isEmpty ? nil : store,
-                            location: category == "Other" ? normalizeCategory("", name) : category,
-                            receiptId: keepReceiptId,
-                            source: keepSource
-                        )
+                        let item = ShoppingItem.expense(
+                            editing: existing, name: name, qty: Int(qty) ?? 1, price: Int(price) ?? 0,
+                            store: store, purchasedAt: date.millisecondsSince1970, category: category)
                         onSave(item)
                         dismiss()
                     }

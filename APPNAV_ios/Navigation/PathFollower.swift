@@ -32,11 +32,15 @@ final class PathFollower {
     /// A turn is "now" inside this distance, "soon" up to `announceTurnM`.
     static let turnNowM = 3.0
     static let announceTurnM = 12.0
+    /// Progress may run this far ahead of the distance actually walked since the last update.
+    static let progressSlackM = 3.0
 
     private(set) var polyline: [CGPoint] = []
     private var cumulative: [Double] = []          // route distance at each vertex
     private var turnsAlongRoute: [(atM: Double, direction: String)] = []
     private var segmentIndex = 0
+    private var lastProgress = 0.0
+    private var lastPos: CGPoint?
 
     private var anchorMap = CGPoint.zero
     private var anchorPDR = CGPoint.zero
@@ -67,6 +71,8 @@ final class PathFollower {
             }
             .sorted { $0.atM < $1.atM }
         segmentIndex = 0
+        lastProgress = 0      // a new route starts where the user is
+        lastPos = nil
         hasRoute = polyline.count >= 1
         if !keepAnchor, let first = polyline.first {
             anchor(mapPoint: first, pdr: pdr)
@@ -96,18 +102,24 @@ final class PathFollower {
                                arrived: d <= Self.arrivalRadiusM)
         }
 
-        // Project onto the route. Only look a few segments ahead of the last one so a
-        // route that doubles back on itself can't teleport the marker backwards.
+        // Project onto the route. Only look a few segments ahead of the last one, and
+        // never further along than the user can have walked since the last update: on a
+        // route that doubles back, the return leg can be nearer than the leg being walked.
         let lo = max(0, segmentIndex - 1)
         let hi = min(polyline.count - 2, segmentIndex + 3)
-        var best = (seg: lo, t: 0.0, cross: Double.infinity)
+        let maxProgress = lastProgress + (lastPos.map { Self.distance(pos, $0) } ?? 0) + Self.progressSlackM
+        var best = (seg: segmentIndex, t: 0.0, cross: Double.infinity)
         for seg in lo...hi {
             let (t, cross) = Self.project(pos, onto: polyline[seg], polyline[seg + 1])
+            let along = cumulative[seg] + t * (cumulative[seg + 1] - cumulative[seg])
+            if along > maxProgress && seg != segmentIndex { continue }
             if cross < best.cross { best = (seg, t, cross) }
         }
         segmentIndex = best.seg
         let segLen = cumulative[best.seg + 1] - cumulative[best.seg]
         let progress = cumulative[best.seg] + best.t * segLen
+        lastProgress = progress
+        lastPos = pos
         // Along-route distance clamps to 0 once the projection hits the last vertex,
         // so the straight-line distance to the target is the floor.
         let toTarget = Self.distance(pos, polyline[polyline.count - 1])
@@ -140,6 +152,20 @@ final class PathFollower {
                            remainingM: remaining, offRouteM: best.cross,
                            nextTurnDirection: next?.direction, nextTurnInM: turnIn,
                            prompt: prompt, needsReplan: offRoute, arrived: arrived)
+    }
+
+    /// The point `m` metres along the route, clamped to its ends — e.g. where the arrow
+    /// points: the user's own `progressM` plus a few metres. Unlike a nearest-segment
+    /// search it follows a route that doubles back leg by leg.
+    func point(atProgress m: Double) -> CGPoint? {
+        guard polyline.count >= 2 else { return polyline.first }
+        let d = min(max(m, 0), totalLengthM)
+        var seg = 0
+        while seg < polyline.count - 2 && cumulative[seg + 1] < d { seg += 1 }
+        let len = cumulative[seg + 1] - cumulative[seg]
+        let t = len > 1e-9 ? (d - cumulative[seg]) / len : 0
+        let a = polyline[seg], b = polyline[seg + 1]
+        return CGPoint(x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y))
     }
 
     // MARK: - Helpers

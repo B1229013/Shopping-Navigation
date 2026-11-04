@@ -72,6 +72,13 @@ final class RouteFollowerModel: ObservableObject {
         }
     }
 
+    /// The route point `distance` metres beyond the user's progress along the route, or nil
+    /// without a route / position yet.
+    func lookAheadPoint(_ distance: Double) -> CGPoint? {
+        guard follower.hasRoute, let s = state else { return nil }
+        return follower.point(atProgress: s.progressM + distance)
+    }
+
     /// A new PDR sample from the sensors (raw frame — used until the first photo fix).
     func ingest(_ point: PathPoint) {
         lastPDR = point

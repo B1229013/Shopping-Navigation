@@ -16,6 +16,7 @@ struct ShoppingListView: View {
     @State private var editPrice = ""
     @State private var range: ListRange = .day
     @State private var newDueDate = Date()
+    @State private var aiMessage: String?
     @State private var editDueDate = Date()
 
     private let accent = Color.appAccent
@@ -148,6 +149,10 @@ struct ShoppingListView: View {
                 .cornerRadius(14)
             }
             .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+            if let aiMessage {
+                Text(aiMessage).font(.caption).foregroundColor(.appDanger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(16)
         .background(surface)
@@ -292,10 +297,15 @@ struct ShoppingListView: View {
     private func refineCategory(id: String, name: String) {
         guard guessCategory(from: name) == "Other" else { return }
         Task {
-            if let cat = try? await GroqService.shared.classifyItem(name: name, apiKey: AppConfig.groqApiKey), cat != "Other" {
+            do {
+                let cat = try await GroqService.shared.classifyItem(name: name, apiKey: AppConfig.groqApiKey)
                 await MainActor.run {
-                    if let idx = items.firstIndex(where: { $0.id == id }) { items[idx].location = cat }
+                    aiMessage = nil
+                    if cat != "Other", let idx = items.firstIndex(where: { $0.id == id }) { items[idx].location = cat }
                 }
+            } catch {
+                let msg = GroqService.userMessage(for: error)
+                await MainActor.run { aiMessage = "「\(name)」\(msg)，先放在「其他」" }
             }
         }
     }

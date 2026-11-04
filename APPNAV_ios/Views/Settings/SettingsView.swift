@@ -78,10 +78,10 @@ struct SettingsView: View {
                 // API Configuration
                 Section("API 設定") {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Groq API Key")
+                        Text("OpenAI API 金鑰")
                             .font(.caption)
                             .foregroundColor(.appTextSecondary)
-                        SecureField("輸入 Groq API Key", text: $groqApiKey)
+                        SecureField("輸入 OpenAI API 金鑰", text: $groqApiKey)
                             .font(.caption)
                             .autocapitalization(.none)
                     }
@@ -152,7 +152,7 @@ struct SettingsView: View {
                 Section("關於") {
                     LabeledContent("版本", value: "1.0.0 (iOS)")
                     LabeledContent("OCR 引擎", value: "iOS Vision + PaddleOCR")
-                    LabeledContent("AI 模型", value: "LLaMA 3.3 (via Groq)")
+                    LabeledContent("AI 模型", value: AppConfig.llmModel)
                 }
 
                 // Sign out

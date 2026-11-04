@@ -2,7 +2,8 @@ import Foundation
 
 struct GroqMessage: Codable {
     let role: String
-    let content: String
+    /// nil when the model refuses ("content": null); requests always set it.
+    let content: String?
 }
 
 struct GroqRequest: Codable {
@@ -52,8 +53,14 @@ struct NutritionParse: Codable {
 }
 
 /// All LLM calls go through an OpenAI-compatible /chat/completions endpoint,
-/// configured in AppConfig (currently the CGU gateway).
+/// configured in AppConfig (currently OpenAI).
 final class GroqService {
+    /// A short message for a failed LLM call — shown instead of failing silently.
+    static func userMessage(for error: Error) -> String {
+        if AppConfig.groqApiKey.isEmpty { return "尚未設定 API 金鑰，請到「設定」輸入" }
+        return "AI 呼叫失敗：\(error.localizedDescription)"
+    }
+
     static let shared = GroqService()
 
     private var endpoint: URL { URL(string: AppConfig.llmBaseURL)! }

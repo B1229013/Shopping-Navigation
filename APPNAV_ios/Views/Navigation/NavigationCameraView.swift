@@ -510,12 +510,11 @@ struct NavigationCameraView: View {
     /// Gray (not localized): fixed pointing up (returns 0).
     /// Blue (localized): points along the route polyline toward the next segment.
     private var arrowBearing: Double {
-        guard sensorSession.mapPosition != nil else { return 0 }
-        let pos = sensorSession.mapPosition!
+        guard let pos = sensorSession.mapPosition else { return 0 }
 
         let target: (x: Double, y: Double)
-        if let route = routeModel.route, route.polyline.count >= 2 {
-            target = Self.lookAhead(on: route.polyline, from: pos, distance: Self.arrowLookAheadM)
+        if let p = routeModel.lookAheadPoint(Self.arrowLookAheadM) {
+            target = (p.x, p.y)
         } else if let nodeId = targetNodeId,
                   let coord = NodeCoordinateStore.shared.coordinate(for: nodeId) {
             target = coord
@@ -532,67 +531,6 @@ struct NavigationCameraView: View {
         while relative > 180 { relative -= 360 }
         while relative < -180 { relative += 360 }
         return relative
-    }
-
-    /// Find a point on the polyline that is `distance` metres ahead of the nearest
-    /// projection of `from` onto the polyline. Returns the final point when the
-    /// remaining polyline is shorter than `distance`.
-    private static func lookAhead(on polyline: [[Double]],
-                                  from pos: (x: Double, y: Double),
-                                  distance: Double) -> (x: Double, y: Double) {
-        // 1. Find nearest segment and project pos onto it
-        var bestSeg = 0
-        var bestDist = Double.infinity
-        var bestT = 0.0
-        for i in 0..<(polyline.count - 1) {
-            let ax = polyline[i][0],   ay = polyline[i][1]
-            let bx = polyline[i+1][0], by = polyline[i+1][1]
-            let (t, d) = projectOnSegment(px: pos.x, py: pos.y, ax: ax, ay: ay, bx: bx, by: by)
-            if d < bestDist { bestDist = d; bestSeg = i; bestT = t }
-        }
-
-        // 2. Walk forward from projection point along the polyline
-        let ax = polyline[bestSeg][0],   ay = polyline[bestSeg][1]
-        let bx = polyline[bestSeg+1][0], by = polyline[bestSeg+1][1]
-        let projX = ax + bestT * (bx - ax)
-        let projY = ay + bestT * (by - ay)
-
-        var remaining = distance
-        // Distance from projection to end of current segment
-        let toEnd = hypot(bx - projX, by - projY)
-        if toEnd >= remaining && toEnd > 1e-6 {
-            let r = remaining / toEnd
-            return (projX + r * (bx - projX), projY + r * (by - projY))
-        }
-        remaining -= toEnd
-
-        // Walk through subsequent segments
-        for i in (bestSeg + 1)..<(polyline.count - 1) {
-            let sx = polyline[i][0],   sy = polyline[i][1]
-            let ex = polyline[i+1][0], ey = polyline[i+1][1]
-            let segLen = hypot(ex - sx, ey - sy)
-            if segLen >= remaining && segLen > 1e-6 {
-                let r = remaining / segLen
-                return (sx + r * (ex - sx), sy + r * (ey - sy))
-            }
-            remaining -= segLen
-        }
-        // Reached the end — point to the last polyline point
-        let last = polyline[polyline.count - 1]
-        return (last[0], last[1])
-    }
-
-    /// Project point (px,py) onto segment (ax,ay)→(bx,by).
-    /// Returns (t, distance) where t ∈ [0,1] is the parameter along the segment.
-    private static func projectOnSegment(px: Double, py: Double,
-                                         ax: Double, ay: Double,
-                                         bx: Double, by: Double) -> (t: Double, dist: Double) {
-        let dx = bx - ax, dy = by - ay
-        let lenSq = dx * dx + dy * dy
-        guard lenSq > 1e-10 else { return (0, hypot(px - ax, py - ay)) }
-        let t = max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq))
-        let projX = ax + t * dx, projY = ay + t * dy
-        return (t, hypot(px - projX, py - projY))
     }
 
     /// On-device DINOv2 result for one photo: the top-K nodes the server fuses

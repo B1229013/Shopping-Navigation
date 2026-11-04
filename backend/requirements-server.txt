@@ -7,3 +7,7 @@ easyocr>=1.7.0
 pytest==8.0.2
 pytest-asyncio==0.23.5
 httpx==0.27.0
+numpy
+Pillow>=10.0.0
+# server/graph_renderer.py (imported at startup)
+matplotlib>=3.8

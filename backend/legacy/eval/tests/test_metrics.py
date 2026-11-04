@@ -54,6 +54,20 @@ def test_direction_sanity_matches_guidance_direction_to_detected_side():
     assert direction_sanity(records) == 0.5
 
 
+def test_direction_sanity_reads_chinese_guidance_and_far_sides():
+    # The server's guidance is Traditional Chinese; scene.detection_sides has far-left/far-right too.
+    records = [
+        TurnRecord(photo="a.jpg", goal="泡麵", predicted_action="MOVE",
+                   guidance="泡麵在你的左手邊，往前走兩步。", detection_sides=["far-left"]),   # sane
+        TurnRecord(photo="b.jpg", goal="泡麵", predicted_action="MOVE",
+                   guidance="往右轉，沿著走道走。", detection_sides=["left"]),                # not sane
+        TurnRecord(photo="c.jpg", goal="泡麵", predicted_action="MOVE",
+                   guidance="往前走 5 公尺左右再拍一張。", detection_sides=["right"]),         # 左右 = about
+    ]
+    assert direction_sanity(records) == 0.5
+    assert summarize(records)["n_directional"] == 2
+
+
 def test_json_validity_rate_counts_parseable_responses():
     records = [
         TurnRecord(photo="a.jpg", goal="milk", predicted_action="MOVE", json_valid=True),
@@ -88,3 +102,11 @@ def test_summarize_reports_metrics_with_denominator_counts():
     assert s["n_non_goal"] == 1
     assert s["success_rate"] == 0.5
     assert s["false_arrival_rate"] == 1.0
+
+
+def test_replay_flags_the_vlm_fallback_reply():
+    from eval.replay import _parsed
+    from server.models import VLMAction, VLMResponse
+    from server.vlm import _FALLBACK
+    assert not _parsed(_FALLBACK)
+    assert _parsed(VLMResponse(action=VLMAction.MOVE, guidance="往前走", question=None, vlm_summary=""))

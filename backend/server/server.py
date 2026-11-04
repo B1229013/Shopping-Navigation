@@ -3818,6 +3818,7 @@ def session_tracking(session_id: str):
     # Reference map nodes (positions on the map)
     ref_nodes = []
     ref_edges = []
+    neo4j = get_neo4j()
     ref_map = neo4j.load_reference_map(s.place) if neo4j and s.place else None
     if ref_map:
         for nid_key, node in ref_map.photos.items():

@@ -268,6 +268,11 @@ async function fetchJSON(url) {
   return r.json();
 }
 
+// Text from sessions (goal, VLM / OCR output, ids) goes into innerHTML only through esc().
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch]);
+}
+
 async function loadSessions() {
   const data = await fetchJSON('/sessions');
   if (!data) return;
@@ -283,16 +288,21 @@ function renderSessionList() {
   el.innerHTML = sessionsCache.map(s => {
     const active = s.id === currentSession;
     const time = new Date(s.created_at).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'});
-    return `<div class="session-item ${active?'active':''}" onclick="selectSession('${s.id}')">
-      <div class="sid">${s.id}</div>
-      <div class="meta">${time} &middot; ${s.goal_objects.slice(0,3).join(', ')}${s.goal_objects.length>3?'...':''}</div>
+    return `<div class="session-item ${active?'active':''}" data-sid="${esc(s.id)}">
+      <div class="sid">${esc(s.id)}</div>
+      <div class="meta">${time} &middot; ${esc(s.goal_objects.slice(0,3).join(', '))}${s.goal_objects.length>3?'...':''}</div>
       <div class="badges">
-        <span class="badge photos">${s.photo_count} photos</span>
+        <span class="badge photos">${esc(s.photo_count)} photos</span>
         ${s.arrived ? '<span class="badge arrived">ARRIVED</span>' : '<span class="badge active">ACTIVE</span>'}
       </div>
     </div>`;
   }).join('');
 }
+
+document.getElementById('session-list').addEventListener('click', e => {
+  const item = e.target.closest('.session-item');
+  if (item) selectSession(item.dataset.sid);
+});
 
 async function selectSession(sid) {
   currentSession = sid;
@@ -301,7 +311,7 @@ async function selectSession(sid) {
 }
 
 async function loadSessionDetail(sid) {
-  const data = await fetchJSON('/session/' + sid);
+  const data = await fetchJSON('/session/' + encodeURIComponent(sid));
   if (!data) return;
   const el = document.getElementById('content');
   el.classList.remove('empty');
@@ -319,7 +329,7 @@ async function loadSessionDetail(sid) {
       let cls = '';
       if (visited.has(n)) cls = 'visited';
       else if (i === currentIdx) cls = 'current';
-      return `${i > 0 ? '<span class="route-arrow">&rarr;</span>' : ''}<span class="route-node ${cls}">#${n}</span>`;
+      return `${i > 0 ? '<span class="route-arrow">&rarr;</span>' : ''}<span class="route-node ${cls}">#${esc(n)}</span>`;
     }).join('');
     routeHTML += '</div>';
   }
@@ -335,48 +345,48 @@ async function loadSessionDetail(sid) {
 
     cardsHTML += `<div class="photo-card">
       <div class="photo-card-header">
-        <span class="step">Photo #${nid}</span>
-        <span class="action ${action}">${action}</span>
-        ${matchedNid !== null ? `<span style="font-size:11px;color:var(--text2)">matched &rarr; <b style="color:var(--text)">#${matchedNid}</b></span>` : '<span style="font-size:11px;color:var(--bad)">no match</span>'}
+        <span class="step">Photo #${esc(nid)}</span>
+        <span class="action ${esc(action)}">${esc(action)}</span>
+        ${matchedNid !== null ? `<span style="font-size:11px;color:var(--text2)">matched &rarr; <b style="color:var(--text)">#${esc(matchedNid)}</b></span>` : '<span style="font-size:11px;color:var(--bad)">no match</span>'}
       </div>
       <div class="photo-pair">
         <div class="photo-col">
           <div class="label">Live Photo</div>
-          <img src="/session/${sid}/original/${nid}.jpg" onerror="this.style.display='none'" loading="lazy">
+          <img src="/session/${encodeURIComponent(sid)}/original/${encodeURIComponent(nid)}.jpg" onerror="this.style.display='none'" loading="lazy">
         </div>
         <div class="photo-col">
-          <div class="label">Matched Reference ${matchedNid !== null ? '#' + matchedNid : ''}</div>
+          <div class="label">Matched Reference ${matchedNid !== null ? '#' + esc(matchedNid) : ''}</div>
           ${matchedNid !== null
-            ? `<img src="/reference-photo/${matchedNid}.jpg" onerror="this.outerHTML='<div class=no-ref>Photo not found</div>'" loading="lazy">`
+            ? `<img src="/reference-photo/${encodeURIComponent(matchedNid)}.jpg${data.place ? '?place=' + encodeURIComponent(data.place) : ''}" onerror="this.outerHTML='<div class=no-ref>Photo not found</div>'" loading="lazy">`
             : '<div class="no-ref">No confident match</div>'}
         </div>
       </div>
       <div class="confidence-bar">
         <div class="row">
           <span class="lbl">Conf.</span>
-          <div class="track"><div class="fill ${confColor(conf)}" style="width:${conf*100}%"></div></div>
+          <div class="track"><div class="fill ${confColor(conf)}" style="width:${Number(conf)*100}%"></div></div>
           <span class="val" style="color:var(--${confColor(conf)})">${confText(conf)}</span>
         </div>
       </div>
       <div class="detail-grid">
         <div class="detail-cell">
           <div class="dlabel">Reasoning</div>
-          <div class="dval mono">${loc ? loc.reasoning : 'N/A'}</div>
+          <div class="dval mono">${loc ? esc(loc.reasoning) : 'N/A'}</div>
         </div>
         <div class="detail-cell">
           <div class="dlabel">Heading</div>
-          <div class="dval mono">${loc && loc.heading !== null ? loc.heading + '&deg; (' + (loc.slot||'?') + ')' : 'N/A'}</div>
+          <div class="dval mono">${loc && loc.heading !== null ? esc(loc.heading) + '&deg; (' + esc(loc.slot||'?') + ')' : 'N/A'}</div>
         </div>
         <div class="detail-cell">
           <div class="dlabel">VLM Detections</div>
-          <div class="dval">${(entry.detections||[]).join(', ') || 'N/A'}</div>
+          <div class="dval">${esc((entry.detections||[]).join(', ')) || 'N/A'}</div>
         </div>
         <div class="detail-cell">
           <div class="dlabel">OCR Texts</div>
-          <div class="dval">${(entry.ocr_texts||[]).join(', ') || 'N/A'}</div>
+          <div class="dval">${esc((entry.ocr_texts||[]).join(', ')) || 'N/A'}</div>
         </div>
       </div>
-      <div class="guidance-text">${entry.vlm_guidance || ''}</div>
+      <div class="guidance-text">${esc(entry.vlm_guidance)}</div>
     </div>`;
   }
 
@@ -386,8 +396,8 @@ async function loadSessionDetail(sid) {
 
   el.innerHTML = `
     <div class="session-header">
-      <h2>${sid}</h2>
-      <span class="goal">${data.goal_objects.join(', ')}</span>
+      <h2>${esc(sid)}</h2>
+      <span class="goal">${esc(data.goal_objects.join(', '))}</span>
     </div>
     ${routeHTML}
     ${cardsHTML}

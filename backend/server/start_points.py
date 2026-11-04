@@ -18,6 +18,7 @@ reads it with ``GET /starts?place=``.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from pathlib import Path
@@ -26,6 +27,8 @@ from typing import List, Optional
 from PIL import Image, ImageOps
 
 from server.map_build import place_folder
+
+log = logging.getLogger(__name__)
 
 PHOTO_MAX_SIDE = 900
 _ID_RE = re.compile(r"[^A-Za-z0-9_-]+")
@@ -68,7 +71,14 @@ def load_north_offset(place: str, maps_dir: Path) -> Optional[float]:
     except Exception:
         return None
     v = data.get("map_north_offset_deg")
-    return float(v) if v is not None else None
+    if v is None:
+        return None
+    try:
+        deg = float(v)
+    except (TypeError, ValueError):
+        log.warning("%s: map_north_offset_deg %r is not a number — ignored", p.name, v)
+        return None
+    return deg if math.isfinite(deg) else None
 
 
 def photo_path(place: str, start_id: str, maps_dir: Path) -> Optional[Path]:

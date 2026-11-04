@@ -370,8 +370,6 @@ iOS 前端（`APPNAV_ios/`）只在 `ios` 修改，Android 前端（`app/`）只
 * [FastAPI](https://fastapi.tiangolo.com/)
 * [Hugging Face Transformers](https://huggingface.co/docs/transformers)
 * [Shields.io](https://shields.io/)：徽章
-* [Best-README-Template](https://github.com/othneildrew/Best-README-Template)：README 範本
-* 指導老師，以及幫忙到賣場測試的同學
 
 <p align="right">(<a href="#readme-top">回到頂端</a>)</p>
 

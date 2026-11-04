@@ -67,6 +67,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
 
+// StartSessionRequest.place = "" asks the backend for explore mode (no reference map);
+// a null place is left out of the JSON and the backend falls back to its default store.
+private const val NO_MAP = ""
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeammateHomeScreen(navController: NavController) {
@@ -91,6 +95,7 @@ fun TeammateHomeScreen(navController: NavController) {
     // Neo4j map selection
     var neo4jPlaces by remember { mutableStateOf<List<PlaceInfo>>(emptyList()) }
     var isLoadingPlaces by remember { mutableStateOf(false) }
+    // null = nothing picked (the backend uses its default store); NO_MAP = 「不使用地圖」 (explore mode)
     var selectedPlace by remember { mutableStateOf<String?>(null) }
     var placeDropdownExpanded by remember { mutableStateOf(false) }
 
@@ -161,7 +166,7 @@ fun TeammateHomeScreen(navController: NavController) {
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_session_id", response.session_id)
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_goal", goalText)
                 navController.currentBackStackEntry?.savedStateHandle?.set("nav_guidance", response.guidance)
-                navController.currentBackStackEntry?.savedStateHandle?.set("nav_place", response.place ?: selectedPlace)
+                navController.currentBackStackEntry?.savedStateHandle?.set("nav_place", response.place ?: selectedPlace?.takeIf { it != NO_MAP })
                 response.map_north_offset_deg?.let {
                     navController.currentBackStackEntry?.savedStateHandle?.set("nav_north_offset", it)
                 }
@@ -288,7 +293,11 @@ fun TeammateHomeScreen(navController: NavController) {
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedTextField(
-                            value = selectedPlace ?: "選擇地圖（可選）",
+                            value = when (val p = selectedPlace) {
+                                null -> "選擇地圖（可選）"
+                                NO_MAP -> "不使用地圖"
+                                else -> p
+                            },
                             onValueChange = {},
                             readOnly = true,
                             label = { Text("導航地圖") },
@@ -311,7 +320,7 @@ fun TeammateHomeScreen(navController: NavController) {
                             DropdownMenuItem(
                                 text = { Text("不使用地圖") },
                                 onClick = {
-                                    selectedPlace = null
+                                    selectedPlace = NO_MAP
                                     placeDropdownExpanded = false
                                 }
                             )

@@ -23,7 +23,9 @@ class TurnRecord:
     is_goal_frame: Optional[bool] = None  # ground-truth: is the goal visible here?
 
 
-_DIRECTION_WORDS = ("left", "right")
+# side -> words naming it in guidance; the server's guidance is Traditional Chinese
+# (server/prompts.py), the older hand-made predictions files are English.
+_DIRECTION_WORDS = {"left": (r"\bleft\b", "左"), "right": (r"\bright\b", "右")}
 
 
 def success_rate(records: list[TurnRecord]) -> float:
@@ -49,8 +51,9 @@ def false_arrival_rate(records: list[TurnRecord]) -> float:
 
 
 def _mentioned_sides(guidance: str) -> list[str]:
-    text = guidance.lower()
-    return [w for w in _DIRECTION_WORDS if re.search(rf"\b{w}\b", text)]
+    text = guidance.lower().replace("左右", "")      # 「5 公尺左右」 = about 5 m, not a side
+    return [side for side, words in _DIRECTION_WORDS.items()
+            if any(re.search(w, text) for w in words)]
 
 
 def direction_sanity(records: list[TurnRecord]) -> float:
@@ -68,7 +71,8 @@ def direction_sanity(records: list[TurnRecord]) -> float:
         return 0.0
     sane = sum(
         1 for r in directional
-        if any(side in r.detection_sides for side in _mentioned_sides(r.guidance))
+        if any(side in r.detection_sides or f"far-{side}" in r.detection_sides
+               for side in _mentioned_sides(r.guidance))
     )
     return sane / len(directional)
 

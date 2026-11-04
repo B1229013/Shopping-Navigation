@@ -1,4 +1,4 @@
-"""OpenAI text embeddings for object labels, cached on disk — the vectors the server's
+"""Text embeddings for object labels (EMBEDDING_BASE_URL, OpenAI by default), cached on disk — the vectors the server's
 hybrid_max similarity uses when its embedding cache is on (visual_localization:
 _emb_cache, EMBEDDING_MODEL), and what legacy/server/locate_v2._embedding_sim used.
 
@@ -6,7 +6,7 @@ _emb_cache, EMBEDDING_MODEL), and what legacy/server/locate_v2._embedding_sim us
   emb.ensure(labels)            # fetches only the missing ones (paid; ~$0.02 / 1M tokens)
   emb.matrix(labels)            # (n × d) L2-normalised rows
 
-Same endpoint and model as server/visual_localization._compute_query_embeddings.
+Same endpoint, key and model as server/visual_localization.ensure_label_embeddings.
 """
 from __future__ import annotations
 
@@ -37,15 +37,15 @@ class LabelEmbeddings:
         missing = sorted({l for l in labels if l and l not in self.vec})
         if not missing:
             return 0
-        if not C.OPENAI_API_KEY:
-            sys.exit("OPENAI_API_KEY is not set")
+        if not C.EMBEDDING_API_KEY:
+            sys.exit("EMBEDDING_API_KEY / OPENAI_API_KEY is not set")
         for i in range(0, len(missing), BATCH):
             batch = missing[i:i + BATCH]
             for attempt in range(3):
                 try:
-                    r = requests.post("https://api.openai.com/v1/embeddings",
+                    r = requests.post(f"{C.EMBEDDING_BASE_URL}/embeddings",
                                       json={"input": batch, "model": self.model},
-                                      headers={"Authorization": f"Bearer {C.OPENAI_API_KEY}",
+                                      headers={"Authorization": f"Bearer {C.EMBEDDING_API_KEY}",
                                                "Content-Type": "application/json"}, timeout=60)
                     r.raise_for_status()
                     break

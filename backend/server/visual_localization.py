@@ -58,7 +58,7 @@ def _load_embedding_cache() -> bool:
         return _emb_on
     _emb_loaded = True
 
-    from server.config import EMBEDDING_CACHE_PATH, EMBEDDING_ENABLED, EMBEDDING_MODEL, OPENAI_API_KEY
+    from server.config import EMBEDDING_API_KEY, EMBEDDING_CACHE_PATH, EMBEDDING_ENABLED, EMBEDDING_MODEL
     if not EMBEDDING_ENABLED or not EMBEDDING_CACHE_PATH:
         return False
     cache_path = Path(EMBEDDING_CACHE_PATH)
@@ -78,14 +78,14 @@ def _load_embedding_cache() -> bool:
             log.info("Loaded %d label embeddings from %s", len(data), cache_path)
         except Exception as e:
             log.warning("Failed to load embedding cache %s: %s", cache_path, e)
-    _emb_on = bool(_emb_cache) or bool(OPENAI_API_KEY)
+    _emb_on = bool(_emb_cache) or bool(EMBEDDING_API_KEY)
     if not _emb_on:
-        log.warning("Label embeddings off: no cache at %s and no OPENAI_API_KEY", cache_path)
+        log.warning("Label embeddings off: no cache at %s and no EMBEDDING_API_KEY / OPENAI_API_KEY", cache_path)
     return _emb_on
 
 
 def ensure_label_embeddings(labels: List[str], persist: bool = False) -> int:
-    """Fetch the embeddings of labels not cached yet (OpenAI, batched); persist=True also
+    """Fetch the embeddings of labels not cached yet (EMBEDDING_BASE_URL, batched); persist=True also
     writes them to EMBEDDING_CACHE_PATH (.npz) — for the reference map's labels, which
     are the same on every photo. Returns how many were fetched; failures leave the
     labels without a vector (character similarity only)."""
@@ -94,16 +94,16 @@ def ensure_label_embeddings(labels: List[str], persist: bool = False) -> int:
     global _emb_retry_at
     import time as _time
     missing = list(dict.fromkeys(l for l in labels if l and l not in _emb_cache))
-    from server.config import EMBEDDING_CACHE_PATH, EMBEDDING_MODEL, OPENAI_API_KEY
+    from server.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_CACHE_PATH, EMBEDDING_MODEL
     fetched = 0
-    if missing and OPENAI_API_KEY and _time.time() >= _emb_retry_at:
+    if missing and EMBEDDING_API_KEY and _time.time() >= _emb_retry_at:
         for i in range(0, len(missing), _EMB_BATCH):
             batch = missing[i:i + _EMB_BATCH]
             try:
                 resp = requests.post(
-                    "https://api.openai.com/v1/embeddings",
+                    f"{EMBEDDING_BASE_URL}/embeddings",
                     json={"input": batch, "model": EMBEDDING_MODEL},
-                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {EMBEDDING_API_KEY}", "Content-Type": "application/json"},
                     timeout=30,
                 )
                 resp.raise_for_status()

@@ -165,7 +165,7 @@ pip install numpy pillow torch transformers   # 伺服器端 DINOv2 定位（沒
    | 變數 | 用途 |
    |------|------|
    | `NAVIGATION_BACKEND_URL` | 導航後端網址；專案裡目前是 `http://172.20.10.3:8000`，請改成你跑後端那台電腦的 IP |
-   | `GROQ_API_KEY` | AI 助手 |
+   | `GROQ_API_KEY` | AI 助手用的 OpenAI 金鑰。建議直接在 App 的「設定」頁輸入（只存在手機上，優先使用）；寫在 Build Settings 會存進 `project.pbxproj`，不要 commit。不要寫進程式碼 |
    | `PADDLEOCR_API_URL` / `PADDLEOCR_ACCESS_TOKEN` | 收據 OCR |
    | `MAPS_API_KEY` | 地圖相關功能 |
    | `ON_DEVICE_DINO` | 設 `YES` 才在手機上跑 DINOv2（預設不設＝關閉，由後端算） |

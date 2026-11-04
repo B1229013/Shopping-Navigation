@@ -2,9 +2,12 @@ import Foundation
 
 // Read API keys from Info.plist (set via Xcode build settings or xcconfig)
 enum AppConfig {
+    /// Key for every LLM call: the one typed in Settings (stored as "groqApiKey"), else the
+    /// GROQ_API_KEY build setting via Info.plist. Never a literal here — the source is shared.
     static var groqApiKey: String {
-        // Forced OpenAI key for the demo (ignore build settings / Info.plist). Rotate/remove before any public push.
-        return "REDACTED-OPENAI-KEY"
+        let typed = UserDefaults.standard.string(forKey: "groqApiKey") ?? ""
+        if !typed.isEmpty { return typed }
+        return Bundle.main.object(forInfoDictionaryKey: "GROQ_API_KEY") as? String ?? ""
     }
 
     /// OpenAI-compatible chat-completions endpoint for every LLM call (CGU gateway).

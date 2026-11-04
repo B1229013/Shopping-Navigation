@@ -26,10 +26,10 @@ import Foundation
 /// Pure logic, no sensors / UI — unit tested in scripts/swift_logic_tests.
 final class MapPositionEstimator {
     struct Config {
-        var minConfidence = 0.25
+        var minConfidence = 0.6
         /// The very first fix has no sensor position to agree with, so the server's
         /// confidence is image-only and lower (backend loc_fusion.fuse_v2 posterior).
-        var minFirstFixConfidence = 0.15
+        var minFirstFixConfidence = 0.3
         var maxJumpM = 15.0
         var jumpOverrideConfidence = 0.85
         var minCalibrationDistanceM = 8.0

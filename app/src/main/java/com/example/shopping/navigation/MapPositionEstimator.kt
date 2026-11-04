@@ -30,7 +30,7 @@ data class Vec2(val x: Double, val y: Double) {
  *   thought it walked; fixes closer together extend the stretch instead. Within
  *   [Config.maxHeadingCorrectionDeg] it is smoothed in; beyond it, two stretches in a row
  *   must agree before the offset is replaced. [alignHeading] sets it from the user
- *   ("facing into the store");
+ *   ("facing into the store"); before either, [setMapNorth] gives a rough first offset;
  * - **step scale** — map distance A→B vs PDR distance over the same stretch, clamped.
  * Both are smoothed with [Config.learningRate] and reset only with the session.
  *
@@ -77,6 +77,10 @@ class MapPositionEstimator(val config: Config = Config()) {
     private var rawPathSinceBase = 0.0
     /** A heading offset observed far from the current one, waiting for a second stretch to confirm it. */
     private var pendingLargeOffsetDeg: Double? = null
+    /** Compass bearing of the map's +Y axis from the venue config ([setMapNorth]), or null. */
+    private var mapNorthBearingDeg: Double? = null
+    /** The offset came from the user ([alignHeading]) or a walked stretch: map north no longer applies. */
+    var headingAligned = false; private set
 
     val isCalibrated: Boolean get() = mapPosition != null
 
@@ -91,6 +95,8 @@ class MapPositionEstimator(val config: Config = Config()) {
         baseRaw = null
         rawPathSinceBase = 0.0
         pendingLargeOffsetDeg = null
+        mapNorthBearingDeg = null
+        headingAligned = false
     }
 
     /**
@@ -101,6 +107,38 @@ class MapPositionEstimator(val config: Config = Config()) {
     fun alignHeading(rawHeadingDeg: Double, mapHeadingDeg: Double) {
         headingOffsetDeg = wrap(mapHeadingDeg - rawHeadingDeg)
         pendingLargeOffsetDeg = null
+        headingAligned = true
+    }
+
+    /**
+     * The venue config's map north: compass bearing of the map's +Y axis. A rough first
+     * offset, used only while nothing better is known — [alignHeading] (pressing "I'm at
+     * start") or a walked stretch replaces it. Applied now when the raw heading already
+     * points to magnetic north ([rawIsNorthReferenced]), otherwise at [onNorthCalibrated]:
+     * before that the raw heading's zero is arbitrary.
+     */
+    fun setMapNorth(compassBearingOfMapNorth: Double, rawIsNorthReferenced: Boolean) {
+        mapNorthBearingDeg = compassBearingOfMapNorth
+        if (rawIsNorthReferenced && !headingAligned) {
+            headingOffsetDeg = wrap(-compassBearingOfMapNorth)
+            pendingLargeOffsetDeg = null
+        }
+    }
+
+    /**
+     * The phone found north: the raw heading jumped by [rawJumpDeg] and now points to
+     * magnetic north. Without a user / walked alignment, take the map north outright;
+     * otherwise keep the map heading ([absorbRawHeadingJump]). Absorbing the jump on top of
+     * a map-north offset set too early cancelled it.
+     */
+    fun onNorthCalibrated(rawJumpDeg: Double) {
+        val north = mapNorthBearingDeg
+        if (north != null && !headingAligned) {
+            headingOffsetDeg = wrap(-north)
+            pendingLargeOffsetDeg = null
+        } else {
+            absorbRawHeadingJump(rawJumpDeg)
+        }
     }
 
     /** The raw heading itself jumped by [rawJumpDeg] (the phone found north): keep the map heading. */
@@ -165,6 +203,7 @@ class MapPositionEstimator(val config: Config = Config()) {
                 if (abs(wrap(observed - headingOffsetDeg)) <= config.maxHeadingCorrectionDeg) {
                     headingOffsetDeg = wrap(headingOffsetDeg + config.learningRate * wrap(observed - headingOffsetDeg))
                     pendingLargeOffsetDeg = null
+                    headingAligned = true
                 } else {
                     // One stretch far off may be a wrong fix; two that agree mean the
                     // compass is off (90° in the 2026-10-17 store test): take their mean.
@@ -172,6 +211,7 @@ class MapPositionEstimator(val config: Config = Config()) {
                     if (prev != null && abs(wrap(observed - prev)) <= config.largeCorrectionAgreementDeg) {
                         headingOffsetDeg = wrap(prev + wrap(observed - prev) / 2)
                         pendingLargeOffsetDeg = null
+                        headingAligned = true
                     } else {
                         pendingLargeOffsetDeg = observed
                     }

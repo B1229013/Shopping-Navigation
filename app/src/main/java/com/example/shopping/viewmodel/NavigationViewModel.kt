@@ -73,6 +73,8 @@ class NavigationViewModel : ViewModel() {
     var isAnswering: Boolean by mutableStateOf(false)
     var hasArrived: Boolean by mutableStateOf(false)
     var pendingArrival: Boolean by mutableStateOf(false)
+    /** True when [pendingArrival] was triggered by PDR proximity, not a server photo response. */
+    var arrivalFromPdr: Boolean by mutableStateOf(false)
     var isConfirming: Boolean by mutableStateOf(false)
     var annotatedPhotoUrl: String? by mutableStateOf(null)
     var errorMessage: String? by mutableStateOf(null)
@@ -91,6 +93,10 @@ class NavigationViewModel : ViewModel() {
     var retakeHint: String? by mutableStateOf(null)
     /** Several places look alike — turn ~90° on the spot and take one more photo. */
     var secondPhotoHint: String? by mutableStateOf(null)
+
+    // ── Magnetometer calibration ──
+    /** True when sensors are running but north calibration has not completed yet. */
+    var needsMagCalibration: Boolean by mutableStateOf(false); private set
 
     // ── PDR position on the map (MapPositionEstimator) ──
     /** True while the step / heading sensors are running for this screen. */
@@ -163,16 +169,20 @@ class NavigationViewModel : ViewModel() {
     private var isLoadingRoute = false
     /** Raw PDR where the server asked for a second photo; the request lapses after walking on. */
     private var secondPhotoAtRaw: Vec2? = null
+    /** PDR already triggered pendingArrival for the current route; reset on new route. */
+    private var pdrArrivalTriggered = false
     /** Node coordinates (map frame) from the last route payload. */
     private var nodeCoords: Map<Int, Vec2> = emptyMap()
 
-    fun init(sessionId: String?, goal: String, initialGuidance: String, place: String? = null) {
+    fun init(sessionId: String?, goal: String, initialGuidance: String, place: String? = null,
+             mapNorthOffsetDeg: Double? = null) {
         val isNewSession = sessionId != null && sessionId != this.sessionId
         this.sessionId = sessionId
         this.goal = goal
         this.guidance = initialGuidance
         // As on iOS: show the route from the entrance before the first photo.
         if (isNewSession) {
+            mapNorthOffsetDeg?.let { estimator.setMapNorth(it, tracker?.isNorthCalibrated == true) }
             loadRoute()
             if (place != null) loadStarts(place)
         }
@@ -186,12 +196,14 @@ class NavigationViewModel : ViewModel() {
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager ?: return
         tracker = PdrTracker(sm).also { t ->
             t.onStep = { x, y, _ -> onStep(Vec2(x.toDouble(), y.toDouble())) }
-            // Finding north rotates the raw heading (and later PDR steps) at once; keep the
-            // map heading where it was, e.g. the "facing into the store" alignment.
+            // Finding north rotates the raw heading (and later PDR steps) at once: keep the
+            // map heading where it was (e.g. the "facing into the store" alignment), or, with
+            // no alignment yet, take the venue's map north now that raw points to north.
             t.onNorthCalibrated = {
                 t.northCorrectionDeg?.let { jump ->
-                    estimator.absorbRawHeadingJump(jump)
+                    estimator.onNorthCalibrated(jump)
                     rawHeadingDeg = normalize360(t.getCalibratedYawDeg().toDouble())
+                    needsMagCalibration = false
                     publishEstimate()
                 }
             }
@@ -200,7 +212,10 @@ class NavigationViewModel : ViewModel() {
         sensorsRunning = true
         headingJob = viewModelScope.launch {
             while (isActive) {
-                tracker?.let { rawHeadingDeg = normalize360(it.getCalibratedYawDeg().toDouble()) }
+                tracker?.let {
+                    rawHeadingDeg = normalize360(it.getCalibratedYawDeg().toDouble())
+                    needsMagCalibration = !it.isNorthCalibrated
+                }
                 mapHeadingDeg = estimator.mapHeading(rawHeadingDeg)
                 if (isOnMap) updateLiveArrow()
                 delay(HEADING_POLL_MS)
@@ -236,6 +251,13 @@ class NavigationViewModel : ViewModel() {
         val m = mapPosition
         if (m != null) followMapPosition(m) else followRaw(raw)
         followState?.let { st ->
+            if (st.arrived && !pdrArrivalTriggered && !pendingArrival && !hasArrived && phase != "done") {
+                pdrArrivalTriggered = true
+                pendingArrival = true
+                arrivalFromPdr = true
+                guidance = st.prompt
+                clearArrow()
+            }
             val now = SystemClock.elapsedRealtime()
             if (st.needsReplan && now - lastReplanAtMs > REPLAN_MIN_INTERVAL_MS) {
                 lastReplanAtMs = now
@@ -308,6 +330,7 @@ class NavigationViewModel : ViewModel() {
     }
 
     private fun installRoute(path: PathResponse, keepPhoneAnchor: Boolean) {
+        pdrArrivalTriggered = false
         val polyline = path.polyline.map { Vec2(it[0], it[1]) }
         val turns = path.turns.map { Vec2(it.at[0], it.at[1]) to it.direction }
         val m = mapPosition
@@ -353,6 +376,18 @@ class NavigationViewModel : ViewModel() {
                     FixResult.Accepted -> {
                         fixAccepted = true
                         lastFixNodeId = nid
+                        // First fix with no heading alignment yet: use the DINO-matched
+                        // directional photo's heading as the initial offset so the first
+                        // PDR steps after this fix go in roughly the right direction.
+                        if (!estimator.headingAligned) {
+                            val dh = response.heading_deg
+                            val dc = response.heading_confidence ?: 0.0
+                            if (dh != null && dc >= MIN_HEADING_CONFIDENCE) {
+                                val raw = tracker?.let { normalize360(it.getCalibratedYawDeg().toDouble()) } ?: rawHeadingDeg
+                                estimator.alignHeading(raw, dh)
+                                Log.i("NavHeading", "DINO heading init: raw=%.1f° dino=%.1f° conf=%.2f".format(raw, dh, dc))
+                            }
+                        }
                         estimator.ingest(rawPdr)          // replay the steps walked since the shutter
                         publishEstimate()
                         mapPosition?.let { followMapPosition(it) }
@@ -394,6 +429,7 @@ class NavigationViewModel : ViewModel() {
                     pendingArrival = false
                 } else {
                     pendingArrival = true
+                    arrivalFromPdr = false
                 }
                 pendingQuestion = null
                 clearArrow()
@@ -561,6 +597,12 @@ class NavigationViewModel : ViewModel() {
         }
     }
 
+    /** PDR arrival dismissed ("還沒到"): resume navigation without calling the server. */
+    fun dismissPdrArrival() {
+        pendingArrival = false
+        arrivalFromPdr = false
+    }
+
     /** Answer the "眼前有沒有看到要找的東西？" question with a button (有 / 沒有). */
     fun answerConfirm(yes: Boolean) {
         answerText = if (yes) "有" else "沒有"
@@ -606,7 +648,15 @@ class NavigationViewModel : ViewModel() {
         val mapPos = mapPosition
         val dist = distanceSinceFix
         val fixNode = lastFixNodeId
-        val heading = mapHeadingDeg
+        // Same raw heading as the live arrow and the PDR steps (calibrated GameRotVec yaw): the
+        // offset is learned against it, and its yaw follows the phone's x axis, which stays
+        // level when the phone is held upright for a photo. The accel+mag azimuth (logged for
+        // comparison only) follows the phone's top, which points up then and can flip 180°.
+        val rawNow = tracker?.let { normalize360(it.getCalibratedYawDeg().toDouble()) } ?: rawHeadingDeg
+        val heading = estimator.mapHeading(rawNow)
+        Log.i("HeadingDebug", "calYaw=%.1f° azimuth=%.1f° camera=%.1f° offset=%.1f° → heading=%.1f°".format(
+            rawNow, tracker?.getAzimuthDeg() ?: -1f, tracker?.getCameraHeadingDeg() ?: -1f,
+            estimator.headingOffsetDeg, heading))
 
         val photoFile = File(context.cacheDir, "nav_photo_${System.currentTimeMillis()}.jpg")
         val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()

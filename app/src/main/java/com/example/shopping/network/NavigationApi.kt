@@ -26,6 +26,7 @@ data class StartSessionResponse(
     val goal_objects: List<String>,
     val place: String? = null,
     val goal_node_id: Int? = null,
+    val map_north_offset_deg: Double? = null,
 )
 
 data class PlaceInfo(

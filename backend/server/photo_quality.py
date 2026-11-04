@@ -4,9 +4,9 @@ Two stages, both cheap:
 
 1. `assess_image` — before any model call. Sharpness is the variance of a 4-neighbour
    Laplacian on a 512 px grayscale copy; brightness is its mean (0–255). Thresholds
-   were set on the 23 photos of 測試路線1 (sharpness 1662–2597, brightness 106–138)
-   against Gaussian-blurred (σ=12 px: ≤ 45) and darkened (25 %: ≤ 34) copies, with a
-   wide margin so normal photos are never rejected.
+   were set against Gaussian-blurred (σ=12 px: ≤ 45) and darkened (25 %: ≤ 34)
+   copies. Supermarket photos score 800–2600, office hallway photos 100–400; the
+   threshold must clear both environments.
 2. `assess_occlusion` — after detection. People / carts / hands covering ≥ 30 % of the
    frame, or covering ≥ 10 % while fewer than 3 other objects remain to match.
 
@@ -21,7 +21,7 @@ from typing import Iterable, Optional
 import numpy as np
 from PIL import Image, ImageOps
 
-MIN_SHARPNESS = 150.0
+MIN_SHARPNESS = 60.0
 MIN_BRIGHTNESS = 45.0
 MAX_OCCLUDED_FRACTION = 0.30
 MIN_USEFUL_OBJECTS = 3

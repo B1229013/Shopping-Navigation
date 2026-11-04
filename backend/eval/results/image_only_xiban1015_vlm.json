@@ -1,0 +1,2051 @@
+{
+ "set": "xiban1015",
+ "n_photos": 144,
+ "generated": "2026-10-21 03:06",
+ "commit": "323433d",
+ "machine": "yixianlin / Intel64 Family 6 Model 154 Stepping 4, GenuineIntel / GPU NVIDIA GeForce MX550",
+ "map": {
+  "place": "系辦",
+  "nodes": 36,
+  "source": "neo4j",
+  "fingerprint": "1ea9723cf92b",
+  "sidecar_sha1": "ead9ef52d3d8"
+ },
+ "config": {
+  "locate_fusion_weights": [
+   1.0,
+   0.1,
+   0.3
+  ],
+  "server_image_k": "32,64,8",
+  "confident_threshold": 0.15,
+  "dino_model": "facebook/dinov2-base",
+  "perception": {
+   "model": "gpt-5.4-mini",
+   "base_url": "https://api.openai.com/v1",
+   "rounds": 1,
+   "pass3": false,
+   "goal": "定位",
+   "goal_objects": [],
+   "prompts_sha1": "9bb095df3ecc"
+  }
+ },
+ "perception": "vlm",
+ "vlm_calls": {
+  "total": 287,
+  "by_kind": {
+   "pass1": 144,
+   "pass2": 143
+  },
+  "errors": 0,
+  "pass3_useful_photos": 0
+ },
+ "live_comparison": null,
+ "timing_s": {
+  "quality": {
+   "mean": 0.02,
+   "median": 0.02
+  },
+  "vlm": {
+   "mean": 7.22,
+   "median": 7.47
+  },
+  "dino": {
+   "mean": 0.54,
+   "median": 0.48
+  },
+  "fusion": {
+   "mean": 0.4,
+   "median": 0.38
+  },
+  "total": {
+   "mean": 8.18,
+   "median": 8.44
+  }
+ },
+ "text_coverage": {
+  "photos": 144,
+  "with_ocr_text_in_map": 62,
+  "with_aisle_sign_evidence": 0
+ },
+ "sensor_modes": [
+  "none"
+ ],
+ "variants": {
+  "prod": {
+   "metrics": {
+    "n": 144,
+    "top1": 61.8,
+    "top5": 88.2,
+    "within_1_hop": 72.9,
+    "error_m": {
+     "mean": 2.07,
+     "median": 0.0
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.07,
+     "median": 0.62
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 92.4,
+      "n": 133,
+      "top1_when_confident": 64.7,
+      "within_1_hop_when_confident": 74.4
+     },
+     ">=0.6": {
+      "coverage": 62.5,
+      "n": 90,
+      "top1_when_confident": 78.9,
+      "within_1_hop_when_confident": 81.1
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 56,
+     "rejected_occlusion": 0,
+     "below_threshold": 0,
+     "answered": 88,
+     "coverage": 61.1,
+     "top1_of_answered": 68.2
+    },
+    "heading": {
+     "labelled": 0,
+     "with_prediction": 0,
+     "within_45deg": null,
+     "n_correct_node": 0,
+     "within_45deg_on_correct_node": null
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 144,
+      "top1": 61.8,
+      "within_1_hop": 72.9
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 36,
+      "mean_top1": 61.8,
+      "any_top1": 86.1,
+      "most_confident_top1": 77.8,
+      "most_confident_within_1_hop": 80.6
+     },
+     "at_node": {
+      "points": 36,
+      "mean_top1": 61.8,
+      "any_top1": 86.1,
+      "most_confident_top1": 77.8,
+      "most_confident_within_1_hop": 80.6
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 55,
+    "kind": {
+     "neighbour (1 hop)": 16,
+     "far (≥3 hops)": 31,
+     "2 hops": 8
+    },
+    "truth_in_top5": 38,
+    "between_nodes": 0,
+    "occluded": 0,
+    "low_quality": 27,
+    "confused_pairs": [
+     {
+      "nodes": [
+       22,
+       33
+      ],
+      "count": 3,
+      "directions": {
+       "22->33": 1,
+       "33->22": 2
+      }
+     },
+     {
+      "nodes": [
+       4,
+       28
+      ],
+      "count": 3,
+      "directions": {
+       "4->28": 3
+      }
+     },
+     {
+      "nodes": [
+       5,
+       29
+      ],
+      "count": 2,
+      "directions": {
+       "5->29": 2
+      }
+     },
+     {
+      "nodes": [
+       6,
+       7
+      ],
+      "count": 2,
+      "directions": {
+       "6->7": 1,
+       "7->6": 1
+      }
+     },
+     {
+      "nodes": [
+       10,
+       18
+      ],
+      "count": 2,
+      "directions": {
+       "10->18": 2
+      }
+     },
+     {
+      "nodes": [
+       11,
+       16
+      ],
+      "count": 2,
+      "directions": {
+       "11->16": 1,
+       "16->11": 1
+      }
+     },
+     {
+      "nodes": [
+       15,
+       16
+      ],
+      "count": 2,
+      "directions": {
+       "15->16": 2
+      }
+     },
+     {
+      "nodes": [
+       18,
+       21
+      ],
+      "count": 2,
+      "directions": {
+       "21->18": 2
+      }
+     },
+     {
+      "nodes": [
+       21,
+       33
+      ],
+      "count": 2,
+      "directions": {
+       "21->33": 1,
+       "33->21": 1
+      }
+     },
+     {
+      "nodes": [
+       21,
+       22
+      ],
+      "count": 2,
+      "directions": {
+       "22->21": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "01/wp8_right",
+      "truth": 6,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 17.6,
+      "conf": 0.56,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp20_left",
+      "truth": 18,
+      "pred": 24,
+      "hop": 6,
+      "err_m": 17.1,
+      "conf": 0.6,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp8_left",
+      "truth": 6,
+      "pred": 17,
+      "hop": 11,
+      "err_m": 15.1,
+      "conf": 0.31,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp10_right",
+      "truth": 8,
+      "pred": 15,
+      "hop": 7,
+      "err_m": 14.9,
+      "conf": 0.61,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp9_left",
+      "truth": 7,
+      "pred": 17,
+      "hop": 10,
+      "err_m": 12.7,
+      "conf": 0.77,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp14_front",
+      "truth": 12,
+      "pred": 18,
+      "hop": 6,
+      "err_m": 12.7,
+      "conf": 0.72,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp21_left",
+      "truth": 20,
+      "pred": 9,
+      "hop": 11,
+      "err_m": 10.8,
+      "conf": 0.22,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp11_right",
+      "truth": 9,
+      "pred": 17,
+      "hop": 8,
+      "err_m": 9.5,
+      "conf": 0.7,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp12_right",
+      "truth": 10,
+      "pred": 18,
+      "hop": 8,
+      "err_m": 9.5,
+      "conf": 0.38,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp12_left",
+      "truth": 10,
+      "pred": 18,
+      "hop": 8,
+      "err_m": 9.5,
+      "conf": 0.4,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp22_right",
+      "truth": 21,
+      "pred": 18,
+      "hop": 3,
+      "err_m": 9.1,
+      "conf": 0.67,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp22_back",
+      "truth": 21,
+      "pred": 18,
+      "hop": 3,
+      "err_m": 9.1,
+      "conf": 0.49,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp9_right",
+      "truth": 7,
+      "pred": 20,
+      "hop": 13,
+      "err_m": 9.0,
+      "conf": 0.96,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp7_front",
+      "truth": 5,
+      "pred": 22,
+      "hop": 17,
+      "err_m": 9.0,
+      "conf": 0.62,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp13_right",
+      "truth": 11,
+      "pred": 16,
+      "hop": 5,
+      "err_m": 9.0,
+      "conf": 0.87,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "dino_only": {
+   "metrics": {
+    "n": 144,
+    "top1": 59.7,
+    "top5": 87.5,
+    "within_1_hop": 72.9,
+    "error_m": {
+     "mean": 2.23,
+     "median": 0.0
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.32,
+     "median": 0.75
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 89.6,
+      "n": 129,
+      "top1_when_confident": 65.1,
+      "within_1_hop_when_confident": 76.0
+     },
+     ">=0.6": {
+      "coverage": 59.0,
+      "n": 85,
+      "top1_when_confident": 81.2,
+      "within_1_hop_when_confident": 85.9
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 56,
+     "rejected_occlusion": 0,
+     "below_threshold": 0,
+     "answered": 88,
+     "coverage": 61.1,
+     "top1_of_answered": 68.2
+    },
+    "heading": {
+     "labelled": 0,
+     "with_prediction": 0,
+     "within_45deg": null,
+     "n_correct_node": 0,
+     "within_45deg_on_correct_node": null
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 144,
+      "top1": 59.7,
+      "within_1_hop": 72.9
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 36,
+      "mean_top1": 59.7,
+      "any_top1": 80.6,
+      "most_confident_top1": 72.2,
+      "most_confident_within_1_hop": 75.0
+     },
+     "at_node": {
+      "points": 36,
+      "mean_top1": 59.7,
+      "any_top1": 80.6,
+      "most_confident_top1": 72.2,
+      "most_confident_within_1_hop": 75.0
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 58,
+    "kind": {
+     "neighbour (1 hop)": 19,
+     "far (≥3 hops)": 30,
+     "2 hops": 9
+    },
+    "truth_in_top5": 40,
+    "between_nodes": 0,
+    "occluded": 0,
+    "low_quality": 30,
+    "confused_pairs": [
+     {
+      "nodes": [
+       22,
+       33
+      ],
+      "count": 4,
+      "directions": {
+       "22->33": 1,
+       "33->22": 3
+      }
+     },
+     {
+      "nodes": [
+       5,
+       29
+      ],
+      "count": 2,
+      "directions": {
+       "5->29": 2
+      }
+     },
+     {
+      "nodes": [
+       6,
+       7
+      ],
+      "count": 2,
+      "directions": {
+       "6->7": 1,
+       "7->6": 1
+      }
+     },
+     {
+      "nodes": [
+       11,
+       16
+      ],
+      "count": 2,
+      "directions": {
+       "11->16": 1,
+       "16->11": 1
+      }
+     },
+     {
+      "nodes": [
+       19,
+       20
+      ],
+      "count": 2,
+      "directions": {
+       "20->19": 2
+      }
+     },
+     {
+      "nodes": [
+       23,
+       34
+      ],
+      "count": 2,
+      "directions": {
+       "23->34": 1,
+       "34->23": 1
+      }
+     },
+     {
+      "nodes": [
+       4,
+       28
+      ],
+      "count": 2,
+      "directions": {
+       "4->28": 2
+      }
+     },
+     {
+      "nodes": [
+       25,
+       34
+      ],
+      "count": 2,
+      "directions": {
+       "34->25": 2
+      }
+     },
+     {
+      "nodes": [
+       0,
+       1
+      ],
+      "count": 1,
+      "directions": {
+       "1->0": 1
+      }
+     },
+     {
+      "nodes": [
+       2,
+       3
+      ],
+      "count": 1,
+      "directions": {
+       "3->2": 1
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "01/wp8_right",
+      "truth": 6,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 17.6,
+      "conf": 0.59,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp20_left",
+      "truth": 18,
+      "pred": 24,
+      "hop": 6,
+      "err_m": 17.1,
+      "conf": 0.57,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp8_left",
+      "truth": 6,
+      "pred": 17,
+      "hop": 11,
+      "err_m": 15.1,
+      "conf": 0.41,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp22_left",
+      "truth": 21,
+      "pred": 16,
+      "hop": 5,
+      "err_m": 15.0,
+      "conf": 0.28,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp10_right",
+      "truth": 8,
+      "pred": 15,
+      "hop": 7,
+      "err_m": 14.9,
+      "conf": 0.59,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp9_left",
+      "truth": 7,
+      "pred": 17,
+      "hop": 10,
+      "err_m": 12.7,
+      "conf": 0.72,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp21_left",
+      "truth": 20,
+      "pred": 16,
+      "hop": 4,
+      "err_m": 12.0,
+      "conf": 0.24,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp12_right",
+      "truth": 10,
+      "pred": 15,
+      "hop": 5,
+      "err_m": 10.8,
+      "conf": 0.45,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp11_right",
+      "truth": 9,
+      "pred": 17,
+      "hop": 8,
+      "err_m": 9.5,
+      "conf": 0.77,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp12_left",
+      "truth": 10,
+      "pred": 18,
+      "hop": 8,
+      "err_m": 9.5,
+      "conf": 0.57,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp22_right",
+      "truth": 21,
+      "pred": 18,
+      "hop": 3,
+      "err_m": 9.1,
+      "conf": 0.47,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp23_back",
+      "truth": 22,
+      "pred": 19,
+      "hop": 3,
+      "err_m": 9.0,
+      "conf": 0.21,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp9_right",
+      "truth": 7,
+      "pred": 20,
+      "hop": 13,
+      "err_m": 9.0,
+      "conf": 0.99,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp7_front",
+      "truth": 5,
+      "pred": 22,
+      "hop": 17,
+      "err_m": 9.0,
+      "conf": 0.44,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp13_right",
+      "truth": 11,
+      "pred": 16,
+      "hop": 5,
+      "err_m": 9.0,
+      "conf": 0.85,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "no_objects": {
+   "metrics": {
+    "n": 144,
+    "top1": 60.4,
+    "top5": 86.8,
+    "within_1_hop": 72.2,
+    "error_m": {
+     "mean": 2.21,
+     "median": 0.0
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.22,
+     "median": 0.64
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 92.4,
+      "n": 133,
+      "top1_when_confident": 63.9,
+      "within_1_hop_when_confident": 73.7
+     },
+     ">=0.6": {
+      "coverage": 63.2,
+      "n": 91,
+      "top1_when_confident": 79.1,
+      "within_1_hop_when_confident": 82.4
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 56,
+     "rejected_occlusion": 0,
+     "below_threshold": 0,
+     "answered": 88,
+     "coverage": 61.1,
+     "top1_of_answered": 67.0
+    },
+    "heading": {
+     "labelled": 0,
+     "with_prediction": 0,
+     "within_45deg": null,
+     "n_correct_node": 0,
+     "within_45deg_on_correct_node": null
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 144,
+      "top1": 60.4,
+      "within_1_hop": 72.2
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 36,
+      "mean_top1": 60.4,
+      "any_top1": 83.3,
+      "most_confident_top1": 72.2,
+      "most_confident_within_1_hop": 75.0
+     },
+     "at_node": {
+      "points": 36,
+      "mean_top1": 60.4,
+      "any_top1": 83.3,
+      "most_confident_top1": 72.2,
+      "most_confident_within_1_hop": 75.0
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 57,
+    "kind": {
+     "neighbour (1 hop)": 17,
+     "far (≥3 hops)": 32,
+     "2 hops": 8
+    },
+    "truth_in_top5": 38,
+    "between_nodes": 0,
+    "occluded": 0,
+    "low_quality": 28,
+    "confused_pairs": [
+     {
+      "nodes": [
+       22,
+       33
+      ],
+      "count": 4,
+      "directions": {
+       "22->33": 1,
+       "33->22": 3
+      }
+     },
+     {
+      "nodes": [
+       4,
+       28
+      ],
+      "count": 3,
+      "directions": {
+       "4->28": 3
+      }
+     },
+     {
+      "nodes": [
+       5,
+       29
+      ],
+      "count": 2,
+      "directions": {
+       "5->29": 2
+      }
+     },
+     {
+      "nodes": [
+       6,
+       7
+      ],
+      "count": 2,
+      "directions": {
+       "6->7": 1,
+       "7->6": 1
+      }
+     },
+     {
+      "nodes": [
+       11,
+       16
+      ],
+      "count": 2,
+      "directions": {
+       "11->16": 1,
+       "16->11": 1
+      }
+     },
+     {
+      "nodes": [
+       19,
+       20
+      ],
+      "count": 2,
+      "directions": {
+       "20->19": 2
+      }
+     },
+     {
+      "nodes": [
+       18,
+       21
+      ],
+      "count": 2,
+      "directions": {
+       "21->18": 2
+      }
+     },
+     {
+      "nodes": [
+       23,
+       34
+      ],
+      "count": 2,
+      "directions": {
+       "23->34": 1,
+       "34->23": 1
+      }
+     },
+     {
+      "nodes": [
+       25,
+       34
+      ],
+      "count": 2,
+      "directions": {
+       "34->25": 2
+      }
+     },
+     {
+      "nodes": [
+       0,
+       1
+      ],
+      "count": 1,
+      "directions": {
+       "1->0": 1
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "02/wp5_back",
+      "truth": 33,
+      "pred": 15,
+      "hop": 12,
+      "err_m": 20.0,
+      "conf": 0.26,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp8_right",
+      "truth": 6,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 17.6,
+      "conf": 0.59,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp20_left",
+      "truth": 18,
+      "pred": 24,
+      "hop": 6,
+      "err_m": 17.1,
+      "conf": 0.51,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp22_left",
+      "truth": 21,
+      "pred": 16,
+      "hop": 5,
+      "err_m": 15.0,
+      "conf": 0.28,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp10_right",
+      "truth": 8,
+      "pred": 15,
+      "hop": 7,
+      "err_m": 14.9,
+      "conf": 0.59,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp9_left",
+      "truth": 7,
+      "pred": 17,
+      "hop": 10,
+      "err_m": 12.7,
+      "conf": 0.82,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp21_left",
+      "truth": 20,
+      "pred": 16,
+      "hop": 4,
+      "err_m": 12.0,
+      "conf": 0.24,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp12_right",
+      "truth": 10,
+      "pred": 15,
+      "hop": 5,
+      "err_m": 10.8,
+      "conf": 0.45,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp11_right",
+      "truth": 9,
+      "pred": 17,
+      "hop": 8,
+      "err_m": 9.5,
+      "conf": 0.77,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp12_left",
+      "truth": 10,
+      "pred": 18,
+      "hop": 8,
+      "err_m": 9.5,
+      "conf": 0.57,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp22_right",
+      "truth": 21,
+      "pred": 18,
+      "hop": 3,
+      "err_m": 9.1,
+      "conf": 0.47,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp22_back",
+      "truth": 21,
+      "pred": 18,
+      "hop": 3,
+      "err_m": 9.1,
+      "conf": 0.46,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp23_back",
+      "truth": 22,
+      "pred": 19,
+      "hop": 3,
+      "err_m": 9.0,
+      "conf": 0.21,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp9_right",
+      "truth": 7,
+      "pred": 20,
+      "hop": 13,
+      "err_m": 9.0,
+      "conf": 0.98,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp7_front",
+      "truth": 5,
+      "pred": 22,
+      "hop": 17,
+      "err_m": 9.0,
+      "conf": 0.61,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "no_text": {
+   "metrics": {
+    "n": 144,
+    "top1": 61.1,
+    "top5": 88.9,
+    "within_1_hop": 72.9,
+    "error_m": {
+     "mean": 2.1,
+     "median": 0.0
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.12,
+     "median": 0.64
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 91.7,
+      "n": 132,
+      "top1_when_confident": 64.4,
+      "within_1_hop_when_confident": 75.0
+     },
+     ">=0.6": {
+      "coverage": 61.1,
+      "n": 88,
+      "top1_when_confident": 77.3,
+      "within_1_hop_when_confident": 80.7
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 56,
+     "rejected_occlusion": 0,
+     "below_threshold": 0,
+     "answered": 88,
+     "coverage": 61.1,
+     "top1_of_answered": 68.2
+    },
+    "heading": {
+     "labelled": 0,
+     "with_prediction": 0,
+     "within_45deg": null,
+     "n_correct_node": 0,
+     "within_45deg_on_correct_node": null
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 144,
+      "top1": 61.1,
+      "within_1_hop": 72.9
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 36,
+      "mean_top1": 61.1,
+      "any_top1": 86.1,
+      "most_confident_top1": 75.0,
+      "most_confident_within_1_hop": 77.8
+     },
+     "at_node": {
+      "points": 36,
+      "mean_top1": 61.1,
+      "any_top1": 86.1,
+      "most_confident_top1": 75.0,
+      "most_confident_within_1_hop": 77.8
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 56,
+    "kind": {
+     "neighbour (1 hop)": 17,
+     "far (≥3 hops)": 29,
+     "2 hops": 10
+    },
+    "truth_in_top5": 40,
+    "between_nodes": 0,
+    "occluded": 0,
+    "low_quality": 28,
+    "confused_pairs": [
+     {
+      "nodes": [
+       21,
+       33
+      ],
+      "count": 3,
+      "directions": {
+       "21->33": 1,
+       "33->21": 2
+      }
+     },
+     {
+      "nodes": [
+       5,
+       29
+      ],
+      "count": 2,
+      "directions": {
+       "5->29": 2
+      }
+     },
+     {
+      "nodes": [
+       6,
+       7
+      ],
+      "count": 2,
+      "directions": {
+       "6->7": 1,
+       "7->6": 1
+      }
+     },
+     {
+      "nodes": [
+       10,
+       18
+      ],
+      "count": 2,
+      "directions": {
+       "10->18": 2
+      }
+     },
+     {
+      "nodes": [
+       11,
+       16
+      ],
+      "count": 2,
+      "directions": {
+       "11->16": 1,
+       "16->11": 1
+      }
+     },
+     {
+      "nodes": [
+       15,
+       16
+      ],
+      "count": 2,
+      "directions": {
+       "15->16": 2
+      }
+     },
+     {
+      "nodes": [
+       21,
+       22
+      ],
+      "count": 2,
+      "directions": {
+       "22->21": 2
+      }
+     },
+     {
+      "nodes": [
+       22,
+       33
+      ],
+      "count": 2,
+      "directions": {
+       "22->33": 1,
+       "33->22": 1
+      }
+     },
+     {
+      "nodes": [
+       23,
+       34
+      ],
+      "count": 2,
+      "directions": {
+       "23->34": 1,
+       "34->23": 1
+      }
+     },
+     {
+      "nodes": [
+       4,
+       28
+      ],
+      "count": 2,
+      "directions": {
+       "4->28": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "01/wp8_right",
+      "truth": 6,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 17.6,
+      "conf": 0.56,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp20_left",
+      "truth": 18,
+      "pred": 24,
+      "hop": 6,
+      "err_m": 17.1,
+      "conf": 0.63,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp8_left",
+      "truth": 6,
+      "pred": 17,
+      "hop": 11,
+      "err_m": 15.1,
+      "conf": 0.39,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp10_right",
+      "truth": 8,
+      "pred": 15,
+      "hop": 7,
+      "err_m": 14.9,
+      "conf": 0.61,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp9_left",
+      "truth": 7,
+      "pred": 17,
+      "hop": 10,
+      "err_m": 12.7,
+      "conf": 0.71,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp14_front",
+      "truth": 12,
+      "pred": 18,
+      "hop": 6,
+      "err_m": 12.7,
+      "conf": 0.72,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp21_left",
+      "truth": 20,
+      "pred": 9,
+      "hop": 11,
+      "err_m": 10.8,
+      "conf": 0.22,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp11_right",
+      "truth": 9,
+      "pred": 17,
+      "hop": 8,
+      "err_m": 9.5,
+      "conf": 0.7,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp12_right",
+      "truth": 10,
+      "pred": 18,
+      "hop": 8,
+      "err_m": 9.5,
+      "conf": 0.38,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp12_left",
+      "truth": 10,
+      "pred": 18,
+      "hop": 8,
+      "err_m": 9.5,
+      "conf": 0.4,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp22_right",
+      "truth": 21,
+      "pred": 18,
+      "hop": 3,
+      "err_m": 9.1,
+      "conf": 0.67,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp9_right",
+      "truth": 7,
+      "pred": 20,
+      "hop": 13,
+      "err_m": 9.0,
+      "conf": 0.97,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp7_front",
+      "truth": 5,
+      "pred": 22,
+      "hop": 17,
+      "err_m": 9.0,
+      "conf": 0.45,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp13_right",
+      "truth": 11,
+      "pred": 16,
+      "hop": 5,
+      "err_m": 9.0,
+      "conf": 0.87,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp18_left",
+      "truth": 16,
+      "pred": 11,
+      "hop": 5,
+      "err_m": 9.0,
+      "conf": 0.69,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "objects_only": {
+   "metrics": {
+    "n": 144,
+    "top1": 40.3,
+    "top5": 74.3,
+    "within_1_hop": 49.3,
+    "error_m": {
+     "mean": 4.93,
+     "median": 2.06
+    },
+    "estimated_xy_error_m": {
+     "mean": 4.57,
+     "median": 2.03
+    },
+    "photos_with_signal": 99.3,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 93.1,
+      "n": 134,
+      "top1_when_confident": 42.5,
+      "within_1_hop_when_confident": 52.2
+     },
+     ">=0.6": {
+      "coverage": 64.6,
+      "n": 93,
+      "top1_when_confident": 51.6,
+      "within_1_hop_when_confident": 60.2
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 56,
+     "rejected_occlusion": 0,
+     "below_threshold": 0,
+     "answered": 88,
+     "coverage": 61.1,
+     "top1_of_answered": 51.1
+    },
+    "heading": {
+     "labelled": 0,
+     "with_prediction": 0,
+     "within_45deg": null,
+     "n_correct_node": 0,
+     "within_45deg_on_correct_node": null
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 144,
+      "top1": 40.3,
+      "within_1_hop": 49.3
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 36,
+      "mean_top1": 40.3,
+      "any_top1": 72.2,
+      "most_confident_top1": 52.8,
+      "most_confident_within_1_hop": 63.9
+     },
+     "at_node": {
+      "points": 36,
+      "mean_top1": 40.3,
+      "any_top1": 72.2,
+      "most_confident_top1": 52.8,
+      "most_confident_within_1_hop": 63.9
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 86,
+    "kind": {
+     "far (≥3 hops)": 67,
+     "neighbour (1 hop)": 13,
+     "2 hops": 6
+    },
+    "truth_in_top5": 49,
+    "between_nodes": 0,
+    "occluded": 0,
+    "low_quality": 43,
+    "confused_pairs": [
+     {
+      "nodes": [
+       4,
+       28
+      ],
+      "count": 5,
+      "directions": {
+       "4->28": 5
+      }
+     },
+     {
+      "nodes": [
+       21,
+       33
+      ],
+      "count": 4,
+      "directions": {
+       "21->33": 1,
+       "33->21": 3
+      }
+     },
+     {
+      "nodes": [
+       23,
+       34
+      ],
+      "count": 3,
+      "directions": {
+       "23->34": 1,
+       "34->23": 2
+      }
+     },
+     {
+      "nodes": [
+       1,
+       2
+      ],
+      "count": 2,
+      "directions": {
+       "1->2": 2
+      }
+     },
+     {
+      "nodes": [
+       5,
+       8
+      ],
+      "count": 2,
+      "directions": {
+       "5->8": 1,
+       "8->5": 1
+      }
+     },
+     {
+      "nodes": [
+       7,
+       18
+      ],
+      "count": 2,
+      "directions": {
+       "7->18": 1,
+       "18->7": 1
+      }
+     },
+     {
+      "nodes": [
+       7,
+       10
+      ],
+      "count": 2,
+      "directions": {
+       "10->7": 2
+      }
+     },
+     {
+      "nodes": [
+       7,
+       16
+      ],
+      "count": 2,
+      "directions": {
+       "16->7": 2
+      }
+     },
+     {
+      "nodes": [
+       17,
+       21
+      ],
+      "count": 2,
+      "directions": {
+       "17->21": 1,
+       "21->17": 1
+      }
+     },
+     {
+      "nodes": [
+       27,
+       28
+      ],
+      "count": 2,
+      "directions": {
+       "27->28": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "01/wp17_left",
+      "truth": 15,
+      "pred": 0,
+      "hop": 15,
+      "err_m": 36.7,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp16_back",
+      "truth": 14,
+      "pred": 3,
+      "hop": 11,
+      "err_m": 27.3,
+      "conf": 0.44,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp12_left",
+      "truth": 10,
+      "pred": 35,
+      "hop": 15,
+      "err_m": 21.9,
+      "conf": 0.37,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp19_left",
+      "truth": 17,
+      "pred": 35,
+      "hop": 8,
+      "err_m": 20.0,
+      "conf": 0.83,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp2_right",
+      "truth": 1,
+      "pred": 20,
+      "hop": 19,
+      "err_m": 19.3,
+      "conf": 0.25,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp8_right",
+      "truth": 6,
+      "pred": 12,
+      "hop": 6,
+      "err_m": 18.1,
+      "conf": 0.06,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp13_back",
+      "truth": 11,
+      "pred": 5,
+      "hop": 6,
+      "err_m": 18.0,
+      "conf": 0.65,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp17_right",
+      "truth": 15,
+      "pred": 7,
+      "hop": 8,
+      "err_m": 17.5,
+      "conf": 0.5,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp15_back",
+      "truth": 13,
+      "pred": 7,
+      "hop": 6,
+      "err_m": 15.3,
+      "conf": 0.42,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp10_left",
+      "truth": 8,
+      "pred": 23,
+      "hop": 15,
+      "err_m": 15.1,
+      "conf": 0.69,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp6_front",
+      "truth": 4,
+      "pred": 9,
+      "hop": 5,
+      "err_m": 15.0,
+      "conf": 0.34,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp13_front",
+      "truth": 11,
+      "pred": 20,
+      "hop": 9,
+      "err_m": 15.0,
+      "conf": 0.95,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp18_front",
+      "truth": 16,
+      "pred": 7,
+      "hop": 9,
+      "err_m": 15.0,
+      "conf": 0.57,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp18_back",
+      "truth": 16,
+      "pred": 7,
+      "hop": 9,
+      "err_m": 15.0,
+      "conf": 0.47,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp14_back",
+      "truth": 12,
+      "pred": 7,
+      "hop": 5,
+      "err_m": 15.0,
+      "conf": 0.49,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "text_only": {
+   "metrics": {
+    "n": 144,
+    "top1": 16.7,
+    "top5": 35.4,
+    "within_1_hop": 22.2,
+    "error_m": {
+     "mean": 14.07,
+     "median": 12.21
+    },
+    "estimated_xy_error_m": {
+     "mean": 13.99,
+     "median": 12.19
+    },
+    "photos_with_signal": 43.1,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 36.8,
+      "n": 53,
+      "top1_when_confident": 43.4,
+      "within_1_hop_when_confident": 52.8
+     },
+     ">=0.6": {
+      "coverage": 25.7,
+      "n": 37,
+      "top1_when_confident": 51.4,
+      "within_1_hop_when_confident": 62.2
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 56,
+     "rejected_occlusion": 0,
+     "below_threshold": 49,
+     "answered": 39,
+     "coverage": 27.1,
+     "top1_of_answered": 38.5
+    },
+    "heading": {
+     "labelled": 0,
+     "with_prediction": 0,
+     "within_45deg": null,
+     "n_correct_node": 0,
+     "within_45deg_on_correct_node": null
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 144,
+      "top1": 16.7,
+      "within_1_hop": 22.2
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 36,
+      "mean_top1": 16.7,
+      "any_top1": 47.2,
+      "most_confident_top1": 41.7,
+      "most_confident_within_1_hop": 50.0
+     },
+     "at_node": {
+      "points": 36,
+      "mean_top1": 16.7,
+      "any_top1": 47.2,
+      "most_confident_top1": 41.7,
+      "most_confident_within_1_hop": 50.0
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 120,
+    "kind": {
+     "far (≥3 hops)": 107,
+     "neighbour (1 hop)": 8,
+     "2 hops": 5
+    },
+    "truth_in_top5": 27,
+    "between_nodes": 0,
+    "occluded": 0,
+    "low_quality": 48,
+    "confused_pairs": [
+     {
+      "nodes": [
+       0,
+       27
+      ],
+      "count": 8,
+      "directions": {
+       "27->0": 8
+      }
+     },
+     {
+      "nodes": [
+       0,
+       4
+      ],
+      "count": 7,
+      "directions": {
+       "4->0": 7
+      }
+     },
+     {
+      "nodes": [
+       4,
+       28
+      ],
+      "count": 5,
+      "directions": {
+       "4->28": 5
+      }
+     },
+     {
+      "nodes": [
+       0,
+       6
+      ],
+      "count": 4,
+      "directions": {
+       "0->6": 1,
+       "6->0": 3
+      }
+     },
+     {
+      "nodes": [
+       0,
+       10
+      ],
+      "count": 4,
+      "directions": {
+       "10->0": 4
+      }
+     },
+     {
+      "nodes": [
+       0,
+       11
+      ],
+      "count": 4,
+      "directions": {
+       "11->0": 4
+      }
+     },
+     {
+      "nodes": [
+       0,
+       14
+      ],
+      "count": 4,
+      "directions": {
+       "14->0": 4
+      }
+     },
+     {
+      "nodes": [
+       0,
+       33
+      ],
+      "count": 4,
+      "directions": {
+       "33->0": 4
+      }
+     },
+     {
+      "nodes": [
+       0,
+       1
+      ],
+      "count": 3,
+      "directions": {
+       "1->0": 3
+      }
+     },
+     {
+      "nodes": [
+       0,
+       8
+      ],
+      "count": 3,
+      "directions": {
+       "8->0": 3
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "01/wp17_right",
+      "truth": 15,
+      "pred": 0,
+      "hop": 15,
+      "err_m": 36.7,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp17_back",
+      "truth": 15,
+      "pred": 0,
+      "hop": 15,
+      "err_m": 36.7,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp17_left",
+      "truth": 15,
+      "pred": 0,
+      "hop": 15,
+      "err_m": 36.7,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp16_front",
+      "truth": 14,
+      "pred": 0,
+      "hop": 14,
+      "err_m": 36.2,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp16_right",
+      "truth": 14,
+      "pred": 0,
+      "hop": 14,
+      "err_m": 36.2,
+      "conf": 0.06,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp16_back",
+      "truth": 14,
+      "pred": 0,
+      "hop": 14,
+      "err_m": 36.2,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp16_left",
+      "truth": 14,
+      "pred": 0,
+      "hop": 14,
+      "err_m": 36.2,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp14_front",
+      "truth": 12,
+      "pred": 0,
+      "hop": 12,
+      "err_m": 36.1,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp14_back",
+      "truth": 12,
+      "pred": 0,
+      "hop": 12,
+      "err_m": 36.1,
+      "conf": 0.06,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp15_front",
+      "truth": 13,
+      "pred": 0,
+      "hop": 13,
+      "err_m": 36.0,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp15_right",
+      "truth": 13,
+      "pred": 0,
+      "hop": 13,
+      "err_m": 36.0,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp15_back",
+      "truth": 13,
+      "pred": 0,
+      "hop": 13,
+      "err_m": 36.0,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp18_front",
+      "truth": 16,
+      "pred": 0,
+      "hop": 16,
+      "err_m": 33.7,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp18_right",
+      "truth": 16,
+      "pred": 0,
+      "hop": 16,
+      "err_m": 33.7,
+      "conf": 0.03,
+      "condition": "at_node"
+     },
+     {
+      "id": "01/wp18_back",
+      "truth": 16,
+      "pred": 0,
+      "hop": 16,
+      "err_m": 33.7,
+      "conf": 0.03,
+      "condition": "at_node"
+     }
+    ]
+   }
+  }
+ },
+ "grid": {
+  "prod": {
+   "at_node": {
+    "none": {
+     "n": 144,
+     "top1": 61.8,
+     "within_1_hop": 72.9,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.62
+    }
+   }
+  },
+  "dino_only": {
+   "at_node": {
+    "none": {
+     "n": 144,
+     "top1": 59.7,
+     "within_1_hop": 72.9,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.75
+    }
+   }
+  }
+ },
+ "paired": {},
+ "notes": [
+  "感知＝伺服器模式 B（部署中的 .env：PERCEPTION_ENABLED=0、OCR_ENABLED=0）：兩階段 VLM（gpt-5.4-mini），目標用中性的「定位」；每張照片只問一次並快取",
+  "融合權重 DINOv2 : 物件 : 文字 = 1 : 0.1 : 0.3；物件相似度＝字元與語意向量取較大值",
+  "地圖＝Neo4j「系辦」（組員 iPhone 照片）；測試照片＝2026-10-15 自己用 Android 拍的兩趟，答案逐點人工確認（eval/data/xiban1015_labels.csv）；標「不確定」的點，走道相鄰點也算對",
+  "座標完全相同的節點互相算對（系辦：#24/#25/#35）"
+ ],
+ "detail_file": "image_only_xiban1015_vlm_photos.jsonl"
+}

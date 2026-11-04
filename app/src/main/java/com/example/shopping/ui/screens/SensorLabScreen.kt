@@ -431,6 +431,7 @@ fun SensorLabScreen(navController: NavController) {
     // ── Display values (updated via polling) ──
     var displayStepCount by remember { mutableIntStateOf(0) }
     var displayHeading by remember { mutableFloatStateOf(0f) }
+    var displayCameraHeading by remember { mutableFloatStateOf(0f) }
     var displayPdrX by remember { mutableFloatStateOf(0f) }
     var displayPdrY by remember { mutableFloatStateOf(0f) }
     var displayGpsLat by remember { mutableStateOf<Double?>(null) }
@@ -611,6 +612,7 @@ fun SensorLabScreen(navController: NavController) {
         while (true) {
             displayStepCount = pdrTracker.totalSteps
             displayHeading = pdrTracker.headingDeg
+            displayCameraHeading = pdrTracker.getCameraHeadingDeg()
             displayPdrX = pdrTracker.x
             displayPdrY = pdrTracker.y
             totalPdrDistance = pdrTracker.totalDistance
@@ -789,7 +791,7 @@ fun SensorLabScreen(navController: NavController) {
 
             // ── Live readings ──
             StaggeredItem(index = 4) {
-                LiveReadingsCard(stepCount = displayStepCount, heading = displayHeading)
+                LiveReadingsCard(stepCount = displayStepCount, heading = displayHeading, cameraHeading = displayCameraHeading)
             }
 
             // ── Recording control ──
@@ -1713,7 +1715,7 @@ private fun GpsStatusCard(lat: Double?, lng: Double?, accuracy: Float?, hasPermi
 }
 
 @Composable
-private fun LiveReadingsCard(stepCount: Int, heading: Float) {
+private fun LiveReadingsCard(stepCount: Int, heading: Float, cameraHeading: Float = 0f) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
             .clip(RoundedCornerShape(20.dp)).background(SurfaceBase).padding(20.dp),
@@ -1729,7 +1731,8 @@ private fun LiveReadingsCard(stepCount: Int, heading: Float) {
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             BigStat(value = "$stepCount", label = "步數")
-            BigStat(value = "%.0f°".format(heading), label = "朝向")
+            BigStat(value = "%.0f°".format(heading), label = "Azimuth")
+            BigStat(value = "%.0f°".format(cameraHeading), label = "鏡頭方向")
         }
     }
 }

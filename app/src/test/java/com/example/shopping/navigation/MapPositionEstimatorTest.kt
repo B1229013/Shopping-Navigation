@@ -116,6 +116,47 @@ class MapPositionEstimatorTest {
         assertEquals(0.0, e.mapHeading(85.0), 1e-9)
     }
 
+    @Test
+    fun mapNorthWaitsForTheRawHeadingToFindNorth() {
+        val e = MapPositionEstimator()
+        e.setMapNorth(76.0, rawIsNorthReferenced = false)            // raw zero still arbitrary
+        assertEquals(0.0, e.headingOffsetDeg, 1e-9)
+        e.onNorthCalibrated(40.0)                                    // raw now magnetic: the jump is not absorbed
+        assertEquals(-76.0, e.headingOffsetDeg, 1e-9)
+        assertEquals(0.0, e.mapHeading(76.0), 1e-9)                  // facing compass 76° = map +y
+    }
+
+    @Test
+    fun mapNorthAppliesAtOnceWhenNorthIsAlreadyKnown() {
+        val e = MapPositionEstimator()
+        e.setMapNorth(330.0, rawIsNorthReferenced = true)
+        assertEquals(0.0, e.mapHeading(330.0), 1e-9)
+    }
+
+    @Test
+    fun userAlignmentOutranksMapNorth() {
+        val e = MapPositionEstimator()
+        e.setMapNorth(76.0, rawIsNorthReferenced = false)
+        e.alignHeading(rawHeadingDeg = 10.0, mapHeadingDeg = 0.0)    // "I'm at the entrance"
+        e.onNorthCalibrated(75.0)                                    // raw 10° → 85°: keep the user's heading
+        assertEquals(0.0, e.mapHeading(85.0), 1e-9)
+        e.setMapNorth(76.0, rawIsNorthReferenced = true)             // a later session's map north doesn't override it
+        assertEquals(0.0, e.mapHeading(85.0), 1e-9)
+    }
+
+    @Test
+    fun walkedCorrectionOutranksMapNorth() {
+        val e = MapPositionEstimator()
+        e.setMapNorth(76.0, rawIsNorthReferenced = false)
+        e.ingest(Vec2(0.0, 0.0))
+        e.applyFix(Vec2(0.0, 0.0), 1.0, Vec2(0.0, 0.0))
+        walk(e, Vec2(0.0, 0.0), Vec2(0.0, 10.0))
+        e.applyFix(Vec2(1.0, 10.0), 0.9, Vec2(0.0, 10.0))            // small offset learned from walking
+        val learned = e.headingOffsetDeg
+        e.onNorthCalibrated(20.0)
+        assertEquals(learned - 20.0, e.headingOffsetDeg, 1e-9)
+    }
+
     /** Fix at the origin, then two 10 m stretches PDR calls north that the map says go east. */
     private fun twoStretchesOff(e: MapPositionEstimator) {
         e.ingest(Vec2(0.0, 0.0))

@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>定位評估報告</title>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
+  --green: #3fb950; --yellow: #d29922; --red: #f85149; --purple: #bc8cff;
+  --orange: #d2a34a;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system,"SF Pro Text",system-ui,sans-serif; background:var(--bg); color:var(--text); }
+
+/* ── top bar ── */
+.topbar { position:sticky; top:0; z-index:100; background:var(--surface); border-bottom:1px solid var(--border); padding:10px 16px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.topbar label { font-size:13px; color:var(--muted); }
+.topbar select, .topbar input { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:13px; }
+.topbar select { min-width:140px; }
+.topbar input[type=text] { width:60px; }
+.topbar .stats { margin-left:auto; font-size:13px; color:var(--muted); }
+.badge { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; }
+.badge-green { background:rgba(63,185,80,.15); color:var(--green); }
+.badge-red { background:rgba(248,81,73,.15); color:var(--red); }
+.badge-yellow { background:rgba(210,153,34,.15); color:var(--yellow); }
+
+/* ── summary bar ── */
+.summary { padding:8px 16px; background:var(--surface); border-bottom:1px solid var(--border); display:flex; gap:20px; flex-wrap:wrap; font-size:13px; }
+.summary .metric { display:flex; align-items:center; gap:4px; }
+.summary .metric .val { font-weight:700; font-size:15px; }
+
+/* ── photo list ── */
+.container { padding:12px 16px; }
+.photo-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; margin-bottom:12px; overflow:hidden; }
+.photo-header { padding:10px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none; }
+.photo-header:hover { background:rgba(88,166,255,.05); }
+.photo-header .left { display:flex; align-items:center; gap:8px; }
+.photo-header .pid { font-weight:600; font-size:14px; }
+.photo-header .pred-info { font-size:13px; color:var(--muted); }
+.photo-body { display:none; padding:0 14px 14px; }
+.photo-card.open .photo-body { display:block; }
+
+/* ── minimap ── */
+.minimap-wrap { position:relative; }
+canvas.minimap { background:var(--bg); border:1px solid var(--border); border-radius:8px; width:100%; max-width:500px; }
+
+/* ── detail layout ── */
+.detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:10px; }
+@media(max-width:700px) { .detail-grid { grid-template-columns:1fr; } }
+.detail-section { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px; }
+.detail-section h3 { font-size:13px; color:var(--accent); margin-bottom:6px; }
+table.det { width:100%; border-collapse:collapse; font-size:12px; }
+table.det th { text-align:left; color:var(--muted); font-weight:500; padding:3px 6px; border-bottom:1px solid var(--border); }
+table.det td { padding:3px 6px; border-bottom:1px solid rgba(48,54,61,.4); }
+.score { font-variant-numeric:tabular-nums; }
+.score-hi { color:var(--green); font-weight:600; }
+.score-mid { color:var(--yellow); }
+.score-lo { color:var(--red); }
+
+/* ── top5 list ── */
+.top5-list { font-size:13px; }
+.top5-item { display:flex; align-items:center; gap:8px; padding:3px 0; }
+.top5-rank { width:20px; font-weight:700; color:var(--accent); text-align:center; }
+.top5-bar { height:6px; border-radius:3px; background:var(--accent); }
+.top5-item.correct .top5-rank { color:var(--green); }
+.top5-item.wrong .top5-rank { color:var(--red); }
+.top5-score { min-width:50px; text-align:right; font-variant-numeric:tabular-nums; }
+.top5-nid { min-width:50px; }
+.top5-slot { color:var(--muted); font-size:11px; }
+
+/* ── per-node evidence ── */
+.ev-bar { display:inline-block; height:8px; border-radius:4px; vertical-align:middle; }
+
+/* ── filter buttons ── */
+.filter-row { display:flex; gap:4px; flex-wrap:wrap; }
+.filter-btn { font-size:11px; padding:2px 8px; border:1px solid var(--border); border-radius:12px; background:transparent; color:var(--muted); cursor:pointer; }
+.filter-btn.active { background:rgba(88,166,255,.15); color:var(--accent); border-color:var(--accent); }
+
+/* ── loading ── */
+#loading { text-align:center; padding:80px 20px; color:var(--muted); font-size:16px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <label>場域:
+    <select id="sel-venue">
+      <option value="lab1019">A7 家樂福 (lab1019, 376張)</option>
+      <option value="xiban1015">系辦 (xiban1015, 144張)</option>
+    </select>
+  </label>
+  <label>組態:
+    <select id="sel-variant"></select>
+  </label>
+  <label>篩選:
+    <select id="sel-filter">
+      <option value="all">全部</option>
+      <option value="wrong">只看錯誤 (hit1=false)</option>
+      <option value="correct">只看正確 (hit1=true)</option>
+      <option value="low-conf">低信心 (&lt;0.5)</option>
+    </select>
+  </label>
+  <label>跳至 #<input type="text" id="goto-idx" placeholder="1"></label>
+  <div class="stats" id="stats-text"></div>
+</div>
+
+<div class="summary" id="summary-bar"></div>
+
+<div id="loading">載入中…請稍候</div>
+<div class="container" id="cards-container" style="display:none"></div>
+
+<script>
+const VENUES = {
+  lab1019:    { photos: "image_only_lab1019_vlm_photos.jsonl",    graph: "lab1019_graph.json" },
+  xiban1015:  { photos: "image_only_xiban1015_vlm_photos.jsonl",  graph: "xiban1015_graph.json" },
+};
+
+let allPhotos = [];
+let graph = { nodes:{}, edges:[] };
+let currentVariant = "prod";
+let currentFilter = "all";
+
+// ── load data ──
+async function loadVenue(venue) {
+  document.getElementById("loading").style.display = "block";
+  document.getElementById("cards-container").style.display = "none";
+  const v = VENUES[venue];
+
+  const [photosText, graphData] = await Promise.all([
+    fetch(v.photos).then(r => r.text()),
+    fetch(v.graph).then(r => r.json()),
+  ]);
+
+  allPhotos = photosText.trim().split("\n").map(l => JSON.parse(l));
+  graph = graphData;
+
+  // populate variant selector
+  const sel = document.getElementById("sel-variant");
+  sel.innerHTML = "";
+  if (allPhotos.length > 0) {
+    const variants = Object.keys(allPhotos[0].results || {});
+    for (const v of variants) {
+      const opt = document.createElement("option");
+      opt.value = v; opt.textContent = v;
+      if (v === currentVariant) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    if (!variants.includes(currentVariant)) {
+      currentVariant = variants[0] || "prod";
+      sel.value = currentVariant;
+    }
+  }
+  render();
+}
+
+function getResult(photo) {
+  const r = photo.results?.[currentVariant];
+  if (!r) return null;
+  return Array.isArray(r) ? r[0] : r;
+}
+
+function filterPhotos() {
+  return allPhotos.filter(p => {
+    const r = getResult(p);
+    if (!r) return false;
+    if (currentFilter === "wrong") return !r.hit1;
+    if (currentFilter === "correct") return r.hit1;
+    if (currentFilter === "low-conf") return r.confidence < 0.5;
+    return true;
+  });
+}
+
+// ── render ──
+function render() {
+  const photos = filterPhotos();
+  const total = allPhotos.length;
+  const hit1 = allPhotos.filter(p => getResult(p)?.hit1).length;
+  const hit5 = allPhotos.filter(p => getResult(p)?.hit5).length;
+  const avgConf = allPhotos.reduce((s,p) => s + (getResult(p)?.confidence || 0), 0) / total;
+  const avgErr = allPhotos.reduce((s,p) => s + (getResult(p)?.err_m || 0), 0) / total;
+
+  document.getElementById("summary-bar").innerHTML = `
+    <div class="metric">Hit@1: <span class="val" style="color:var(--green)">${hit1}/${total} (${(hit1/total*100).toFixed(1)}%)</span></div>
+    <div class="metric">Hit@5: <span class="val" style="color:var(--accent)">${hit5}/${total} (${(hit5/total*100).toFixed(1)}%)</span></div>
+    <div class="metric">平均信心: <span class="val">${avgConf.toFixed(3)}</span></div>
+    <div class="metric">平均誤差: <span class="val">${avgErr.toFixed(1)}m</span></div>
+  `;
+  document.getElementById("stats-text").textContent = `顯示 ${photos.length} / ${total} 張`;
+
+  const container = document.getElementById("cards-container");
+  container.innerHTML = "";
+
+  for (let i = 0; i < photos.length; i++) {
+    container.appendChild(buildCard(photos[i], i));
+  }
+
+  document.getElementById("loading").style.display = "none";
+  container.style.display = "block";
+}
+
+function scoreClass(s) {
+  if (s >= 0.3) return "score-hi";
+  if (s >= 0.1) return "score-mid";
+  return "score-lo";
+}
+
+function headingLabel(deg) {
+  if (deg == null) return "—";
+  const dirs = ["N","NE","E","SE","S","SW","W","NW"];
+  return dirs[Math.round(((deg % 360 + 360) % 360) / 45) % 8] + ` (${deg.toFixed(0)}°)`;
+}
+
+function buildCard(photo, idx) {
+  const r = getResult(photo);
+  const card = document.createElement("div");
+  card.className = "photo-card";
+  card.id = `photo-${idx}`;
+
+  const isHit = r?.hit1;
+  const statusBadge = isHit
+    ? `<span class="badge badge-green">✓ 正確</span>`
+    : `<span class="badge badge-red">✗ 錯誤 (hop ${r?.hop || "?"})</span>`;
+
+  card.innerHTML = `
+    <div class="photo-header" onclick="this.parentElement.classList.toggle('open'); drawMinimap(this.parentElement)">
+      <div class="left">
+        <span style="color:var(--muted);font-size:12px">#${idx+1}</span>
+        <span class="pid">${photo.id || photo.photo || "?"}</span>
+        ${statusBadge}
+      </div>
+      <div class="pred-info">
+        預測: WP${r?.pred ?? "?"} (${(r?.confidence*100||0).toFixed(1)}%)
+        · 真值: WP${photo.truth}
+        · 誤差: ${(r?.err_m||0).toFixed(1)}m
+        · 方向: ${r?.slot || "—"}
+      </div>
+    </div>
+    <div class="photo-body">
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:280px">
+          <canvas class="minimap" width="500" height="400" data-idx="${idx}"></canvas>
+          <div style="margin-top:4px;font-size:11px;color:var(--muted)">
+            ● 藍=預測 ● 綠=真值 ● 紅=Top2-5 · 灰線=走道
+          </div>
+        </div>
+        <div style="flex:1;min-width:240px">
+          <h3 style="font-size:13px;color:var(--accent);margin-bottom:6px">Top-5 候選</h3>
+          <div class="top5-list">${buildTop5(photo, r)}</div>
+          <div style="margin-top:10px">
+            <h3 style="font-size:13px;color:var(--accent);margin-bottom:6px">定位資訊</h3>
+            <div style="font-size:12px;line-height:1.8">
+              預測節點: <strong>WP${r?.pred ?? "?"}</strong><br>
+              信心度: <strong>${(r?.confidence||0).toFixed(3)}</strong><br>
+              方向 (slot): <strong>${r?.slot || "—"}</strong><br>
+              預測朝向: <strong>${headingLabel(r?.heading_pred)}</strong><br>
+              真值節點: <strong>WP${photo.truth}</strong><br>
+              真值朝向: <strong>${headingLabel(photo.heading_label != null ? parseFloat(photo.heading_label) : null)}</strong><br>
+              配對照片: <strong style="word-break:break-all;font-size:11px">${r?.matched_photo || "—"}</strong><br>
+              估計座標: <strong>${r?.estimated_xy ? `(${r.estimated_xy[0].toFixed(1)}, ${r.estimated_xy[1].toFixed(1)})` : "—"}</strong><br>
+              真值座標: <strong>${photo.truth_xy ? `(${photo.truth_xy[0].toFixed(1)}, ${photo.truth_xy[1].toFixed(1)})` : "—"}</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-section">
+          <h3>物件偵測 (${(photo.detections||[]).length})</h3>
+          ${buildDetTable(photo.detections)}
+        </div>
+        <div class="detail-section">
+          <h3>OCR 文字 (${(photo.ocr||[]).length})</h3>
+          ${buildOcrTable(photo.ocr)}
+        </div>
+        <div class="detail-section">
+          <h3>DINOv2 Top-10</h3>
+          ${buildDinoTable(photo.dino_top10)}
+        </div>
+        <div class="detail-section">
+          <h3>節點分數 (Top-10 by fused)</h3>
+          ${buildPerNodeTable(photo.per_node)}
+        </div>
+      </div>
+    </div>
+  `;
+  return card;
+}
+
+function buildTop5(photo, r) {
+  if (!r?.top5) return '<div style="color:var(--muted);font-size:12px">無資料</div>';
+  const maxS = r.top5[0]?.[1] || 1;
+  return r.top5.map(([nid, score], i) => {
+    const isCorrect = nid === photo.truth;
+    const cls = isCorrect ? "correct" : (i === 0 && !r.hit1 ? "wrong" : "");
+    const pct = Math.max(2, (score / maxS) * 100);
+    return `<div class="top5-item ${cls}">
+      <span class="top5-rank">${i+1}</span>
+      <span class="top5-nid">WP${nid}</span>
+      <span class="top5-score score ${scoreClass(score)}">${score.toFixed(3)}</span>
+      <div style="flex:1"><div class="top5-bar" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join("");
+}
+
+function buildDetTable(dets) {
+  if (!dets?.length) return '<div style="color:var(--muted);font-size:12px">無偵測</div>';
+  let h = '<table class="det"><tr><th>物件</th><th>信心度</th><th>位置</th></tr>';
+  for (const d of dets) {
+    h += `<tr><td>${d.label}</td><td class="score ${scoreClass(d.score)}">${d.score}</td><td style="color:var(--muted)">${d.position||""}</td></tr>`;
+  }
+  return h + "</table>";
+}
+
+function buildOcrTable(ocrs) {
+  if (!ocrs?.length) return '<div style="color:var(--muted);font-size:12px">無 OCR</div>';
+  let h = '<table class="det"><tr><th>文字</th><th>信心度</th></tr>';
+  for (const o of ocrs) {
+    h += `<tr><td><strong>${o.text}</strong></td><td class="score ${scoreClass(o.confidence)}">${o.confidence}</td></tr>`;
+  }
+  return h + "</table>";
+}
+
+function buildDinoTable(dino) {
+  if (!dino?.length) return '<div style="color:var(--muted);font-size:12px">無資料</div>';
+  let h = '<table class="det"><tr><th>#</th><th>節點</th><th>相似度</th><th>方向</th></tr>';
+  for (let i = 0; i < Math.min(dino.length, 10); i++) {
+    const [nid, sim, slot] = dino[i];
+    h += `<tr><td>${i+1}</td><td>WP${nid}</td><td class="score ${scoreClass(sim)}">${sim.toFixed(4)}</td><td style="color:var(--muted)">${slot}</td></tr>`;
+  }
+  return h + "</table>";
+}
+
+function buildPerNodeTable(pn) {
+  if (!pn || typeof pn !== "object") return '<div style="color:var(--muted);font-size:12px">無資料</div>';
+  const entries = Object.entries(pn).map(([nid, v]) => ({nid: +nid, ...v}));
+  entries.sort((a,b) => (b.fused||0) - (a.fused||0));
+  const top = entries.slice(0, 10);
+  const maxFused = top[0]?.fused || 1;
+  let h = '<table class="det"><tr><th>節點</th><th>DINOv2</th><th>物件</th><th>OCR</th><th>融合</th><th>方向</th></tr>';
+  for (const e of top) {
+    const barW = Math.max(2, (e.fused / maxFused) * 60);
+    h += `<tr>
+      <td>WP${e.nid}</td>
+      <td class="score">${(e.dino||0).toFixed(3)}</td>
+      <td class="score">${(e.obj||0).toFixed(3)}</td>
+      <td class="score">${(e.ocr||0).toFixed(3)}</td>
+      <td class="score ${scoreClass(e.fused/maxFused*0.5)}">
+        ${(e.fused||0).toFixed(2)}
+        <span class="ev-bar" style="width:${barW}px;background:var(--accent)"></span>
+      </td>
+      <td style="color:var(--muted);font-size:11px">${e.fused_slot||""}</td>
+    </tr>`;
+  }
+  return h + "</table>";
+}
+
+// ── minimap ──
+function drawMinimap(cardEl) {
+  const canvas = cardEl.querySelector("canvas.minimap");
+  if (!canvas || !canvas.dataset.idx) return;
+  const idx = parseInt(canvas.dataset.idx);
+  const photos = filterPhotos();
+  const photo = photos[idx];
+  if (!photo) return;
+  const r = getResult(photo);
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const nodes = graph.nodes || {};
+  const nids = Object.keys(nodes);
+  if (nids.length === 0) return;
+
+  // compute bounds
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const k of nids) {
+    const n = nodes[k];
+    minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x);
+    minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y);
+  }
+  const pad = 30;
+  const rangeX = maxX - minX || 1;
+  const rangeY = maxY - minY || 1;
+  const scale = Math.min((W - 2*pad) / rangeX, (H - 2*pad) / rangeY);
+  const offX = pad + ((W - 2*pad) - rangeX * scale) / 2;
+  const offY = pad + ((H - 2*pad) - rangeY * scale) / 2;
+
+  function tx(x) { return offX + (x - minX) * scale; }
+  function ty(y) { return offY + (maxY - y) * scale; } // flip Y
+
+  // edges
+  ctx.strokeStyle = "#30363d";
+  ctx.lineWidth = 1;
+  for (const [a, b] of (graph.edges || [])) {
+    const na = nodes[String(a)], nb = nodes[String(b)];
+    if (!na || !nb) continue;
+    ctx.beginPath();
+    ctx.moveTo(tx(na.x), ty(na.y));
+    ctx.lineTo(tx(nb.x), ty(nb.y));
+    ctx.stroke();
+  }
+
+  // all nodes
+  for (const k of nids) {
+    const n = nodes[k];
+    ctx.fillStyle = "#30363d";
+    ctx.beginPath();
+    ctx.arc(tx(n.x), ty(n.y), 3, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "#8b949e";
+    ctx.font = "9px sans-serif";
+    ctx.fillText(k, tx(n.x)+5, ty(n.y)-4);
+  }
+
+  // top5 markers
+  if (r?.top5) {
+    for (let i = r.top5.length - 1; i >= 0; i--) {
+      const [nid, score] = r.top5[i];
+      const n = nodes[String(nid)];
+      if (!n) continue;
+      const x = tx(n.x), y = ty(n.y);
+      if (i === 0) {
+        // top-1: blue diamond
+        ctx.fillStyle = "#58a6ff";
+        ctx.beginPath();
+        ctx.moveTo(x, y-10); ctx.lineTo(x+7, y); ctx.lineTo(x, y+10); ctx.lineTo(x-7, y);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("1", x, y+3.5);
+        ctx.textAlign = "start";
+      } else {
+        // top 2-5: red circles
+        ctx.fillStyle = `rgba(248,81,73,${0.8 - i*0.12})`;
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 9px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(String(i+1), x, y+3);
+        ctx.textAlign = "start";
+      }
+    }
+  }
+
+  // ground truth marker (green triangle)
+  if (photo.truth_xy) {
+    const x = tx(photo.truth_xy[0]), y = ty(photo.truth_xy[1]);
+    ctx.fillStyle = "#3fb950";
+    ctx.beginPath();
+    ctx.moveTo(x, y-10); ctx.lineTo(x+8, y+6); ctx.lineTo(x-8, y+6);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 8px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("GT", x, y+3);
+    ctx.textAlign = "start";
+  }
+
+  // direction arrow from predicted position
+  if (r?.estimated_xy && r?.heading_pred != null) {
+    const x = tx(r.estimated_xy[0]), y = ty(r.estimated_xy[1]);
+    const rad = (90 - r.heading_pred) * Math.PI / 180;
+    const len = 20;
+    const ex = x + Math.cos(rad) * len, ey = y - Math.sin(rad) * len;
+    ctx.strokeStyle = "#58a6ff";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.lineTo(ex, ey);
+    ctx.stroke();
+    // arrowhead
+    const angle = Math.atan2(ey-y, ex-x);
+    ctx.fillStyle = "#58a6ff";
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - 8*Math.cos(angle-0.4), ey - 8*Math.sin(angle-0.4));
+    ctx.lineTo(ex - 8*Math.cos(angle+0.4), ey - 8*Math.sin(angle+0.4));
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+// ── event handlers ──
+document.getElementById("sel-venue").addEventListener("change", e => {
+  loadVenue(e.target.value);
+});
+document.getElementById("sel-variant").addEventListener("change", e => {
+  currentVariant = e.target.value;
+  render();
+});
+document.getElementById("sel-filter").addEventListener("change", e => {
+  currentFilter = e.target.value;
+  render();
+});
+document.getElementById("goto-idx").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    const idx = parseInt(e.target.value) - 1;
+    const el = document.getElementById(`photo-${idx}`);
+    if (el) {
+      el.classList.add("open");
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      drawMinimap(el);
+    }
+  }
+});
+
+// ── init ──
+loadVenue("lab1019");
+</script>
+</body>
+</html>

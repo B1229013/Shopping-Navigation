@@ -84,7 +84,10 @@ DATA = Path(__file__).resolve().parent / "data"
 LAB_SETS = {   # Sensor Lab test walks: labels CSV, photo folders under --data-root
     "lab1019": ("lab1019_labels.csv", "output/eval_photos/1019_A7"),
 }
-SETS = ("0916", "field1017", "route1") + tuple(LAB_SETS)
+SET_PLACE = {   # sets taken somewhere other than NEO4J_PLACE: localized against this place
+    "xiban1015": "系辦",
+}
+SETS = ("0916", "field1017", "route1") + tuple(LAB_SETS) + tuple(SET_PLACE)
 VARIANTS = ("prod", "dino_only")
 # one of the two extras switched off, or DINOv2 switched off and one extra left on
 ABLATIONS = ("no_objects", "no_text", "objects_only", "text_only")
@@ -144,6 +147,25 @@ def load_items(name, ref_map, data_root, photos_dir=None):
                               heading=None, stored=False, meta={"fraction": f}))
     elif name in LAB_SETS:
         items = _lab_items(name, ref_map, data_root, xy)
+    elif name == "xiban1015":
+        # 2026-10-15 Android walks of 系辦 (my own, never in the map) against the classmate's
+        # Neo4j 系辦; labels confirmed by hand per point. unsure → the node or a walkway neighbour
+        adj = {n: set() for n in ref_map.photos}
+        for a, node in ref_map.photos.items():
+            for b in node.neighbor_nids:
+                if b in adj:
+                    adj[a].add(b)
+                    adj[b].add(a)
+        for r in _read_csv("xiban1015_labels.csv"):
+            if r["status"] == "skip":
+                continue
+            node = int(r["node"])
+            ok = [node] + (sorted(adj[node]) if r["status"] == "unsure" else [])
+            items.append(dict(id=f"{r['set']}/wp{r['wp']}_{r['direction']}", path=data_root / r["photo"],
+                              ok=ok, truth=node, truth_xy=list(xy[node]),
+                              condition="at_node" if r["status"] == "ok" else "unsure", heading=None,
+                              stored=False, meta={"point": f"{r['set']}/wp{r['wp']}", "direction": r["direction"],
+                                                  "status": r["status"]}))
     else:
         raise ValueError(name)
     missing = [it["path"] for it in items if not Path(it["path"]).is_file()]
@@ -1153,6 +1175,9 @@ def main(argv=None):
     logging.getLogger().setLevel(logging.WARNING)
 
     C.RERANK_ENABLED = False      # no VLM calls; read inside _run_early_localization
+    if args.set in SET_PLACE:     # load_map and localize read C.NEO4J_PLACE at call time
+        C.NEO4J_PLACE = SET_PLACE[args.set]
+        C.AISLE_SIGN_PLACES = set()
     if not (C.LOC_FUSION_V2 and C.LOC_SERVER_DINO):
         sys.exit("LOC_FUSION_V2 and LOC_SERVER_DINO must be on (that is the production path)")
 
@@ -1309,6 +1334,9 @@ def main(argv=None):
         notes.append(f"0916 測試點離答案節點 ≤{AT_NODE_M:g} m 算 at_node，否則 between；方向（front/right/…）是測試者自己的相對方向，不能當朝向答案")
     if args.set == "route1":
         notes.append("route1 的位置是從走道號碼牌與地標估計的（未人工確認）；在兩節點之間時 node_a、node_b 都算對")
+    if args.set == "xiban1015":
+        notes.append("地圖＝Neo4j「系辦」（組員 iPhone 照片）；測試照片＝2026-10-15 自己用 Android 拍的兩趟，"
+                     "答案逐點人工確認（eval/data/xiban1015_labels.csv）；標「不確定」的點，走道相鄰點也算對")
     if args.set in LAB_SETS:
         notes.append("答案＝拍照前設的點位標記（eval/data/" + LAB_SETS[args.set][0] + "）；中點在兩端任一節點都算對，誤差量到中點本身")
         notes.append("+replay：手機 MapPositionEstimator 的 Python 版重播 Sensor Lab 的原始 PDR（入口對齊、每點拍完後用"
@@ -1316,7 +1344,10 @@ def main(argv=None):
         notes.append("朝向標註＝拍照當下 cal_yaw 經同一個估計器轉成地圖方向（入口面向賣場＝0°），是推算值")
     if args.sim:
         notes.append(f"+simσ：手機位置＝真實位置＋σ 公尺的高斯誤差（每點 {SIM_DRAWS} 次平均），dist_since_fix 設成讓伺服器的 σ 等於該值，不給 fix_node")
-    notes.append("位置相同的兩個節點（9 和 24）互相算對")
+    if args.set in SET_PLACE:
+        notes.append("座標完全相同的節點互相算對（系辦：#24/#25/#35）")
+    else:
+        notes.append("位置相同的兩個節點（9 和 24）互相算對")
 
     rep = {
         "set": args.set, "n_photos": len(items),

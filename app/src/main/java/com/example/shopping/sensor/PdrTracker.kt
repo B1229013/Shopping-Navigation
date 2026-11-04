@@ -376,6 +376,18 @@ class PdrTracker(
     fun getGyroOnlyYawDeg(): Float = Math.toDegrees(gyroOnlyYawRad).toFloat()
     fun getCalibratedYawDeg(): Float = calibratedYawDeg()
 
+    /** Compass heading the camera (device −z) looks along, from ROTATION_VECTOR — for checking
+     *  the north calibration against an upright photo pose. [SensorManager.getOrientation]'s
+     *  azimuth follows the phone's top instead, which points up then (unstable, flips 180°
+     *  when tilted past vertical). Meaningless with the phone flat (camera points down). */
+    fun getCameraHeadingDeg(): Float {
+        val rm = FloatArray(9)
+        SensorManager.getRotationMatrixFromVector(rm, rotVec)
+        // Third column = device z in world (east, north, up); the camera looks along −z.
+        val deg = Math.toDegrees(atan2(-rm[2].toDouble(), -rm[5].toDouble())).toFloat()
+        return if (deg < 0) deg + 360f else deg
+    }
+
     // ── SensorEventListener ──
 
     override fun onSensorChanged(event: SensorEvent) {
@@ -560,6 +572,10 @@ class PdrTracker(
             }
 
             Sensor.TYPE_STEP_COUNTER -> {
+                // Record only — no step triggering or lastHwStepTime update.
+                // The catch-up logic contributed <0.1% of steps across 35 field
+                // tests, and updating lastHwStepTime here blocked the software
+                // fallback when the counter reported unchanged values.
                 val raw = event.values[0].toInt()
                 if (stepBaseline < 0) {
                     stepBaseline = raw
@@ -567,12 +583,7 @@ class PdrTracker(
                 }
                 val hwStepCount = raw - stepBaseline
                 if (hwStepCount > totalSteps) {
-                    val missed = hwStepCount - totalSteps
-                    Log.d("PdrTracker", "Counter catch-up: $missed steps (counter=$hwStepCount, tracked=$totalSteps)")
-                    repeat(missed) {
-                        stepCounterBuf.add(elapsed)
-                        onStepDetected()
-                    }
+                    Log.d("PdrTracker", "Counter ahead: $hwStepCount vs tracked=$totalSteps (record only)")
                 }
                 stepMerger.hardwareAlive(event.timestamp / 1_000_000L)
             }

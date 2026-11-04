@@ -27,6 +27,7 @@ class Session:
     history: List[dict] = field(default_factory=list)
     pending_question: Optional[str] = None
     pending_is_confirm: bool = False  # is pending_question our arrival-confirm question?
+    pending_next_instruction: Optional[str] = None  # next_instruction at the time of ASK, shown when user answers "沒有"
     last_planned_action: Optional[str] = None
     arrived: bool = False
     pending_arrival: bool = False

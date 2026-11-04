@@ -75,17 +75,27 @@ def test_default_start_is_the_entrance_or_the_first_start_point():
 def test_arrival_far_from_the_goal_asks_with_the_distance():
     with _neo():
         s = _session()
-        q = srv._far_from_goal_question(s, 10, "「entrance」附近")
+        q, far_m = srv._far_from_goal_question(s, 10, "「entrance」附近")
         assert q and "17 公尺" in q and "牛奶" in q
-        assert srv._far_from_goal_question(s, 12) is None          # 5 m away: plausible
+        assert far_m is not None and far_m > 15
+        assert srv._far_from_goal_question(s, 12) == (None, None)  # 5 m away: plausible
         s.last_loc_log = {"image_evidence": {"10": 0.4, "13": 1.9}}
-        assert srv._far_from_goal_question(s, 10) is None          # the photo itself matched the goal
+        assert srv._far_from_goal_question(s, 10) == (None, None)  # the photo itself matched the goal
+
+
+def test_arrival_very_far_should_silent_move():
+    """Distance > ARRIVAL_ASK_MAX_M → caller should MOVE, not ASK."""
+    with _neo():
+        s = _session()
+        q, far_m = srv._far_from_goal_question(s, 10, "「entrance」附近")
+        assert q is not None and far_m is not None
+        assert far_m > srv.ARRIVAL_ASK_MAX_M
 
 
 def test_arrival_is_not_gated_without_a_goal_node_for_the_phase():
     with _neo():
         s = _session(phase="checkout")                             # no checkout leg on this map
-        assert srv._far_from_goal_question(s, 10) is None
+        assert srv._far_from_goal_question(s, 10) == (None, None)
 
 
 def test_confirm_answers():

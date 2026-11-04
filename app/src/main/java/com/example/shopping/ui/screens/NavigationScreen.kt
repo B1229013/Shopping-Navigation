@@ -576,8 +576,6 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
                 vm.secondPhotoHint != null -> NavHintBanner(vm.secondPhotoHint.orEmpty(), Color(0xFF2196F3).copy(alpha = 0.85f))
                 idle && vm.sensorsRunning && !vm.isOnMap && vm.startPoints.isNotEmpty() ->
                     NavHintButton("我在起點，從這裡開始", Color.Black.copy(alpha = 0.6f), onClick = { showStartPicker = true })
-                idle && vm.needsMagCalibration ->
-                    NavHintBanner("請揮動手機畫 8 字校正磁力計", Color(0xFFFF9800).copy(alpha = 0.8f))
                 idle && vm.isOnMap && vm.distanceSinceFix >= NavigationViewModel.PHOTO_REMINDER_M ->
                     NavHintBanner("已走 ${vm.distanceSinceFix.toInt()} m，拍一張照片校正位置", Color.Black.copy(alpha = 0.55f))
                 idle && !isPhoneUpright -> NavHintBanner("手機請拿直、對準走道前方", Color.Black.copy(alpha = 0.55f))
@@ -675,47 +673,83 @@ fun NavigationScreen(navController: NavController, vm: NavigationViewModel = vie
 
             // ── Bottom: Action buttons ──
             if (vm.pendingArrival) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(
-                        onClick = { vm.confirmArrival("confirmed") },
-                        enabled = !vm.isConfirming,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White),
-                        shape = RoundedCornerShape(24.dp),
-                        modifier = Modifier.fillMaxWidth().height(46.dp)
-                    ) {
-                        if (vm.isConfirming) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                        } else {
-                            Text(
-                                when (vm.phase) {
-                                    "checkout" -> "確認已結帳"
-                                    "exit" -> "確認已到出口"
-                                    else -> "確認到達"
-                                },
-                                fontSize = 14.sp, fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+                if (vm.arrivalFromPdr) {
+                    // PDR proximity: simple confirm / dismiss
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            onClick = { vm.confirmArrival("false_positive") },
+                            onClick = { vm.confirmArrival("confirmed") },
+                            enabled = !vm.isConfirming,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White),
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.weight(1f).height(46.dp)
+                        ) {
+                            if (vm.isConfirming) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Text(
+                                    when (vm.phase) {
+                                        "checkout" -> "確認已結帳"
+                                        "exit" -> "確認已到出口"
+                                        else -> "確認到達"
+                                    },
+                                    fontSize = 14.sp, fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = { vm.dismissPdrArrival() },
                             enabled = !vm.isConfirming,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9E9E9E), contentColor = Color.White),
                             shape = RoundedCornerShape(24.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            modifier = Modifier.weight(1f).height(42.dp)
+                            modifier = Modifier.weight(1f).height(46.dp)
                         ) {
-                            Text("不是目標", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("還沒到", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
+                    }
+                } else {
+                    // Server photo response: full confirmation with mismatch options
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Button(
-                            onClick = { vm.confirmArrival("wrong_instance") },
+                            onClick = { vm.confirmArrival("confirmed") },
                             enabled = !vm.isConfirming,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9C27B0), contentColor = Color.White),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White),
                             shape = RoundedCornerShape(24.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            modifier = Modifier.weight(1f).height(42.dp)
+                            modifier = Modifier.fillMaxWidth().height(46.dp)
                         ) {
-                            Text("同類非目標", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            if (vm.isConfirming) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Text(
+                                    when (vm.phase) {
+                                        "checkout" -> "確認已結帳"
+                                        "exit" -> "確認已到出口"
+                                        else -> "確認到達"
+                                    },
+                                    fontSize = 14.sp, fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { vm.confirmArrival("false_positive") },
+                                enabled = !vm.isConfirming,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9E9E9E), contentColor = Color.White),
+                                shape = RoundedCornerShape(24.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.weight(1f).height(42.dp)
+                            ) {
+                                Text("不是目標", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                            Button(
+                                onClick = { vm.confirmArrival("wrong_instance") },
+                                enabled = !vm.isConfirming,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9C27B0), contentColor = Color.White),
+                                shape = RoundedCornerShape(24.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.weight(1f).height(42.dp)
+                            ) {
+                                Text("同類非目標", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
                         }
                     }
                 }

@@ -5,6 +5,12 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -37,6 +43,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -291,21 +298,32 @@ fun RoutePanel(
         Column(
             modifier = modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color(0xFF00BCD4).copy(alpha = 0.18f))
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFFF0EDE4).copy(alpha = 0.92f))
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     prompt ?: "定位中…",
-                    color = PanelText,
+                    color = Color(0xFF3D3D3A),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                Text("剩 ${(remainingM ?: route.distance_m).roundToInt()} m",
-                    color = PanelText.copy(alpha = 0.8f), fontSize = 12.sp)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF5B8A72).copy(alpha = 0.18f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        "${(remainingM ?: route.distance_m).roundToInt()} m",
+                        color = Color(0xFF3D6B52),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
             RouteMap(
                 route = route,
@@ -315,7 +333,7 @@ fun RoutePanel(
                 offRoute = offRoute,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(150.dp),
+                    .height(180.dp),
             )
         }
     } else if (statusMessage != null) {
@@ -328,10 +346,19 @@ fun RoutePanel(
     }
 }
 
+// ── Mini-Motorways-style pastel palette ─────────────────────────────────────
+private val MapBg           = Color(0xFFCDD4B1)   // sage green canvas
+private val RoadColor       = Color(0xFFF5F0E8)   // cream-white roads
+private val RoadShadow      = Color(0xFFB8B5AB)   // subtle road shadow
+private val RouteTeal       = Color(0xFF4AA8A0)   // teal route line
+private val TargetCoral     = Color(0xFFE8655A)   // coral-red destination
+private val TargetPinStem   = Color(0xFFC04E44)   // darker stem
+private val UserBlue        = Color(0xFF4B7BB5)   // calm blue user marker
+private val UserOffRouteRed = Color(0xFFE8655A)   // red when off route
+
 /**
- * Top-down store map: walkable edges and waypoints, the planned route (cyan), the target
- * (orange) and the user (green, with heading). Map metres → screen, y flipped
- * (map +y = heading 0° = screen up).
+ * Mini-Motorways-style flat top-down map: pastel background, thick cream roads,
+ * teal route line, pin-drop target, clean user marker with heading arrow.
  */
 @Composable
 fun RouteMap(
@@ -342,20 +369,32 @@ fun RouteMap(
     modifier: Modifier = Modifier,
     offRoute: Boolean = false,
 ) {
+    val infinite = rememberInfiniteTransition(label = "mapAnim")
+    val pulse by infinite.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Restart),
+        label = "pulse",
+    )
+    val dashPhase by infinite.animateFloat(
+        initialValue = 0f, targetValue = 20f,
+        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart),
+        label = "dashPhase",
+    )
+
     Canvas(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black.copy(alpha = 0.55f)),
+            .clip(RoundedCornerShape(14.dp))
+            .background(MapBg),
     ) {
         val pts = route.nodes
         if (pts.isEmpty()) return@Canvas
+
         val minX = pts.minOf { it.x }; val maxX = pts.maxOf { it.x }
         val minY = pts.minOf { it.y }; val maxY = pts.maxOf { it.y }
-        val pad = 12.dp.toPx()
+        val pad = 22.dp.toPx()
         val spanX = maxOf(maxX - minX, 1.0).toFloat()
         val spanY = maxOf(maxY - minY, 1.0).toFloat()
         val scale = minOf((size.width - 2 * pad) / spanX, (size.height - 2 * pad) / spanY)
-        // centre the map in whichever direction has room left over
         val offX = (size.width - spanX * scale) / 2
         val offY = (size.height - spanY * scale) / 2
         fun toScreen(x: Double, y: Double) = Offset(
@@ -363,42 +402,96 @@ fun RouteMap(
             size.height - offY - ((y - minY) * scale).toFloat(),
         )
 
-        // walkable edges + waypoints
+        // ── walkable edges as thick cream "roads" ──
+        val roadWidth = 8.dp.toPx()
+        val shadowWidth = 10.dp.toPx()
         val byId = pts.associateBy { it.id }
+        // shadow pass
         route.edges.forEach { e ->
             val a = byId[e.from] ?: return@forEach
             val b = byId[e.to] ?: return@forEach
-            drawLine(Color.White.copy(alpha = 0.25f), toScreen(a.x, a.y), toScreen(b.x, b.y), strokeWidth = 1.dp.toPx())
+            drawLine(RoadShadow, toScreen(a.x, a.y), toScreen(b.x, b.y),
+                strokeWidth = shadowWidth, cap = StrokeCap.Round)
         }
-        pts.forEach { drawCircle(Color.White.copy(alpha = 0.5f), radius = 1.5.dp.toPx(), center = toScreen(it.x, it.y)) }
+        // road pass
+        route.edges.forEach { e ->
+            val a = byId[e.from] ?: return@forEach
+            val b = byId[e.to] ?: return@forEach
+            drawLine(RoadColor, toScreen(a.x, a.y), toScreen(b.x, b.y),
+                strokeWidth = roadWidth, cap = StrokeCap.Round)
+        }
 
-        // planned route
+        // ── planned route: solid teal over the road ──
         if (route.polyline.size >= 2) {
             val line = Path()
             route.polyline.forEachIndexed { i, v ->
                 val s = toScreen(v[0], v[1])
                 if (i == 0) line.moveTo(s.x, s.y) else line.lineTo(s.x, s.y)
             }
-            drawPath(line, Color(0xFF00BCD4),
-                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(line, RouteTeal,
+                style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            // animated dashes for direction
+            drawPath(line, Color.White.copy(alpha = 0.55f),
+                style = Stroke(
+                    width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round,
+                    pathEffect = PathEffect.dashPathEffect(
+                        floatArrayOf(4.dp.toPx(), 10.dp.toPx()), dashPhase.dp.toPx()),
+                ))
         }
 
-        // target
+        // ── target: map-pin style ──
         val t = toScreen(route.target.x, route.target.y)
-        drawCircle(Color(0xFFFF9800), radius = 6.dp.toPx(), center = t)
-        drawCircle(Color.White, radius = 6.dp.toPx(), center = t, style = Stroke(width = 1.5.dp.toPx()))
+        val pinR = 8.dp.toPx()
+        val pinH = 14.dp.toPx()
+        // pin stem (triangle)
+        val pinPath = Path().apply {
+            moveTo(t.x - 4.dp.toPx(), t.y - pinR * 0.3f)
+            lineTo(t.x, t.y + pinH)
+            lineTo(t.x + 4.dp.toPx(), t.y - pinR * 0.3f)
+            close()
+        }
+        drawPath(pinPath, TargetPinStem)
+        // pin head (circle)
+        drawCircle(TargetCoral, radius = pinR, center = Offset(t.x, t.y - pinR * 0.2f))
+        drawCircle(Color.White, radius = 3.5.dp.toPx(), center = Offset(t.x, t.y - pinR * 0.2f))
 
-        // user
+        // ── user marker: circle + heading ──
         if (userX != null && userY != null) {
             val u = toScreen(userX, userY)
-            val green = if (offRoute) Color(0xFFF44336) else Color(0xFF4CAF50)   // red: off the route
-            drawCircle(green, radius = 6.dp.toPx(), center = u)
-            drawCircle(Color.White, radius = 6.dp.toPx(), center = u, style = Stroke(width = 1.5.dp.toPx()))
+            val color = if (offRoute) UserOffRouteRed else UserBlue
+
+            // gentle pulse ring
+            val pulseRadius = (10 + 8 * pulse).dp.toPx()
+            val pulseAlpha = (1f - pulse) * 0.25f
+            drawCircle(color.copy(alpha = pulseAlpha), radius = pulseRadius, center = u)
+
+            // outer white ring (shadow-ish)
+            drawCircle(Color.White, radius = 8.dp.toPx(), center = u)
+            // main filled circle
+            drawCircle(color, radius = 6.dp.toPx(), center = u)
+            // inner white dot
+            drawCircle(Color.White, radius = 2.dp.toPx(), center = u)
+
+            // heading arrow
             userHeadingDeg?.let { h ->
                 val rad = Math.toRadians(h)
-                val len = 14.dp.toPx()
+                val len = 16.dp.toPx()
                 val tip = Offset(u.x + len * sin(rad).toFloat(), u.y - len * cos(rad).toFloat())
-                drawLine(green, u, tip, strokeWidth = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                // white border of arrow
+                drawLine(Color.White, u, tip, strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
+                // colored arrow
+                drawLine(color, u, tip, strokeWidth = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                // arrowhead
+                val wingLen = 5.dp.toPx()
+                val wingAngle = Math.toRadians(30.0)
+                val leftRad = rad + Math.PI - wingAngle
+                val rightRad = rad + Math.PI + wingAngle
+                val leftWing = Offset(tip.x + wingLen * sin(leftRad).toFloat(), tip.y - wingLen * cos(leftRad).toFloat())
+                val rightWing = Offset(tip.x + wingLen * sin(rightRad).toFloat(), tip.y - wingLen * cos(rightRad).toFloat())
+                drawLine(Color.White, tip, leftWing, strokeWidth = 3.5.dp.toPx(), cap = StrokeCap.Round)
+                drawLine(Color.White, tip, rightWing, strokeWidth = 3.5.dp.toPx(), cap = StrokeCap.Round)
+                drawLine(color, tip, leftWing, strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                drawLine(color, tip, rightWing, strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
             }
         }
     }

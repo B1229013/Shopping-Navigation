@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>定位測試工具</title>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
+  --green: #3fb950; --yellow: #d29922; --red: #f85149; --purple: #bc8cff;
+  --orange: #d18616;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, "SF Pro Text", "Noto Sans TC", sans-serif; background: var(--bg); color: var(--text); }
+.container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 22px; color: var(--accent); margin-bottom: 4px; }
+.subtitle { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+
+/* Layout */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+/* Cards */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.card h2 { font-size: 15px; color: var(--accent); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.card h3 { font-size: 13px; color: var(--muted); margin: 12px 0 6px; }
+
+/* Badges */
+.badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+.badge-green { background: rgba(63,185,80,.15); color: var(--green); }
+.badge-yellow { background: rgba(210,153,34,.15); color: var(--yellow); }
+.badge-red { background: rgba(248,81,73,.15); color: var(--red); }
+.badge-purple { background: rgba(188,140,255,.15); color: var(--purple); }
+.badge-blue { background: rgba(88,166,255,.15); color: var(--accent); }
+
+/* Form */
+.form-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+select, input[type=number] { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 14px; }
+select:focus, input:focus { outline: none; border-color: var(--accent); }
+.upload-area { border: 2px dashed var(--border); border-radius: 10px; padding: 24px; text-align: center; cursor: pointer; transition: border-color .2s; }
+.upload-area:hover, .upload-area.dragover { border-color: var(--accent); background: rgba(88,166,255,.05); }
+.upload-area img { max-width: 100%; max-height: 300px; border-radius: 8px; margin-top: 8px; }
+.btn { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 10px 24px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity .2s; }
+.btn:hover { opacity: .85; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn-sm { padding: 6px 14px; font-size: 12px; border-radius: 6px; }
+.btn-outline { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+td { padding: 6px 8px; border-bottom: 1px solid rgba(48,54,61,.4); vertical-align: top; }
+.score { font-variant-numeric: tabular-nums; }
+.score-high { color: var(--green); font-weight: 600; }
+.score-mid { color: var(--yellow); }
+.score-low { color: var(--red); }
+
+/* Minimap */
+.minimap-container { position: relative; width: 100%; aspect-ratio: 1; background: var(--bg); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+.minimap-container canvas { width: 100%; height: 100%; }
+
+/* Top-5 cards */
+.top5-list { display: flex; flex-direction: column; gap: 8px; }
+.top5-item { display: flex; gap: 12px; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: rgba(22,27,34,.6); transition: border-color .2s; cursor: pointer; }
+.top5-item:hover { border-color: var(--accent); }
+.top5-item.highlight { border-color: var(--green); background: rgba(63,185,80,.08); }
+.top5-item.gt { border-color: var(--orange); background: rgba(209,134,22,.08); }
+.top5-rank { font-size: 18px; font-weight: 700; color: var(--accent); min-width: 28px; }
+.top5-rank.r1 { color: var(--green); }
+.top5-photo { width: 80px; height: 60px; object-fit: cover; border-radius: 6px; background: var(--bg); }
+.top5-info { flex: 1; }
+.top5-nid { font-weight: 600; font-size: 14px; }
+.top5-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.top5-bar { height: 4px; border-radius: 2px; background: var(--accent); margin-top: 4px; transition: width .3s; }
+
+/* Detection grid */
+.det-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.det-chip { font-size: 12px; padding: 4px 10px; border-radius: 14px; border: 1px solid var(--border); display: flex; align-items: center; gap: 4px; }
+.det-score { font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 8px; }
+
+/* Result summary */
+.result-big { font-size: 28px; font-weight: 700; color: var(--green); }
+.result-label { font-size: 12px; color: var(--muted); }
+.result-row { display: flex; gap: 24px; flex-wrap: wrap; margin: 12px 0; }
+.result-stat { text-align: center; }
+
+/* Loading */
+.loading { display: none; text-align: center; padding: 40px; }
+.loading.active { display: block; }
+.spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Ground truth */
+.gt-indicator { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 8px; border-radius: 8px; background: rgba(209,134,22,.15); color: var(--orange); font-weight: 600; }
+
+/* Direction arrow */
+.dir-arrow { display: inline-block; font-size: 18px; transition: transform .3s; }
+
+.no-data { color: var(--muted); font-style: italic; font-size: 13px; padding: 8px; }
+#results { display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>定位測試工具</h1>
+<div class="subtitle">上傳照片，測試系辦 / A7 家樂福的定位準確度</div>
+
+<!-- Upload Section -->
+<div class="card">
+  <h2>設定 & 上傳</h2>
+  <div class="form-row">
+    <label style="font-size:13px;color:var(--muted)">場域：</label>
+    <select id="place-select">
+      <option value="">載入中...</option>
+    </select>
+    <label style="font-size:13px;color:var(--muted);margin-left:12px">正確節點 (Ground Truth)：</label>
+    <input type="number" id="gt-nid" placeholder="WP 節點編號" style="width:130px">
+    <button class="btn" id="run-btn" disabled onclick="runTest()">開始定位</button>
+  </div>
+  <div class="upload-area" id="upload-area" onclick="document.getElementById('file-input').click()">
+    <div id="upload-text">
+      <div style="font-size:32px;margin-bottom:8px">📷</div>
+      <div>點擊或拖曳照片到這裡</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">支援 JPG / PNG</div>
+    </div>
+    <img id="preview-img" style="display:none" alt="preview">
+    <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleFile(this.files[0])">
+  </div>
+</div>
+
+<!-- Loading -->
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <div style="margin-top:12px;color:var(--muted)">VLM 辨識 + 定位中... (約 10-60 秒)</div>
+  <div style="margin-top:4px;font-size:12px;color:var(--muted)" id="loading-timer"></div>
+</div>
+
+<!-- Results -->
+<div id="results">
+
+<!-- Row 1: Match result + Minimap -->
+<div class="grid-2">
+  <div class="card">
+    <h2>定位結果</h2>
+    <div id="match-result"></div>
+    <h3>Ground Truth 比對</h3>
+    <div id="gt-result"></div>
+  </div>
+  <div class="card">
+    <h2>小地圖 — Top 5 候選位置</h2>
+    <div class="minimap-container" id="minimap-container">
+      <canvas id="minimap"></canvas>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--muted)">
+      <span style="color:var(--green)">●</span> 匹配位置
+      <span style="color:var(--accent);margin-left:8px">●</span> Top 2-5
+      <span style="color:var(--orange);margin-left:8px">●</span> Ground Truth
+      <span style="color:var(--muted);margin-left:8px">●</span> 其他節點
+    </div>
+  </div>
+</div>
+
+<!-- Row 2: Top-5 + Matched photo -->
+<div class="grid-2">
+  <div class="card">
+    <h2>Top 5 候選</h2>
+    <div class="top5-list" id="top5-list"></div>
+  </div>
+  <div class="card">
+    <h2>匹配到的參考照片</h2>
+    <div id="matched-photo-section">
+      <img id="matched-photo" style="max-width:100%;border-radius:8px;display:none" alt="matched">
+      <div id="matched-photo-info" style="margin-top:8px;font-size:13px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Row 3: Objects + OCR -->
+<div class="grid-2">
+  <div class="card">
+    <h2>偵測到的物件</h2>
+    <div id="det-objects"></div>
+  </div>
+  <div class="card">
+    <h2>偵測到的文字 (OCR)</h2>
+    <div id="det-ocr"></div>
+  </div>
+</div>
+
+</div><!-- /results -->
+</div><!-- /container -->
+
+<script>
+let selectedFile = null;
+let loadingStart = 0;
+let loadingInterval = null;
+
+// Drag & drop
+const uploadArea = document.getElementById('upload-area');
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadArea.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+
+function handleFile(file) {
+  if (!file) return;
+  selectedFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = document.getElementById('preview-img');
+    img.src = e.target.result;
+    img.style.display = 'block';
+    document.getElementById('upload-text').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+  document.getElementById('run-btn').disabled = false;
+}
+
+// Load places
+fetch('/places').then(r => r.json()).then(data => {
+  const sel = document.getElementById('place-select');
+  sel.innerHTML = '';
+  for (const p of (data.places || data)) {
+    const name = typeof p === 'string' ? p : p.name || p.place;
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  }
+}).catch(() => {
+  document.getElementById('place-select').innerHTML = '<option value="">無法載入場域</option>';
+});
+
+function scoreClass(s) {
+  if (s >= 0.3) return 'score-high';
+  if (s >= 0.15) return 'score-mid';
+  return 'score-low';
+}
+
+function dirArrow(deg) {
+  if (deg == null) return '';
+  return `<span class="dir-arrow" style="transform:rotate(${deg}deg)">↑</span>`;
+}
+
+function slotLabel(slot) {
+  const map = { front: '前方', right: '右方', back: '後方', left: '左方' };
+  return map[slot] || slot || '';
+}
+
+async function runTest() {
+  if (!selectedFile) return;
+  const place = document.getElementById('place-select').value;
+  const gtNid = document.getElementById('gt-nid').value;
+
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('loading').classList.add('active');
+  document.getElementById('run-btn').disabled = true;
+
+  loadingStart = Date.now();
+  loadingInterval = setInterval(() => {
+    const s = ((Date.now() - loadingStart) / 1000).toFixed(0);
+    document.getElementById('loading-timer').textContent = `已等待 ${s} 秒`;
+  }, 500);
+
+  const fd = new FormData();
+  fd.append('photo', selectedFile);
+
+  let url = `/localize-test?place=${encodeURIComponent(place)}`;
+  if (gtNid) url += `&ground_truth_nid=${gtNid}`;
+
+  try {
+    const resp = await fetch(url, { method: 'POST', body: fd });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    renderResults(data);
+  } catch (e) {
+    alert('定位失敗: ' + e.message);
+  } finally {
+    clearInterval(loadingInterval);
+    document.getElementById('loading').classList.remove('active');
+    document.getElementById('run-btn').disabled = false;
+  }
+}
+
+function renderResults(data) {
+  document.getElementById('results').style.display = 'block';
+
+  // --- Match result ---
+  const m = data.matched;
+  let mH = '';
+  if (m) {
+    mH += `<div class="result-row">
+      <div class="result-stat"><div class="result-big">WP${m.nid}</div><div class="result-label">匹配節點</div></div>
+      <div class="result-stat"><div class="result-big" style="font-size:22px">${(m.confidence * 100).toFixed(1)}%</div><div class="result-label">信心度</div></div>
+      <div class="result-stat"><div style="font-size:18px">${dirArrow(m.heading_deg)} ${m.heading_deg != null ? m.heading_deg.toFixed(0) + '°' : '-'}</div><div class="result-label">方向 ${slotLabel(m.heading_slot)}</div></div>
+      <div class="result-stat"><div style="font-size:14px"><span class="badge badge-blue">${m.method}</span></div><div class="result-label">方法</div></div>
+    </div>`;
+    if (m.reasoning) mH += `<div style="font-size:12px;color:var(--muted);margin-top:4px">${m.reasoning}</div>`;
+  } else {
+    mH = '<div style="color:var(--red);font-size:16px">定位失敗</div>';
+  }
+  mH += `<div style="font-size:12px;color:var(--muted);margin-top:8px">耗時: ${data.elapsed_s}s · 場域: ${data.place}</div>`;
+  document.getElementById('match-result').innerHTML = mH;
+
+  // --- Ground truth ---
+  const gt = data.ground_truth;
+  let gtH = '';
+  if (gt) {
+    const correct = m && m.nid === gt.nid;
+    gtH += `<div style="margin-bottom:8px">`;
+    if (correct) {
+      gtH += `<span class="badge badge-green" style="font-size:13px;padding:4px 12px">✓ Top-1 正確</span>`;
+    } else if (gt.found_in_top5) {
+      gtH += `<span class="badge badge-yellow" style="font-size:13px;padding:4px 12px">Top-${gt.rank} 命中</span>`;
+    } else {
+      gtH += `<span class="badge badge-red" style="font-size:13px;padding:4px 12px">✗ 未在 Top-5</span>`;
+    }
+    gtH += `</div>`;
+    gtH += `<div style="font-size:13px">正確位置: <strong>WP${gt.nid}</strong>`;
+    if (gt.distance_m != null) gtH += ` · 誤差距離: <strong>${gt.distance_m}m</strong>`;
+    gtH += `</div>`;
+  } else {
+    gtH = '<div class="no-data">未設定 Ground Truth</div>';
+  }
+  document.getElementById('gt-result').innerHTML = gtH;
+
+  // --- Minimap ---
+  drawMinimap(data);
+
+  // --- Top 5 ---
+  const t5 = data.top5 || [];
+  let t5H = '';
+  const maxScore = t5.length ? t5[0].score : 1;
+  for (const c of t5) {
+    const isGt = gt && c.nid === gt.nid;
+    const isTop1 = c.rank === 1;
+    const cls = isTop1 ? 'highlight' : isGt ? 'gt' : '';
+    const pct = maxScore > 0 ? Math.round((c.score / maxScore) * 100) : 0;
+    t5H += `<div class="top5-item ${cls}" onclick="highlightNode(${c.nid})">
+      <div class="top5-rank ${isTop1 ? 'r1' : ''}">#${c.rank}</div>
+      ${c.photo_url ? `<img class="top5-photo" src="${c.photo_url}" alt="WP${c.nid}" loading="lazy">` : '<div class="top5-photo" style="display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">無照片</div>'}
+      <div class="top5-info">
+        <div class="top5-nid">WP${c.nid} ${isGt ? '<span class="gt-indicator">GT</span>' : ''} ${dirArrow(c.matched_heading || c.heading_deg)} <span style="font-size:12px;color:var(--muted)">${slotLabel(c.matched_slot || '')}</span></div>
+        <div class="top5-meta">分數: ${c.score.toFixed(4)} · 位置: (${(c.pdr_x||0).toFixed(1)}, ${(c.pdr_y||0).toFixed(1)})</div>
+        <div class="top5-bar" style="width:${pct}%;${isTop1 ? 'background:var(--green)' : isGt ? 'background:var(--orange)' : ''}"></div>
+      </div>
+    </div>`;
+  }
+  document.getElementById('top5-list').innerHTML = t5H || '<div class="no-data">無候選</div>';
+
+  // --- Matched photo ---
+  if (m && m.photo_url) {
+    const img = document.getElementById('matched-photo');
+    img.src = m.photo_url;
+    img.style.display = 'block';
+    document.getElementById('matched-photo-info').innerHTML =
+      `WP${m.nid} · ${slotLabel(m.heading_slot)} · ${m.heading_deg != null ? m.heading_deg.toFixed(0) + '°' : ''}`;
+  } else {
+    document.getElementById('matched-photo').style.display = 'none';
+    document.getElementById('matched-photo-info').innerHTML = '<div class="no-data">無匹配照片</div>';
+  }
+
+  // --- Detections ---
+  const dets = data.detections || [];
+  let detH = '';
+  if (dets.length) {
+    detH = '<table><tr><th>物件</th><th>信心度</th><th>位置</th></tr>';
+    for (const d of dets) {
+      detH += `<tr><td><strong>${d.label}</strong></td>
+        <td class="score ${scoreClass(d.score)}">${d.score.toFixed(3)}</td>
+        <td style="color:var(--muted)">${d.position || ''}</td></tr>`;
+    }
+    detH += '</table>';
+    detH += `<div style="margin-top:8px;font-size:12px;color:var(--muted)">共 ${dets.length} 個物件</div>`;
+  } else {
+    detH = '<div class="no-data">無偵測到物件</div>';
+  }
+  document.getElementById('det-objects').innerHTML = detH;
+
+  // --- OCR ---
+  const ocrs = data.ocr_texts || [];
+  let ocrH = '';
+  if (ocrs.length) {
+    ocrH = '<table><tr><th>文字</th><th>信心度</th></tr>';
+    for (const t of ocrs) {
+      ocrH += `<tr><td><strong>${t.text}</strong></td>
+        <td class="score ${scoreClass(t.score)}">${t.score.toFixed(3)}</td></tr>`;
+    }
+    ocrH += '</table>';
+    ocrH += `<div style="margin-top:8px;font-size:12px;color:var(--muted)">共 ${ocrs.length} 筆文字</div>`;
+  } else {
+    ocrH = '<div class="no-data">無偵測到文字</div>';
+  }
+  document.getElementById('det-ocr').innerHTML = ocrH;
+}
+
+// Minimap drawing
+let mapData = null;
+
+function drawMinimap(data) {
+  mapData = data;
+  const canvas = document.getElementById('minimap');
+  const container = document.getElementById('minimap-container');
+  const rect = container.getBoundingClientRect();
+  const W = rect.width * window.devicePixelRatio;
+  const H = rect.height * window.devicePixelRatio;
+  canvas.width = W;
+  canvas.height = H;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  const w = rect.width, h = rect.height;
+
+  const nodes = data.map_nodes || [];
+  const edges = data.map_edges || [];
+  if (!nodes.length) { ctx.fillStyle = '#8b949e'; ctx.fillText('無地圖資料', w/2 - 30, h/2); return; }
+
+  // Compute bounds
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    if (n.x < minX) minX = n.x;
+    if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y;
+    if (n.y > maxY) maxY = n.y;
+  }
+  const pad = 30;
+  const rangeX = (maxX - minX) || 1;
+  const rangeY = (maxY - minY) || 1;
+  const scale = Math.min((w - 2*pad) / rangeX, (h - 2*pad) / rangeY);
+  const offX = pad + ((w - 2*pad) - rangeX * scale) / 2;
+  const offY = pad + ((h - 2*pad) - rangeY * scale) / 2;
+
+  function tx(x) { return offX + (x - minX) * scale; }
+  function ty(y) { return offY + (maxY - y) * scale; } // flip Y
+
+  const nodeMap = {};
+  for (const n of nodes) nodeMap[n.nid] = n;
+
+  // Draw edges
+  ctx.strokeStyle = 'rgba(48,54,61,.6)';
+  ctx.lineWidth = 1;
+  for (const e of edges) {
+    const a = nodeMap[e.from], b = nodeMap[e.to];
+    if (a && b) {
+      ctx.beginPath();
+      ctx.moveTo(tx(a.x), ty(a.y));
+      ctx.lineTo(tx(b.x), ty(b.y));
+      ctx.stroke();
+    }
+  }
+
+  // Draw all nodes (grey dots)
+  for (const n of nodes) {
+    ctx.beginPath();
+    ctx.arc(tx(n.x), ty(n.y), 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(139,148,158,.3)';
+    ctx.fill();
+  }
+
+  // Highlight top-5
+  const top5 = data.top5 || [];
+  for (let i = top5.length - 1; i >= 0; i--) {
+    const c = top5[i];
+    if (c.pdr_x == null) continue;
+    const cx = tx(c.pdr_x), cy = ty(c.pdr_y);
+    const r = i === 0 ? 8 : 6;
+    const color = i === 0 ? '#3fb950' : '#58a6ff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = i === 0 ? 1.0 : 0.7;
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+    // Label
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${i === 0 ? 11 : 10}px -apple-system, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${c.nid}`, cx, cy - r - 4);
+    // Direction arrow
+    const hdeg = c.matched_heading || c.heading_deg;
+    if (hdeg != null) {
+      const rad = (hdeg - 90) * Math.PI / 180;
+      const len = r + 8;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(rad) * len, cy + Math.sin(rad) * len);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  // Highlight GT
+  const gt = data.ground_truth;
+  if (gt && gt.pdr_x != null) {
+    const gx = tx(gt.pdr_x), gy = ty(gt.pdr_y);
+    ctx.beginPath();
+    ctx.arc(gx, gy, 9, 0, Math.PI * 2);
+    ctx.strokeStyle = '#d18616';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.fillStyle = '#d18616';
+    ctx.font = 'bold 11px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`GT:${gt.nid}`, gx, gy - 14);
+  }
+
+  // Node labels for top5
+  ctx.font = '10px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+}
+
+function highlightNode(nid) {
+  // Scroll to top5 item or flash minimap
+  if (!mapData) return;
+  const canvas = document.getElementById('minimap');
+  const ctx = canvas.getContext('2d');
+  drawMinimap(mapData);
+  const nodeMap = {};
+  for (const n of (mapData.map_nodes || [])) nodeMap[n.nid] = n;
+  const nd = nodeMap[nid];
+  if (!nd) return;
+  // Recompute transforms (same as drawMinimap)
+  const container = document.getElementById('minimap-container');
+  const rect = container.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  const nodes = mapData.map_nodes;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of nodes) { if (n.x<minX)minX=n.x; if (n.x>maxX)maxX=n.x; if (n.y<minY)minY=n.y; if (n.y>maxY)maxY=n.y; }
+  const pad = 30, rangeX = (maxX-minX)||1, rangeY = (maxY-minY)||1;
+  const scale = Math.min((w-2*pad)/rangeX,(h-2*pad)/rangeY);
+  const offX = pad+((w-2*pad)-rangeX*scale)/2;
+  const offY = pad+((h-2*pad)-rangeY*scale)/2;
+  const cx = offX+(nd.x-minX)*scale, cy = offY+(maxY-nd.y)*scale;
+  // Flash
+  ctx.beginPath();
+  ctx.arc(cx, cy, 14, 0, Math.PI*2);
+  ctx.strokeStyle = '#f0f';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+}
+</script>
+</body>
+</html>

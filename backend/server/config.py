@@ -9,15 +9,15 @@ from pathlib import Path
 # Project root (where this repo lives)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Load .env from project root (Shopping-Navigation/.env)
-_dotenv = PROJECT_ROOT.parent / ".env"
-if _dotenv.exists():
-    for line in _dotenv.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, _, v = line.partition("=")
-            v = v.split("#")[0].strip()
-            os.environ.setdefault(k.strip(), v)
+# Load .env — check project root first, then parent (Shopping-Navigation/.env)
+for _dotenv in [PROJECT_ROOT / ".env", PROJECT_ROOT.parent / ".env"]:
+    if _dotenv.exists():
+        for line in _dotenv.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                v = v.split("#")[0].strip()
+                os.environ.setdefault(k.strip(), v)
 
 # Model weights — check local project first, then WSL paths
 _LOCAL_MODELS = PROJECT_ROOT / "models"
@@ -92,7 +92,7 @@ MAP_BUILD_SOURCES = [Path(p) for p in os.environ.get("MAP_BUILD_SOURCES", "").sp
 
 # LLM service — OpenAI GPT-4o
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
 # Neo4j Aura

@@ -38,6 +38,7 @@ class StartSessionResponse(BaseModel):
     goal_objects: List[str]
     place: Optional[str] = None  # the resolved place used for this session
     goal_node_id: Optional[int] = None  # first target node for AR arrow
+    map_north_offset_deg: Optional[float] = None  # compass bearing of map +Y
 
 
 class AnswerRequest(BaseModel):

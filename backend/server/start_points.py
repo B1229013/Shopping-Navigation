@@ -58,6 +58,19 @@ def load_starts(place: str, maps_dir: Path) -> List[dict]:
     return [s for s in data.get("starts") or [] if isinstance(s, dict) and s.get("id")]
 
 
+def load_north_offset(place: str, maps_dir: Path) -> Optional[float]:
+    """The angle (degrees) from geographic north to the map's +Y axis, or None."""
+    p = links_file(place, maps_dir)
+    if not p.is_file():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    v = data.get("map_north_offset_deg")
+    return float(v) if v is not None else None
+
+
 def photo_path(place: str, start_id: str, maps_dir: Path) -> Optional[Path]:
     for s in load_starts(place, maps_dir):
         if s["id"] == start_id and s.get("photo"):

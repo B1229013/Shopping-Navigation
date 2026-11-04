@@ -1,6 +1,7 @@
 {
   "place": "系辦",
   "note": "Neo4j 系辦地圖缺的走道連線（大圈與沙發小圈在入口側相鄰卻沒連），不寫回 Neo4j。",
+  "map_north_offset_deg": 330.0,
   "links": [
     {
       "from": 4,

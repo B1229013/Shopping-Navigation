@@ -1,310 +1,404 @@
-# Shopping Navigation — 室內購物導航系統
+<a id="readme-top"></a>
 
-拍照就能在賣場裡導航的 Android App，搭配一個 Python FastAPI 後端。使用者輸入要找的商品後拍照，
-後端用 **VLM 看懂照片 → 在店家的拓樸地圖上定位 → 規劃路線**，回傳逐步指引；手機在兩張照片之間
-用 **PDR（計步＋航向）** 持續更新位置。App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。
+<!-- 徽章 -->
+[![Contributors][contributors-shield]][contributors-url]
+[![Forks][forks-shield]][forks-url]
+[![Stargazers][stars-shield]][stars-url]
+[![Issues][issues-shield]][issues-url]
 
-開箱影片連結：https://drive.google.com/file/d/1nU0xep0huSmS2-fzG8ooJqlZE7_wVK6P/view?usp=sharing
+<!-- 專案標題 -->
+<br />
+<div align="center">
+  <a href="https://github.com/B1229013/Shopping-Navigation">
+    <img src="docs/architecture.jpg" alt="系統架構圖" width="720">
+  </a>
 
----
+  <h3 align="center">Shopping Navigation 室內購物導航</h3>
 
-## 倉庫與分支
+  <p align="center">
+    在賣場裡拍一張照片，就知道自己在哪、要找的商品往哪走。
+    <br />
+    <a href="#關於專案"><strong>閱讀說明 »</strong></a>
+    <br />
+    <br />
+    <a href="https://drive.google.com/file/d/1nU0xep0huSmS2-fzG8ooJqlZE7_wVK6P/view?usp=sharing">開箱影片</a>
+    &middot;
+    <a href="https://drive.google.com/file/d/1QCjDgK6mSdlr9qOnIhToC8sy7aE-zHj6/view?usp=sharing">情境影片</a>
+    &middot;
+    <a href="https://github.com/B1229013/Shopping-Navigation/issues/new?labels=bug">回報問題</a>
+    &middot;
+    <a href="https://github.com/B1229013/Shopping-Navigation/issues/new?labels=enhancement">建議功能</a>
+  </p>
+</div>
 
-| 倉庫／分支 | 內容 | 說明 |
-|------|------|------|
-| **B1229013/APP-IOS-Android `android`**（本分支） | Android App ＋ 共用後端 `backend/` | 2026-10-21 建立，內容來自 B1229023/APPNAV `main`（`32e4a8b`） |
-| B1229013/APP-IOS-Android `ios` | iOS App ＋ 同一份後端 | 前端不同所以分開；後端在 `android` 改，再合併進 `ios`（見 `ios` 分支的 README） |
-| B1229013/APP-IOS-Android `main` | 2026-09-23 的舊版（`android/`、`ios/`、`backend/` 三個資料夾） | 沒有動 |
-| B1229023/APPNAV | Android ＋ 共用後端的整合倉庫 | `android` 分支的來源 |
-| B1222017/APPNAV_ios | 原本的 iOS 倉庫 | `ios` 分支由它的 `feature/localization-fusion-v2` 合併而來 |
-| B1229013/Shopping-Navigation | Android，停在 2026-10-07 | |
+<!-- 目錄 -->
+<details>
+  <summary>目錄</summary>
+  <ol>
+    <li>
+      <a href="#關於專案">關於專案</a>
+      <ul>
+        <li><a href="#主要功能">主要功能</a></li>
+        <li><a href="#使用技術">使用技術</a></li>
+        <li><a href="#分支說明">分支說明</a></li>
+      </ul>
+    </li>
+    <li>
+      <a href="#開始使用">開始使用</a>
+      <ul>
+        <li><a href="#前置需求">前置需求</a></li>
+        <li><a href="#安裝">安裝</a></li>
+      </ul>
+    </li>
+    <li><a href="#使用方式">使用方式</a></li>
+    <li><a href="#系統架構">系統架構</a></li>
+    <li><a href="#測試">測試</a></li>
+    <li><a href="#開發路線圖">開發路線圖</a></li>
+    <li><a href="#貢獻方式">貢獻方式</a></li>
+    <li><a href="#授權">授權</a></li>
+    <li><a href="#聯絡方式">聯絡方式</a></li>
+    <li><a href="#致謝">致謝</a></li>
+  </ol>
+</details>
 
-- iOS 與 Android 共用同一套後端 API（`backend/`）；iOS 程式在 `ios` 分支。
-- 舊版分支在 B1229023/APPNAV 以 tag 保存：`archive/ranging-metric-distance`、`archive/sensorlab-pdr`、
-  `archive/sensor-nav-pdr`、`archive/remove-dead-modules`；整合前的狀態是 `backup/before-consolidate`。
-- 舊版「感測器導航」（App 的 `SensorNav*`、後端 `/snav`）已由主導航取代並移除，程式保存在 `archive/sensor-nav-pdr`
-  與 `backend/legacy/`。
 
----
 
-## 系統功能
+<!-- 關於專案 -->
+## 關於專案
 
-**導航（主功能，「AR 導航」頁）**
+在不熟的賣場找東西很花時間：GPS 在室內不準，店裡也很少有能用的室內地圖。
+Shopping Navigation 讓使用者**只要拍照**就能導航：
 
-- **選店與起點** — 從 Neo4j 讀出可用的店（`GET /places`），可選「我在起點」對準地圖方向開始（`GET /starts`）。
-- **拍照定位** — VLM 讀出照片裡的物件、商品名與標示文字，再與店家地圖比對，融合
-  **DINOv2 影像相似度 ＋ 物件名稱（中英＋語意向量）＋ OCR 文字 ＋ 手機感測器位置**，算出使用者在哪個節點、面向哪裡。
-- **路線規劃** — 在 Neo4j 的走道拓樸圖上規劃路線，小地圖與指令走同一張圖。
-- **逐步指引** — 每張照片回傳 MOVE / ASK / ARRIVED；抵達時需地圖同意，並以「是／不是」按鈕確認。
-- **PDR 即時位置** — 兩張照片之間用計步與航向更新位置、沿路線前進；照片定位後再校正。
-- **照片品質** — 太暗、模糊、被擋住時會請使用者重拍；信心不足時請使用者原地轉身再拍一張。
+1. 輸入要找的商品（例如「泡麵、牛奶」）。
+2. 拍一張眼前的照片，後端用 **VLM（視覺語言模型）** 讀出照片裡的貨架、商品和標示文字。
+3. 把照片和店家地圖比對，找出使用者在哪個位置、面向哪裡。
+4. 在店家的走道地圖上規劃路線，回傳「直走 5 公尺後右轉」這類逐步指引。
+5. 兩張照片之間，手機用 **PDR（計步＋方向）** 持續更新位置，走偏了會重新規劃。
+
+App 另外有購物清單、預算、食材紀錄與 AI 助手等購物功能。Android 與 iOS 兩個 App 共用同一個後端。
+
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
+
+### 主要功能
+
+**導航**
+* **拍照定位**：融合 **DINOv2 影像相似度 ＋ 物件名稱（中英＋語意向量）＋ OCR 文字 ＋ 走道吊牌號碼 ＋ 手機感測器位置**，
+  算出使用者在哪個節點、面向哪裡（權重 DINOv2 : 物件 : OCR = 1 : 0.1 : 0.3）。
+  在 lab1019 的 376 張測試照片上（單張照片、不帶感測器），Top-1 正確率 44.7%。
+* **路線規劃**：在 Neo4j 的走道拓樸圖上用 A* 規劃，多個商品會排出最短的拜訪順序，最後帶到收銀台和出口。
+* **逐步指引**：每張照片回傳 MOVE（繼續走）、ASK（提問）或 ARRIVED（到了），到達時用「有／沒有」按鈕確認。
+* **PDR 即時位置**：兩張照片之間用計步與方向沿著路線前進；Android 的內建計步器沒反應時，改用加速度計自己判斷步伐。
+* **照片品質檢查**：太暗、模糊、手機沒拿直、被人或推車擋住時，會請使用者重拍；位置不確定時請使用者原地轉身再拍一張。
 
 **建圖與研究工具**
-
-- **Sensor Lab** — 全螢幕拍照（倍率轉盤、點擊對焦）＋ 8 種感測器錄製與 PDR 紀錄，用來建新店的地圖。
-- **拓樸地圖建置器**（`/topomap-builder`）— 把 Sensor Lab 的走路紀錄排成地圖，上傳到 Neo4j。
-- **PDR Waypoint 編輯器**（根目錄 `pdr-waypoint-editor.html`）— 在平面圖上點出航點、Grid Snap、匯出座標 JSON。
-- **定位評估**（`backend/eval/`）— 單張影像定位基準、權重掃描、逐張報告、VLM 重播（不呼叫 API）。
-- **即時監看**（`/dashboard`）與 **定位診斷頁**（`/debug`、`/session/{id}/debug-page`）。
+* **Sensor Lab**（Android）：拍照＋錄 8 種感測器，用來替新店建圖。
+* **拓樸地圖建置器**（`/topomap-builder`）：把走路紀錄排成地圖並上傳到 Neo4j。
+* **定位評估**（`backend/eval/`）：單張影像定位基準、權重掃描、物件關係比較、計步檢查等，可重播已存的 VLM 結果不必重新付費。
+* **監看與診斷頁**：`/dashboard`、`/tracking`、`/localize-test-page`、`/session/{id}/debug-page`。
 
 **購物功能**
+* 購物清單（自動分類）、預算、歷史紀錄、食材與營養標示辨識、AI 助手、收據掃描、附近商店。
 
-- 購物清單（自動分類）、預算、歷史紀錄、食材紀錄、AI 助手、附近商店（含 AR 顯示）、收據掃描。
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
 
----
+### 使用技術
 
-## 系統架構
+* [![Python][Python-badge]][Python-url] [![FastAPI][FastAPI-badge]][FastAPI-url] 後端 API
+* [![Neo4j][Neo4j-badge]][Neo4j-url] 店家地圖（節點、走道、方向照片、物件、DINOv2 向量）
+* [![PyTorch][PyTorch-badge]][PyTorch-url] DINOv2（`facebook/dinov2-base`）影像比對
+* [![OpenAI][OpenAI-badge]][OpenAI-url] VLM 看照片、做導航決策（任何 OpenAI 相容 API，用 `OPENAI_MODEL` 設定模型）
+* [![Kotlin][Kotlin-badge]][Kotlin-url] [![Jetpack Compose][Compose-badge]][Compose-url] Android App
+* [![Swift][Swift-badge]][Swift-url] SwiftUI、CoreMotion：iOS App
 
-```
-┌────────────────────────────┐   HTTP/JSON   ┌──────────────────────────────────────────────┐
-│ Android App（Kotlin）       │ ◄───────────► │ FastAPI 後端（backend/server）               │
-│                            │   Retrofit    │                                              │
-│ NavigationScreen  拍照 ─────┼── JPEG ─────► │ VLM 感知（OpenAI 相容 API，最多 3 輪）         │
-│ MapPositionEstimator（PDR） │               │ 定位融合：DINOv2 ＋ 物件 ＋ OCR ＋ 感測器       │
-│ PathFollower ＋ 小地圖       │ ◄─ 指引／路線 ─┤ 路線規劃（Neo4j 拓樸圖）                      │
-│ Sensor Lab（建圖用）         │               │ VLM 決策 → MOVE / ASK / ARRIVED              │
-└────────────────────────────┘               └───────────────┬──────────────────────────────┘
-                                                             │
-                          ┌──────────────────────────────────┼─────────────────────┐
-                          │ Neo4j Aura：店家地圖（節點、走道、方向照片、物件、DINOv2 向量）│
-                          │ backend/maps：起點、額外走道邊、編輯器地圖                    │
-                          └──────────────────────────────────────────────────────────┘
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
 
-App 的 AI 購物功能（分類、AI 助手、收據）另外直接連 CGU LLM 閘道，不經過導航後端。
-```
+### 分支說明
 
-## 導航流程（`/session`）
+| 分支 | 內容 |
+|------|------|
+| **`main`** | **後端**（`backend/`）、文件（`docs/`、`物件導向Project/`）與 PDR 航點編輯器，不含手機 App |
+| **`android`** | Android App（`app/`，Kotlin）＋ 同一份後端 |
+| **`ios`** | iOS App（`APPNAV_ios/`，SwiftUI）＋ 同一份後端 |
+| `integrate-sensor-nav`、`docs/update-readme` | 2026-09 的舊分支，保留不動 |
 
-1. **建立 session** — `POST /session`，帶目標（如「找優格」）和店名；後端把目標拆成要找的物件。
-2. **選起點（可選）** — `POST /session/{id}/start`，從起點出發並重新規劃路線。
-3. **拍照** — `POST /session/{id}/photo`，帶照片和手機的位置／航向：
-   1. 照片品質檢查（模糊、太暗、遮擋）
-   2. VLM 感知：物件、商品名、OCR 文字、店內區域（`VLM_ROUNDS`、`VLM_PASS3`；請在 `.env` 設 `VLM_PASS3=0`，原因見 [backend/README.md](backend/README.md)）
-   3. 定位融合：伺服器端 DINOv2 找最像的參考照片，再加物件名稱、OCR、走道吊牌與感測器位置
-   4. 依定位結果在 Neo4j 拓樸圖上規劃到目標的路線
-   5. VLM 決策：根據照片與路線回傳 MOVE / ASK / ARRIVED 與中文指引
-4. **回答與確認** — `POST /session/{id}/answer`（回答 ASK）、`POST /session/{id}/confirm`（確認抵達）。
-5. **路線** — `GET /session/{id}/path` 給 App 畫小地圖與跟隨路線。
+三個分支的 `backend/` 完全一樣。後端的改動先做在 `android`，再同步到 `main` 和 `ios`（見[貢獻方式](#貢獻方式)）。
 
-每次導航的定位紀錄存在 `backend/output/sessions/<session_id>/`（`session_log.py`）。
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
 
-## 新店建圖流程
 
-1. 用 App 的 **Sensor Lab** 在店裡走一圈拍照（同時錄 PDR）。
-2. `python build_map_v2_topomap.py` — 把走路紀錄整理成建圖工作區。
-3. 開 `http://<後端>/topomap-builder` — 排節點、接走道、疊平面圖、確認。
-4. `python upload_map_v2.py` — 上傳成 Neo4j 的 V2 地圖格式（`server/map_v2.py`）。
-5. `python rebuild_objects_v2.py` — 對每張方向照片偵測物件並寫回 Neo4j。
-6. `python store_dino_v2.py` — 算每張照片的 DINOv2 向量，存進 `dino_sidecar.pkl` 和 Neo4j。
-7. 在建置器設定起點（位置、面向、照片），存在 `backend/maps/starts/<店名>/`。
 
----
-
-## 安裝與啟動
+<!-- 開始使用 -->
+## 開始使用
 
 ### 前置需求
 
-| 項目 | 版本 |
+| 項目 | 版本／說明 |
 |------|------|
-| Android Studio | Ladybug 以上（AGP 9.0.0） |
-| JDK | 17+ |
 | Python | 3.11 |
 | Neo4j Aura | 店家地圖存在這裡（導航必需） |
+| OpenAI 相容的 API 金鑰 | VLM 與物件名稱的語意向量 |
+| Android Studio ＋ JDK 17 | 只有要編譯 Android App 時（`android` 分支） |
+| Xcode | 只有要編譯 iOS App 時（`ios` 分支） |
 
-### 1. 設定 `.env`（專案根目錄，可參考 `.env.example`）
+### 安裝
 
-```env
-# ── 導航後端 ──
-OPENAI_API_KEY=your-key            # VLM、物件名稱語意向量
-OPENAI_BASE_URL=https://api.openai.com/v1   # 可改成任何 OpenAI 相容閘道
-OPENAI_MODEL=gpt-4o
-NEO4J_URI=neo4j+s://xxxx.databases.neo4j.io
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=your-password
-PERCEPTION_ENABLED=0               # 1 = 本機 GroundingDINO（需模型權重）
-OCR_ENABLED=0                      # 1 = 本機 EasyOCR
+#### 1. 後端（每個分支都有）
 
-# ── Android App ──
-BACKEND_URL=http://192.168.x.x:8000/
-CGU_API_KEY=your-cgu-key           # 購物清單分類、AI 助手、收據（CGU 閘道）
-CGU_BASE_URL=https://air.cgu.edu.tw/cgullmapi/v1
-MAPS_API_KEY=your-google-maps-key  # 附近商店
-```
+1. 下載專案
+   ```sh
+   git clone https://github.com/B1229013/Shopping-Navigation.git
+   cd Shopping-Navigation
+   ```
+2. 建立虛擬環境並安裝套件
+   ```sh
+   cd backend
+   python -m venv venv
+   source venv/bin/activate          # Windows：.\venv\Scripts\Activate.ps1
+   pip install -r requirements-server.txt
+   pip install torch transformers    # 伺服器端 DINOv2 定位；沒裝會退回只用物件＋OCR
+   ```
+3. 在專案根目錄建立 `.env`（可複製 `.env.example`）
+   ```env
+   OPENAI_API_KEY=your-key
+   OPENAI_BASE_URL=https://api.openai.com/v1   # 可改成任何 OpenAI 相容閘道
+   OPENAI_MODEL=gpt-4o
+   NEO4J_URI=neo4j+s://xxxx.databases.neo4j.io
+   NEO4J_USER=neo4j
+   NEO4J_PASSWORD=your-password
+   VLM_PASS3=0                         # 原因見 backend/README.md
+   ```
+   **不要把金鑰 commit 進 git**，`.env` 已在 `.gitignore` 裡。
+4. 啟動
+   ```sh
+   uvicorn server.server:app --host 0.0.0.0 --port 8000   # Windows 也可以用 .\start.ps1
+   ```
+   瀏覽器開 `http://localhost:8000/health` 看到 `{"status":"ok"}` 就代表正常，`/docs` 可看到所有 API。
 
-### 2. 啟動後端
+#### 2. Android App（`android` 分支）
 
-```powershell
+1. `git switch android`，用 Android Studio 開啟專案根目錄，連接手機後 Run。
+2. 後端網址：模擬器預設 `http://10.0.2.2:8000/`；實體手機用 `adb reverse tcp:8000 tcp:8000`，
+   或在 `.env` 設 `BACKEND_URL=http://<你電腦的 IP>:8000/`，也可以在 App 的設定頁切換。
+
+#### 3. iOS App（`ios` 分支）
+
+1. `git switch ios`，用 Xcode 開啟 `APPNAV_ios.xcodeproj`，選 iPhone 後 `Cmd+R`。
+2. 後端網址：target `APPNAV_ios` → Build Settings → `NAVIGATION_BACKEND_URL`，改成你跑後端那台電腦的 IP。
+3. AI 功能的 OpenAI 金鑰：在 App 的「設定」→「OpenAI API 金鑰」輸入（只存在手機上）。**不要寫進程式碼。**
+
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
+
+
+
+<!-- 使用方式 -->
+## 使用方式
+
+### 導航
+
+1. 在 App 選店、輸入要找的商品，按開始。
+2. 站在入口可以按「我在入口，從這裡開始」，讓 App 直接知道你的位置和方向。
+3. 對著走道前方拍一張照片，依指引走；箭頭和小地圖會跟著你的步伐更新。
+4. App 問「看到了嗎？」時按「有／沒有」；全部找到後會帶你到收銀台和出口。
+
+### 後端 API 流程（`/session`）
+
+| 步驟 | API |
+|------|------|
+| 建立導航 | `POST /session`（目標、店名）→ 後端把目標拆成要找的物件 |
+| 選起點（可選） | `POST /session/{id}/start` |
+| 拍照 | `POST /session/{id}/photo`（照片＋手機位置／方向）→ 照片品質 → VLM 感知 → 定位融合 → 路線 → VLM 決策 |
+| 回答與確認 | `POST /session/{id}/answer`、`POST /session/{id}/confirm`（`confirmed`、手機計步判斷到達時用 `confirmed_pdr`） |
+| 路線 | `GET /session/{id}/path`（小地圖與路線跟隨） |
+
+其他 API：`GET /places`、`GET /starts`、`POST /localize`、`GET /reference-photo/{nid}.jpg?place=…`、`GET /health`。
+完整清單見 `http://localhost:8000/docs`。
+
+### 替新店建圖
+
+1. 用 Android App 的 **Sensor Lab** 在店裡走一圈拍照（同時錄 PDR）。
+2. `python build_map_v2_topomap.py`：把走路紀錄整理成建圖工作區。
+3. 開 `http://<後端>/topomap-builder`：排節點、接走道、疊平面圖。
+4. `python upload_map_v2.py` 上傳到 Neo4j，再跑 `rebuild_objects_v2.py`（偵測物件）和 `store_dino_v2.py`（DINOv2 向量）。
+
+### 評估
+
+```sh
 cd backend
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements-server.txt
-pip install numpy pillow torch transformers   # 伺服器端 DINOv2 定位（沒裝會退回只用物件＋OCR）
-.\start.ps1
+python -m eval.image_only --set lab1019            # 單張照片定位正確率
+python -m eval.step_check <Sensor Lab 匯出資料夾>    # 走路時計步有沒有停住
 ```
 
-`start.ps1` 會啟用 venv 並以 `uvicorn server.server:app --port 8000` 啟動。
-瀏覽器開 `http://localhost:8000/docs` 可看到所有端點，`/health` 回傳 `{"status":"ok"}` 代表正常。
+說明與結果見 [`backend/eval/README.md`](backend/eval/README.md)。
 
-### 3. 安裝 App
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
 
-1. 用 Android Studio 開啟專案根目錄，連接手機後 Run。
-2. 後端連線：模擬器預設 `http://10.0.2.2:8000/`；實體手機用 `adb reverse tcp:8000 tcp:8000`，
-   或在 `.env` 設 `BACKEND_URL`，也可在 App 的設定頁切換。
 
-### Docker（選用，尚未在目前版本驗證）
 
-`backend/Dockerfile` 只裝 `requirements-cloud.txt`（不含 torch／easyocr），預設關閉本機偵測與 OCR。
+<!-- 系統架構 -->
+## 系統架構
 
-```bash
-cd backend
-docker build -t shopping-nav-backend .
+```mermaid
+flowchart LR
+    subgraph 手機
+        A["Android App<br/>Kotlin / Compose"]
+        I["iOS App<br/>SwiftUI"]
+    end
+    subgraph 後端["FastAPI 後端（backend/server）"]
+        Q["照片品質檢查"]
+        V["VLM 感知<br/>物件、商品、文字"]
+        L["定位融合<br/>DINOv2＋物件＋OCR＋走道牌＋感測器"]
+        R["路線規劃<br/>A*"]
+        D["VLM 決策<br/>MOVE / ASK / ARRIVED"]
+    end
+    N[("Neo4j Aura<br/>店家地圖")]
+    A -- "照片＋PDR 位置" --> Q
+    I -- "照片＋PDR 位置" --> Q
+    Q --> V --> L --> R --> D
+    L <--> N
+    R <--> N
+    D -- "指引＋路線" --> A
+    D -- "指引＋路線" --> I
 ```
 
-執行時以環境變數提供 `OPENAI_API_KEY`、`NEO4J_*`。
-
----
-
-## API 端點
-
-| 分類 | 端點 |
+| 資料夾 | 內容 |
 |------|------|
-| 店家與起點 | `GET /places`、`GET /starts`、`GET /starts/photo`、`POST /starts` |
-| 導航 session | `POST /session`、`POST /session/{id}/photo`、`POST /session/{id}/answer`、`POST /session/{id}/confirm`、`POST /session/{id}/start` |
-| 路線與地圖 | `GET /session/{id}/path`、`GET /session/{id}/route`、`GET /session/{id}/map`、`POST /session/{id}/sensor-map`、`GET /reference-map` |
-| 單張定位 | `POST /localize`、`POST /ocr` |
-| 照片 | `GET /session/{id}/photo/{node_id}.jpg`、`GET /session/{id}/original/{node_id}.jpg`、`GET /reference-photo/{nid}.jpg` |
-| 建圖工具 | `GET /topomap-builder` 與 `/topomap-*` 系列（來源上傳、走路紀錄、平面圖、建議、確認） |
-| 診斷 | `GET /health`、`GET /dashboard`、`GET /debug`、`GET /sessions`、`GET /session/{id}`、`GET /session/{id}/debug`、`GET /session/{id}/debug-page`、`POST /test/config` |
-| 感測器測試 | `POST /sensor-test`、`GET /sensor-test/{id}/plot.png` |
+| `backend/server/` | FastAPI 主程式（`server.py`）、VLM（`vlm.py`）、定位（`visual_localization.py`、`locate_fusion.py`、`loc_fusion.py`）、路線（`editor_map.py`、`path_planner.py`）、Neo4j（`neo4j_client.py`） |
+| `backend/eval/` | 定位與感測器評估工具、測試資料標註、結果 |
+| `backend/maps/` | 起點照片、額外走道邊、編輯器地圖 |
+| `backend/legacy/` | 舊版後端與早期研究（只供研究腳本使用） |
+| `app/`（`android` 分支） | Android App：`NavigationViewModel`、`MapPositionEstimator`、`PathFollower`、`PdrTracker`、Sensor Lab |
+| `APPNAV_ios/`（`ios` 分支） | iOS App：`NavigationCameraView`、`MapPositionEstimator`、`PathFollower`、`MotionPathTracker` |
+| `docs/` | 設計文件書、測試計劃書、期中／期末報告、架構圖 |
 
----
+詳細的設定開關（`LOC_*`、`VLM_*`…）見 [`backend/README.md`](backend/README.md)。
 
-## 專案結構
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
 
-```
-.
-├── app/                      Android App（Kotlin、Jetpack Compose）
-├── backend/
-│   ├── server/               FastAPI 後端（正式使用）
-│   ├── eval/                 定位與導航評估（資料、結果、圖表）
-│   ├── maps/                 起點照片、額外走道邊（neo4j_links）、編輯器地圖
-│   ├── legacy/               舊後端（/snav、topomap_v2、locate_v2）與早期定位研究，只供研究腳本 import
-│   ├── *.py                  建圖與資料處理腳本（見下表）
-│   ├── dino_sidecar.pkl      參考照片的 DINOv2 向量
-│   └── Dockerfile、requirements-*.txt、start.ps1
-├── docs/                     設計文件書、測試計劃書、期中／期末報告、架構圖
-├── 物件導向Project/            使用案例圖、使用案例描述、活動圖
-└── pdr-waypoint-editor.html  PDR 航點編輯器
-```
 
-### 後端模組（`backend/server/`）
 
-| 檔案 | 功能 |
-|------|------|
-| `server.py` | FastAPI 主程式：所有端點與拍照導航流程 |
-| `config.py` | 讀 `.env`，所有開關與權重（`LOC_*`、`VLM_*`、`EMBEDDING_*`、`NEO4J_*`…） |
-| `vlm.py` / `prompts.py` | VLM 呼叫與提示詞：感知（最多 3 輪）、導航決策、提問 |
-| `goal_decomposer.py` | 把目標拆成要找的物件 |
-| `visual_localization.py` | 照片物件／OCR 與 Neo4j 地圖比對（中英名稱、語意向量、稀有度權重、九宮格） |
-| `locate_fusion.py` / `dino_embed.py` | 伺服器端 DINOv2 影像分數，與物件、OCR 融合（權重 1 : 0.1 : 0.3） |
-| `loc_fusion.py` | 把影像證據與手機感測器位置合成機率排名 |
-| `place_recognizer.py` | 判斷使用者在哪一間已知的店（目前沒有被其他模組使用） |
-| `aisle_signs.py` | 從走道吊牌號碼縮小可能的位置 |
-| `photo_quality.py` | 模糊、太暗、遮擋檢查 |
-| `heading.py` | 估計使用者朝向，產生左轉／右轉指令 |
-| `editor_map.py` / `path_planner.py` | 可走路線圖、A* 與多目標排序、轉彎清單、小地圖資料 |
-| `neo4j_client.py` | Neo4j Aura HTTP 客戶端（讀地圖、照片、DINOv2 向量） |
-| `map_v2.py` / `map_build.py` | 建新店地圖：Sensor Lab 資料 → 建圖工作區 → Neo4j V2 格式 |
-| `start_points.py` | 每間店的起點（位置、面向、照片） |
-| `session.py` / `session_log.py` | session 狀態（記憶體）與每次導航的紀錄（磁碟） |
-| `scene.py` / `annotator.py` / `graph_renderer.py` | 給 VLM 的場景文字、標註圖、除錯用場景圖 |
-| `perception.py` / `ocr.py` | 本機 GroundingDINO 與 EasyOCR（`PERCEPTION_ENABLED`、`OCR_ENABLED` 開啟時） |
-| `topomap_builder.html` / `dashboard.html` / `debug_page.html` | 建圖工具、即時監看、定位診斷頁 |
-| `tests/` | pytest（39 個測試檔） |
-
-### 後端腳本（`backend/`）
-
-| 檔案 | 功能 |
-|------|------|
-| `build_map_v2_topomap.py` | Sensor Lab 走路紀錄 → 建圖工作區 |
-| `upload_map_v2.py` | 建置器確認後的地圖上傳到 Neo4j |
-| `rebuild_objects_v2.py` | 重新偵測每張方向照片的物件並寫回 Neo4j |
-| `store_dino_v2.py` | 計算並儲存每張方向照片的 DINOv2 向量 |
-| `build_store_graph.py`、`build_store_map.py`、`build_html_map.py`、`generate_topomap.py`、`render_clean.py`、`ocr_dump.py` | 早期的拓樸圖產生與繪製工具 |
-
-### Android App（`app/src/main/java/com/example/shopping/`）
-
-| 檔案 | 功能 |
-|------|------|
-| `MainActivity.kt` | 進入點與頁面路由（登入、主畫面、AR 導航、設定、Sensor Lab） |
-| `ui/screens/NavigationScreen.kt` | 導航：選店與目標（`TeammateHomeScreen`）、相機、指引、PDR 跟隨 |
-| `ui/screens/NavigationPanels.kt` | 導航畫面元件：狀態卡、上一張照片縮圖、購物清單、小地圖、拍照說明 |
-| `ui/screens/ArGuidanceArrow.kt` | AR 方向箭頭 |
-| `viewmodel/NavigationViewModel.kt` | 導航狀態：session、拍照上傳、定位、路線、抵達確認 |
-| `navigation/MapPositionEstimator.kt` | PDR 在地圖上的位置估計（移植自 iOS） |
-| `navigation/PathFollower.kt` | 沿路線前進與轉彎提示（移植自 iOS） |
-| `sensor/PdrTracker.kt` | 計步與航向（Rotation Vector／Game Rotation Vector 北方校正） |
-| `network/NavigationApi.kt` / `BackendConfig.kt` | 導航後端 API 與後端網址設定 |
-| `ui/screens/SensorLabScreen.kt` | Sensor Lab：全螢幕拍照與感測器錄製（背景執行緒、約 50 Hz） |
-| `ui/screens/MainContainer.kt` | 主畫面分頁（首頁、清單、食材、預算、歷史、AI），CGU 閘道請求 |
-| `ui/screens/HomeScreen.kt`、`ShoppingListScreen.kt`、`IngredientsScreen.kt`、`HistoryScreen.kt`、`AIScreen.kt`、`LoginScreen.kt`、`SettingsScreen.kt`、`NearbyStoresSheet.kt`、`NearbyStoresAr.kt` | 購物相關頁面 |
-| `ui/utils/CategoryClassifier.kt`、`LlmCategoryClassifier.kt` | 商品分類（例外清單 → LLM → 關鍵字） |
-
----
-
-## 商品分類
-
-每個商品屬於一個首頁分類按鈕，再由按鈕換算成預算類別：
-
-| 首頁分類 | 預算類別 |
-|------|------|
-| 蔬果、肉品海鮮、蛋奶、主食、零食、調味料 | 食品（`Food`） |
-| 飲品 | 飲品（`Beverages`） |
-| 清潔用品、廚房用品 | 生活用品（`Groceries`） |
-| 其他 | 其他（`Other`） |
-
-判斷順序：**例外清單 → LLM → 關鍵字備案**。LLM 走 CGU 閘道的 `gpt-5.6-luna`（`CGU_CHAT_MODEL`），
-AI 助手與收據掃描也用同一個模型。
-
-- **何時分類**：手動新增、修改名稱、掃描收據時；App 啟動時把還沒分類的舊商品一次補完。
-  結果存在 `shopping_list.json` 的 `homeCategory` 與 `location`，之後不會重複呼叫 LLM。
-- **LLM 失敗時**：顯示「AI 分類失敗，已改用關鍵字分類」，改用關鍵字分類。
-- **修正誤判**：在 `CategoryClassifier.kt` 的 `productOverrides` 加一行（例如 `"米酒" to HOME_SEASONING`），
-  名稱包含該字串就套用，優先於 LLM。
-- **實際打 LLM 測試**：`RUN_LLM_PROBE=1 ./gradlew :app:testDebugUnitTest --tests com.example.shopping.ui.utils.LlmClassificationProbe`。
-
----
-
+<!-- 測試 -->
 ## 測試
 
-```powershell
-# 後端
-cd backend
-.\venv\Scripts\python.exe -m pytest -q
+```sh
+# 後端（每個分支）
+cd backend && python -m pytest -q
 
-# Android 單元測試
-.\gradlew :app:testDebugUnitTest
+# Android（android 分支）
+./gradlew :app:testDebugUnitTest
+
+# iOS 定位邏輯（ios 分支，只要 Swift 命令列工具，不用 Xcode）
+scripts/swift_logic_tests/run.sh
 ```
 
-目前後端 `test_vlm.py` 有 2 個檢查 perception 提示詞文字的測試未通過（整合前就存在）。
+目前後端有 11 個測試在部分環境會失敗（`test_vlm.py`、`test_goal_decomposer.py`、`test_api_answer.py` 各有幾個，和設定的模型與環境有關）。
 
----
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
 
-## 疑難排解
 
-| 問題 | 解決方式 |
-|------|----------|
-| 手機連不到後端 | 確認同一 Wi-Fi、IP 正確、防火牆允許 8000；或 `adb reverse tcp:8000 tcp:8000` |
-| 選店清單是空的 | 確認 `.env` 的 `NEO4J_URI`／`NEO4J_PASSWORD`；沒有 Neo4j 時只會列出 `NEO4J_PLACE` |
-| 定位只靠物件與文字 | 伺服器端 DINOv2 需要 `torch`＋`transformers` 與 `dino_sidecar.pkl`；`LOC_SERVER_DINO=0` 可關閉 |
-| 不想每張照片多一次 embedding 請求 | 設 `EMBEDDING_ENABLED=0`，物件名稱改回只用字元相似度 |
-| AGP 版本不相容 | `gradle/libs.versions.toml` 中 `agp` 設為 `9.0.0` |
 
----
+<!-- 開發路線圖 -->
+## 開發路線圖
 
-## 相關文件
+- [x] 拍照定位：DINOv2 ＋ 物件 ＋ OCR ＋ 走道吊牌 ＋ 感測器融合
+- [x] PDR 即時位置、照片校正感測器、沿路線跟隨
+- [x] Android 與 iOS 共用同一個後端（iOS 也改由後端算 DINOv2）
+- [x] 多商品路線：最短拜訪順序、收銀台、出口
+- [x] 物件之間的上下左右關係（實測沒有明顯變好，預設權重 0.05）
+- [x] Android 內建計步器沒反應時，用加速度計補判斷步伐
+- [ ] 拍照方向（指南針）輔助判斷：手機方向誤差還太大（中位數 56°），要先修好感測器方向
+- [ ] 分開統計「正常角度」與「非正常角度」照片的定位正確率
+- [ ] 正確、鄰近、錯誤的判斷標準與一致的測試報告
 
-- [`backend/eval/README.md`](backend/eval/README.md) — 評估工具與指標
-- [`backend/legacy/README_locate_v2.md`](backend/legacy/README_locate_v2.md)、[`backend/legacy/README_topomap_v2.md`](backend/legacy/README_topomap_v2.md) — 舊版定位與拓樸地圖（研究用）
-- `docs/` — 設計文件書、測試計劃書、期中／期末報告
-- `http://localhost:8000/docs` — Swagger UI
+完整的問題與建議見 [open issues](https://github.com/B1229013/Shopping-Navigation/issues)。
+
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
+
+
+
+<!-- 貢獻方式 -->
+## 貢獻方式
+
+1. Fork 這個專案，或在本專案開新分支
+2. 建立功能分支（`git checkout -b feature/新功能`）
+3. Commit 你的修改（`git commit -m '加入新功能'`）
+4. Push 到分支（`git push origin feature/新功能`）
+5. 開一個 Pull Request
+
+**後端只有一份**：請在 `android`（或從 `android` 開的分支）修改後端，再同步到 `main` 和 `ios`：
+
+```sh
+git switch ios       # 或 main
+git merge android
+# android 的 Android 檔案有改動時會出現「deleted in ios, modified in android」衝突，刪掉即可：
+git rm -r -q app build.gradle.kts gradle gradle.properties gradlew gradlew.bat settings.gradle.kts google-services.json .idea 2>/dev/null
+git commit
+```
+
+iOS 前端（`APPNAV_ios/`）只在 `ios` 修改，Android 前端（`app/`）只在 `android` 修改。
+
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
+
+
+
+<!-- 授權 -->
+## 授權
+
+目前沒有附上授權條款（沒有 `LICENSE` 檔案），著作權屬於專案成員。如需使用，請先聯絡我們。
+
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
+
+
+
+<!-- 聯絡方式 -->
+## 聯絡方式
+
+專案成員（GitHub）：[@B1229013](https://github.com/B1229013)、[@B1229023](https://github.com/B1229023)、
+[@B1222017](https://github.com/B1222017)、[@B1229020](https://github.com/B1229020)、
+[@kathchen-art](https://github.com/kathchen-art)、[@selfable01](https://github.com/selfable01)
+
+專案連結：[https://github.com/B1229013/Shopping-Navigation](https://github.com/B1229013/Shopping-Navigation)
+
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
+
+
+
+<!-- 致謝 -->
+## 致謝
+
+* [DINOv2（Meta AI）](https://github.com/facebookresearch/dinov2)：影像特徵
+* [Neo4j Aura](https://neo4j.com/cloud/platform/aura-graph-database/)：地圖資料庫
+* [FastAPI](https://fastapi.tiangolo.com/)
+* [Hugging Face Transformers](https://huggingface.co/docs/transformers)
+* [Shields.io](https://shields.io/)：徽章
+* [Best-README-Template](https://github.com/othneildrew/Best-README-Template)：README 範本
+* 指導老師，以及幫忙到賣場測試的同學
+
+<p align="right">(<a href="#readme-top">回到頂端</a>)</p>
+
+
+
+<!-- 連結 -->
+[contributors-shield]: https://img.shields.io/github/contributors/B1229013/Shopping-Navigation.svg?style=for-the-badge
+[contributors-url]: https://github.com/B1229013/Shopping-Navigation/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/B1229013/Shopping-Navigation.svg?style=for-the-badge
+[forks-url]: https://github.com/B1229013/Shopping-Navigation/network/members
+[stars-shield]: https://img.shields.io/github/stars/B1229013/Shopping-Navigation.svg?style=for-the-badge
+[stars-url]: https://github.com/B1229013/Shopping-Navigation/stargazers
+[issues-shield]: https://img.shields.io/github/issues/B1229013/Shopping-Navigation.svg?style=for-the-badge
+[issues-url]: https://github.com/B1229013/Shopping-Navigation/issues
+[Python-badge]: https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white
+[Python-url]: https://www.python.org/
+[FastAPI-badge]: https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white
+[FastAPI-url]: https://fastapi.tiangolo.com/
+[Neo4j-badge]: https://img.shields.io/badge/Neo4j-4581C3?style=for-the-badge&logo=neo4j&logoColor=white
+[Neo4j-url]: https://neo4j.com/
+[PyTorch-badge]: https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white
+[PyTorch-url]: https://pytorch.org/
+[OpenAI-badge]: https://img.shields.io/badge/OpenAI_API-412991?style=for-the-badge&logo=openai&logoColor=white
+[OpenAI-url]: https://platform.openai.com/
+[Kotlin-badge]: https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white
+[Kotlin-url]: https://kotlinlang.org/
+[Compose-badge]: https://img.shields.io/badge/Jetpack_Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white
+[Compose-url]: https://developer.android.com/jetpack/compose
+[Swift-badge]: https://img.shields.io/badge/Swift-F05138?style=for-the-badge&logo=swift&logoColor=white
+[Swift-url]: https://developer.apple.com/swift/

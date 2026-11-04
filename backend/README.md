@@ -50,7 +50,7 @@ pip install numpy pillow torch transformers   # 伺服器端 DINOv2（facebook/d
 ```env
 OPENAI_API_KEY=...
 OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-5.4-mini
 NEO4J_URI=neo4j+s://xxxx.databases.neo4j.io
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=...
@@ -121,7 +121,7 @@ curl -X POST http://localhost:8000/session/<id>/confirm -H "Content-Type: applic
 
 | 變數 | 預設 | 說明 |
 |------|------|------|
-| `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` | — / `https://api.openai.com/v1` / `gpt-4o` | VLM 服務；`OPENAI_BACKUP_KEY` 為備用金鑰 |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` | — / `https://api.openai.com/v1` / `gpt-5.4-mini` | VLM 服務；`OPENAI_BACKUP_KEY` 為備用金鑰 |
 | `VLM_ROUNDS` / `VLM_PASS3` / `VLM_TIMEOUT_S` | `1` / `1` / `120` | 感知輪數、每輪第 3 次呼叫（找特徵；**建議 `0`**，見上方）、逾時秒數 |
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | — / `neo4j` / — | 店家地圖資料庫 |
 | `NEO4J_PLACE` | `A7家樂福（9/16)` | 預設店名；Neo4j 連不上時 `/places` 只列這一間 |

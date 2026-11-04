@@ -128,7 +128,7 @@ data class PathEdge(val from: Int, val to: Int, val length: Double)
 
 data class AnswerRequest(val answer: String)
 
-data class ConfirmArrivalRequest(val kind: String)  // "confirmed", "false_positive", "wrong_instance"
+data class ConfirmArrivalRequest(val kind: String)  // "confirmed", "confirmed_pdr", "false_positive", "wrong_instance"
 
 data class MapNode(
     val id: Int,

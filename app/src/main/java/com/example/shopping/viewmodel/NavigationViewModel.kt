@@ -707,10 +707,12 @@ class NavigationViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
+                val confirmKind = if (arrivalFromPdr && kind == "confirmed") "confirmed_pdr" else kind
                 val response = withContext(Dispatchers.IO) {
-                    NavigationApi.service.confirmArrival(sid, ConfirmArrivalRequest(kind = kind))
+                    NavigationApi.service.confirmArrival(sid, ConfirmArrivalRequest(kind = confirmKind))
                 }
                 pendingArrival = false
+                arrivalFromPdr = false
                 secondPhotoHint = null
                 secondPhotoAtRaw = null
                 // POST /confirm is the only endpoint that advances the phase; reaching

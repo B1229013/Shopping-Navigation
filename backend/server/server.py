@@ -2723,6 +2723,9 @@ def _handle_confirm(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse
         if s.goal_node is None:
             raise HTTPException(status_code=409, detail={"error": "no_current_stop", "detail": "no stop to confirm"})
         s.pending_arrival = True
+        s.pending_question = None
+        s.pending_is_confirm = False
+        s.pending_next_instruction = None
         req = ConfirmArrivalRequest(kind="confirmed")
     if not s.pending_arrival:
         raise HTTPException(status_code=409, detail={"error": "no_pending_arrival", "detail": "no ARRIVED to confirm"})

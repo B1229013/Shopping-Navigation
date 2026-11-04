@@ -235,6 +235,11 @@ fetch('/places').then(r => r.json()).then(data => {
   document.getElementById('place-select').innerHTML = '<option value="">無法載入場域</option>';
 });
 
+// Text from the VLM, OCR and the map goes into innerHTML only through esc().
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch]);
+}
+
 function scoreClass(s) {
   if (s >= 0.3) return 'score-high';
   if (s >= 0.15) return 'score-mid';
@@ -243,12 +248,12 @@ function scoreClass(s) {
 
 function dirArrow(deg) {
   if (deg == null) return '';
-  return `<span class="dir-arrow" style="transform:rotate(${deg}deg)">↑</span>`;
+  return `<span class="dir-arrow" style="transform:rotate(${Number(deg)}deg)">↑</span>`;
 }
 
 function slotLabel(slot) {
   const map = { front: '前方', right: '右方', back: '後方', left: '左方' };
-  return map[slot] || slot || '';
+  return map[slot] || esc(slot);
 }
 
 async function runTest() {
@@ -270,7 +275,7 @@ async function runTest() {
   fd.append('photo', selectedFile);
 
   let url = `/localize-test?place=${encodeURIComponent(place)}`;
-  if (gtNid) url += `&ground_truth_nid=${gtNid}`;
+  if (gtNid) url += `&ground_truth_nid=${encodeURIComponent(gtNid)}`;
 
   try {
     const resp = await fetch(url, { method: 'POST', body: fd });
@@ -294,16 +299,16 @@ function renderResults(data) {
   let mH = '';
   if (m) {
     mH += `<div class="result-row">
-      <div class="result-stat"><div class="result-big">WP${m.nid}</div><div class="result-label">匹配節點</div></div>
+      <div class="result-stat"><div class="result-big">WP${esc(m.nid)}</div><div class="result-label">匹配節點</div></div>
       <div class="result-stat"><div class="result-big" style="font-size:22px">${(m.confidence * 100).toFixed(1)}%</div><div class="result-label">信心度</div></div>
       <div class="result-stat"><div style="font-size:18px">${dirArrow(m.heading_deg)} ${m.heading_deg != null ? m.heading_deg.toFixed(0) + '°' : '-'}</div><div class="result-label">方向 ${slotLabel(m.heading_slot)}</div></div>
-      <div class="result-stat"><div style="font-size:14px"><span class="badge badge-blue">${m.method}</span></div><div class="result-label">方法</div></div>
+      <div class="result-stat"><div style="font-size:14px"><span class="badge badge-blue">${esc(m.method)}</span></div><div class="result-label">方法</div></div>
     </div>`;
-    if (m.reasoning) mH += `<div style="font-size:12px;color:var(--muted);margin-top:4px">${m.reasoning}</div>`;
+    if (m.reasoning) mH += `<div style="font-size:12px;color:var(--muted);margin-top:4px">${esc(m.reasoning)}</div>`;
   } else {
     mH = '<div style="color:var(--red);font-size:16px">定位失敗</div>';
   }
-  mH += `<div style="font-size:12px;color:var(--muted);margin-top:8px">耗時: ${data.elapsed_s}s · 場域: ${data.place}</div>`;
+  mH += `<div style="font-size:12px;color:var(--muted);margin-top:8px">耗時: ${esc(data.elapsed_s)}s · 場域: ${esc(data.place)}</div>`;
   document.getElementById('match-result').innerHTML = mH;
 
   // --- Ground truth ---
@@ -315,13 +320,13 @@ function renderResults(data) {
     if (correct) {
       gtH += `<span class="badge badge-green" style="font-size:13px;padding:4px 12px">✓ Top-1 正確</span>`;
     } else if (gt.found_in_top5) {
-      gtH += `<span class="badge badge-yellow" style="font-size:13px;padding:4px 12px">Top-${gt.rank} 命中</span>`;
+      gtH += `<span class="badge badge-yellow" style="font-size:13px;padding:4px 12px">Top-${esc(gt.rank)} 命中</span>`;
     } else {
       gtH += `<span class="badge badge-red" style="font-size:13px;padding:4px 12px">✗ 未在 Top-5</span>`;
     }
     gtH += `</div>`;
-    gtH += `<div style="font-size:13px">正確位置: <strong>WP${gt.nid}</strong>`;
-    if (gt.distance_m != null) gtH += ` · 誤差距離: <strong>${gt.distance_m}m</strong>`;
+    gtH += `<div style="font-size:13px">正確位置: <strong>WP${esc(gt.nid)}</strong>`;
+    if (gt.distance_m != null) gtH += ` · 誤差距離: <strong>${esc(gt.distance_m)}m</strong>`;
     gtH += `</div>`;
   } else {
     gtH = '<div class="no-data">未設定 Ground Truth</div>';
@@ -340,17 +345,19 @@ function renderResults(data) {
     const isTop1 = c.rank === 1;
     const cls = isTop1 ? 'highlight' : isGt ? 'gt' : '';
     const pct = maxScore > 0 ? Math.round((c.score / maxScore) * 100) : 0;
-    t5H += `<div class="top5-item ${cls}" onclick="highlightNode(${c.nid})">
-      <div class="top5-rank ${isTop1 ? 'r1' : ''}">#${c.rank}</div>
-      ${c.photo_url ? `<img class="top5-photo" src="${c.photo_url}" alt="WP${c.nid}" loading="lazy">` : '<div class="top5-photo" style="display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">無照片</div>'}
+    t5H += `<div class="top5-item ${cls}" data-nid="${esc(c.nid)}">
+      <div class="top5-rank ${isTop1 ? 'r1' : ''}">#${esc(c.rank)}</div>
+      ${c.photo_url ? `<img class="top5-photo" src="${esc(c.photo_url)}" alt="WP${esc(c.nid)}" loading="lazy">` : '<div class="top5-photo" style="display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">無照片</div>'}
       <div class="top5-info">
-        <div class="top5-nid">WP${c.nid} ${isGt ? '<span class="gt-indicator">GT</span>' : ''} ${dirArrow(c.matched_heading || c.heading_deg)} <span style="font-size:12px;color:var(--muted)">${slotLabel(c.matched_slot || '')}</span></div>
+        <div class="top5-nid">WP${esc(c.nid)} ${isGt ? '<span class="gt-indicator">GT</span>' : ''} ${dirArrow(c.matched_heading || c.heading_deg)} <span style="font-size:12px;color:var(--muted)">${slotLabel(c.matched_slot || '')}</span></div>
         <div class="top5-meta">分數: ${c.score.toFixed(4)} · 位置: (${(c.pdr_x||0).toFixed(1)}, ${(c.pdr_y||0).toFixed(1)})</div>
         <div class="top5-bar" style="width:${pct}%;${isTop1 ? 'background:var(--green)' : isGt ? 'background:var(--orange)' : ''}"></div>
       </div>
     </div>`;
   }
   document.getElementById('top5-list').innerHTML = t5H || '<div class="no-data">無候選</div>';
+  document.querySelectorAll('#top5-list .top5-item').forEach(el =>
+    el.addEventListener('click', () => highlightNode(Number(el.dataset.nid))));
 
   // --- Matched photo ---
   if (m && m.photo_url) {
@@ -358,7 +365,7 @@ function renderResults(data) {
     img.src = m.photo_url;
     img.style.display = 'block';
     document.getElementById('matched-photo-info').innerHTML =
-      `WP${m.nid} · ${slotLabel(m.heading_slot)} · ${m.heading_deg != null ? m.heading_deg.toFixed(0) + '°' : ''}`;
+      `WP${esc(m.nid)} · ${slotLabel(m.heading_slot)} · ${m.heading_deg != null ? m.heading_deg.toFixed(0) + '°' : ''}`;
   } else {
     document.getElementById('matched-photo').style.display = 'none';
     document.getElementById('matched-photo-info').innerHTML = '<div class="no-data">無匹配照片</div>';
@@ -370,9 +377,9 @@ function renderResults(data) {
   if (dets.length) {
     detH = '<table><tr><th>物件</th><th>信心度</th><th>位置</th></tr>';
     for (const d of dets) {
-      detH += `<tr><td><strong>${d.label}</strong></td>
-        <td class="score ${scoreClass(d.score)}">${d.score.toFixed(3)}</td>
-        <td style="color:var(--muted)">${d.position || ''}</td></tr>`;
+      detH += `<tr><td><strong>${esc(d.label)}</strong></td>
+        <td class="score ${scoreClass(d.score)}">${Number(d.score).toFixed(3)}</td>
+        <td style="color:var(--muted)">${esc(d.position)}</td></tr>`;
     }
     detH += '</table>';
     detH += `<div style="margin-top:8px;font-size:12px;color:var(--muted)">共 ${dets.length} 個物件</div>`;
@@ -387,8 +394,8 @@ function renderResults(data) {
   if (ocrs.length) {
     ocrH = '<table><tr><th>文字</th><th>信心度</th></tr>';
     for (const t of ocrs) {
-      ocrH += `<tr><td><strong>${t.text}</strong></td>
-        <td class="score ${scoreClass(t.score)}">${t.score.toFixed(3)}</td></tr>`;
+      ocrH += `<tr><td><strong>${esc(t.text)}</strong></td>
+        <td class="score ${scoreClass(t.score)}">${Number(t.score).toFixed(3)}</td></tr>`;
     }
     ocrH += '</table>';
     ocrH += `<div style="margin-top:8px;font-size:12px;color:var(--muted)">共 ${ocrs.length} 筆文字</div>`;

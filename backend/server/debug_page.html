@@ -101,8 +101,13 @@ td { padding: 4px 8px; border-bottom: 1px solid rgba(48,54,61,.5); }
 <button class="refresh-btn" onclick="load()">重新整理</button>
 
 <script>
-const SID = '{{SESSION_ID}}';
-const API = `/session/${SID}/debug`;
+const SID = {{SESSION_ID_JSON}};
+const API = `/session/${encodeURIComponent(SID)}/debug`;
+
+// Text from the VLM, OCR and the session goes into innerHTML only through esc().
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch]);
+}
 
 function scoreClass(s) {
   if (s >= 0.3) return 'score-high';
@@ -114,7 +119,7 @@ function renderDetTable(dets) {
   if (!dets || !dets.length) return '<div class="no-data">無偵測</div>';
   let h = '<table><tr><th>物件</th><th>信心度</th><th>位置</th></tr>';
   for (const d of dets) {
-    h += `<tr><td>${d.label}</td><td class="score ${scoreClass(d.score)}">${d.score}</td><td style="color:var(--muted)">${d.position||''}</td></tr>`;
+    h += `<tr><td>${esc(d.label)}</td><td class="score ${scoreClass(d.score)}">${esc(d.score)}</td><td style="color:var(--muted)">${esc(d.position)}</td></tr>`;
   }
   return h + '</table>';
 }
@@ -123,7 +128,7 @@ function renderOcrTable(ocrs) {
   if (!ocrs || !ocrs.length) return '<div class="no-data">無 OCR 文字</div>';
   let h = '<table><tr><th>文字</th><th>信心度</th><th>位置</th></tr>';
   for (const t of ocrs) {
-    h += `<tr><td><strong>${t.text}</strong></td><td class="score ${scoreClass(t.score)}">${t.score}</td><td style="color:var(--muted)">${t.position||''}</td></tr>`;
+    h += `<tr><td><strong>${esc(t.text)}</strong></td><td class="score ${scoreClass(t.score)}">${esc(t.score)}</td><td style="color:var(--muted)">${esc(t.position)}</td></tr>`;
   }
   return h + '</table>';
 }
@@ -135,9 +140,9 @@ function renderCandidates(cands) {
   for (const [nid, score, reason] of cands) {
     const pct = Math.round((score / maxScore) * 100);
     h += `<tr>
-      <td><strong>WP${nid}</strong></td>
-      <td class="score ${scoreClass(score)}">${score}</td>
-      <td style="color:var(--muted);font-size:11px;max-width:200px;word-break:break-all">${reason}</td>
+      <td><strong>WP${esc(nid)}</strong></td>
+      <td class="score ${scoreClass(score)}">${esc(score)}</td>
+      <td style="color:var(--muted);font-size:11px;max-width:200px;word-break:break-all">${esc(reason)}</td>
       <td style="width:100px"><div class="candidate-bar" style="width:${pct}%"></div></td>
     </tr>`;
   }
@@ -159,24 +164,24 @@ function load() {
     // Localization
     let locH = '';
     if (loc.matched_nid != null) {
-      locH = `<div style="font-size:20px;font-weight:700;color:var(--green)">WP${loc.matched_nid}</div>
-        <div style="margin-top:4px">信心度: <span class="score ${scoreClass(loc.confidence)}" style="font-size:16px">${loc.confidence}</span>
-        · 方法: <span class="badge badge-blue">${loc.method}</span></div>`;
+      locH = `<div style="font-size:20px;font-weight:700;color:var(--green)">WP${esc(loc.matched_nid)}</div>
+        <div style="margin-top:4px">信心度: <span class="score ${scoreClass(loc.confidence)}" style="font-size:16px">${esc(loc.confidence)}</span>
+        · 方法: <span class="badge badge-blue">${esc(loc.method)}</span></div>`;
       if (loc.runner_up_nid != null) {
-        locH += `<div style="margin-top:4px;color:var(--muted);font-size:13px">次高: WP${loc.runner_up_nid} (${loc.runner_up_score})</div>`;
+        locH += `<div style="margin-top:4px;color:var(--muted);font-size:13px">次高: WP${esc(loc.runner_up_nid)} (${esc(loc.runner_up_score)})</div>`;
       }
     } else {
       locH = `<div style="font-size:16px;color:var(--red)">定位失敗</div>
-        <div style="color:var(--muted);font-size:13px">${loc.reasoning || '無資料'}</div>`;
+        <div style="color:var(--muted);font-size:13px">${esc(loc.reasoning || '無資料')}</div>`;
     }
-    locH += `<div style="margin-top:6px;color:var(--muted);font-size:12px">場景區域: <span class="badge badge-purple">${p.store_zone || '未知'}</span></div>`;
+    locH += `<div style="margin-top:6px;color:var(--muted);font-size:12px">場景區域: <span class="badge badge-purple">${esc(p.store_zone || '未知')}</span></div>`;
     document.getElementById('loc-result').innerHTML = locH;
 
     // Route
     const route = data.route;
     let routeH = '';
     if (route) {
-      routeH += `<div style="font-size:13px;margin-bottom:8px">TSP 順序: ${route.visit_order_items.join(' → ')} · 總距離: ${route.total_cost}m</div>`;
+      routeH += `<div style="font-size:13px;margin-bottom:8px">TSP 順序: ${esc(route.visit_order_items.join(' → '))} · 總距離: ${esc(route.total_cost)}m</div>`;
       const visited = new Set(data.visited_targets || []);
       const itemMap = data.target_node_to_item || {};
       routeH += '<div class="checklist">';
@@ -185,7 +190,7 @@ function load() {
         const isDone = visited.has(nid);
         const isCurrent = route.legs[route.current_leg_index] && route.legs[route.current_leg_index].to === nid && !isDone;
         const cls = isDone ? 'done' : isCurrent ? 'current' : 'pending';
-        routeH += `<span class="item ${cls}">${isDone ? '✓ ' : isCurrent ? '▸ ' : ''}${name}</span>`;
+        routeH += `<span class="item ${cls}">${isDone ? '✓ ' : isCurrent ? '▸ ' : ''}${esc(name)}</span>`;
       }
       routeH += '</div>';
       routeH += '<div style="margin-top:10px;font-size:12px;color:var(--muted)">路線腿:</div>';
@@ -194,9 +199,9 @@ function load() {
         const active = i === route.current_leg_index;
         const purposeBadge = lg.purpose === 'target' ? 'badge-green' : lg.purpose === 'checkout' ? 'badge-yellow' : 'badge-purple';
         routeH += `<div class="route-leg ${active ? 'active' : ''}">
-          ${active ? '▸' : ' '} WP${lg.from} <span class="arrow">→</span> WP${lg.to}
-          <span class="badge ${purposeBadge}">${lg.purpose}</span>
-          <span style="color:var(--muted);font-size:11px">${lg.cost}m</span>
+          ${active ? '▸' : ' '} WP${esc(lg.from)} <span class="arrow">→</span> WP${esc(lg.to)}
+          <span class="badge ${purposeBadge}">${esc(lg.purpose)}</span>
+          <span style="color:var(--muted);font-size:11px">${esc(lg.cost)}m</span>
         </div>`;
       }
     } else {
@@ -219,14 +224,14 @@ function load() {
 
     // Merged
     const mg = p.merged || {};
-    let mgH = `<div style="font-size:13px;margin-bottom:6px">場景: ${mg.scene||'?'} · 區域: <span class="badge badge-purple">${mg.zone||'?'}</span> · 物件: ${(mg.detections||[]).length} · OCR: ${(mg.ocr||[]).length}</div>`;
+    let mgH = `<div style="font-size:13px;margin-bottom:6px">場景: ${esc(mg.scene||'?')} · 區域: <span class="badge badge-purple">${esc(mg.zone||'?')}</span> · 物件: ${(mg.detections||[]).length} · OCR: ${(mg.ocr||[]).length}</div>`;
     mgH += renderDetTable(mg.detections);
     mgH += '<div style="margin-top:8px"></div>';
     mgH += renderOcrTable(mg.ocr);
     document.getElementById('merged-info').innerHTML = mgH;
 
   }).catch(e => {
-    document.getElementById('loading').innerHTML = `<div style="color:var(--red)">載入失敗: ${e.message}<br>尚未上傳照片？</div>`;
+    document.getElementById('loading').innerHTML = `<div style="color:var(--red)">載入失敗: ${esc(e.message)}<br>尚未上傳照片？</div>`;
   });
 }
 

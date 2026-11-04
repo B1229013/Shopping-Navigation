@@ -10,6 +10,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import quote
 from typing import Optional
 
 logging.basicConfig(
@@ -53,7 +54,7 @@ from server.models import (
 )
 from server.perception import Detection as PerceptionDetection, Perception, verify_goal_detection
 from server.ocr import OCRResult
-from server.session import SessionStore
+from server.session import Session, SessionStore
 import re as _re
 
 
@@ -118,7 +119,7 @@ from server import aisle_signs, photo_quality, session_log, start_points
 from server.loc_fusion import (adaptive_weights, dino_gap, parse_dino_topk, parse_image_k, parse_weights,
                                sensor_sigma)
 from server.visual_localization import (
-    localize as _localize_photo, vlm_rerank as _vlm_rerank,
+    LocalizationResult, localize as _localize_photo, vlm_rerank as _vlm_rerank,
     rerank_candidates as _rerank_candidates,
     estimate_node_heading as _estimate_node_heading,
 )
@@ -228,6 +229,35 @@ ARRIVAL_NEAR_M = 6.0
 ARRIVAL_ASK_MAX_M = 15.0
 
 
+def _leg_item_name(s, leg) -> str:
+    """What the user is walking to on this leg: the item, 收銀台 or 出口."""
+    if s.phase == "checkout":
+        return "收銀台"
+    if s.phase == "exit":
+        return "出口"
+    return s.target_node_to_item.get(leg.to_node) or (s.target_objects or s.goal_objects or ["目標"])[0]
+
+
+def _gate_far_arrival(s, vlm_resp, far_q: str, far_m: Optional[float], goal_verified: bool = False):
+    """ARRIVED although the map puts the user far from the goal node: ask (far_q, with the
+    distance) — or, beyond ARRIVAL_ASK_MAX_M, keep walking, unless the VLM checked the item
+    in a close-up (goal_verified). Keep-walking says so; the VLM's own words were "arrived"."""
+    if far_m is not None and far_m > ARRIVAL_ASK_MAX_M and not goal_verified:
+        leg = _phase_leg(s)
+        item = _leg_item_name(s, leg) if leg is not None else "目標"
+        return VLMResponse(action=VLMAction.MOVE, guidance=f"還沒到「{item}」，請照路線繼續走，到了再拍一張照片。",
+                           question=None, vlm_summary=vlm_resp.vlm_summary)
+    return VLMResponse(action=VLMAction.ASK, guidance=far_q, question=far_q, vlm_summary=vlm_resp.vlm_summary)
+
+
+def _resume_instruction(next_instr: Optional[str], retake_hint: Optional[str]) -> Optional[str]:
+    """The route step to repeat after the user answers 「沒有」 — never a retake hint or the
+    "this photo doesn't match the map" hint."""
+    if retake_hint or next_instr == LOCALIZE_FAILED_HINT:
+        return None
+    return next_instr
+
+
 def _far_from_goal_question(s, matched_nid: Optional[int], where: Optional[str] = None) -> tuple[Optional[str], Optional[float]]:
     """(None, None) when an arrival is plausible on the map; otherwise
     (question, distance_m).  When distance_m > ARRIVAL_ASK_MAX_M the caller
@@ -248,12 +278,7 @@ def _far_from_goal_question(s, matched_nid: Optional[int], where: Optional[str] 
                 pass
     if not dists or min(dists.values()) <= ARRIVAL_NEAR_M:
         return None, None
-    if s.phase == "checkout":
-        item = "收銀台"
-    elif s.phase == "exit":
-        item = "出口"
-    else:
-        item = s.target_node_to_item.get(leg.to_node) or (s.target_objects or s.goal_objects or ["目標"])[0]
+    item = _leg_item_name(s, leg)
     far = dists.get(matched_nid, min(dists.values()))
     where = where or "目前的位置"
     q = f"App 認為你在{where}，離「{item}」還有約 {far:.0f} 公尺。你已經看到「{item}」了嗎？"
@@ -384,17 +409,15 @@ def _node_area_name(nid: int, ref_map, goal_keywords=None, goal_item=None) -> st
                         and any(k in clean.lower() for k in kws):
                     return f"「{clean}」"
 
-        # 2b: node carries the goal — use the user's own search term for clarity
-        has_match = any(
-            k in obj.label.lower() or k in (obj.ocr_text or "").lower()
-            for obj in node.objects for k in kws
-        )
-        if has_match:
-            if goal_item:
-                return f"「{goal_item}」區"
-            orig = next((g for g in (goal_keywords or []) if g.lower() in kws), None)
-            if orig and not _is_useless_name(orig):
-                return f"「{orig}」區"
+        # 2b: node carries the goal — use the user's own search term for clarity, and
+        # keep the aisle number when the node has one (「走道 7（泡麵）」)
+        matched = next((g for g in (goal_keywords or []) if g and any(
+            g.lower() in obj.label.lower() or g.lower() in (obj.ocr_text or "").lower()
+            for obj in node.objects)), None)
+        if matched:
+            item = goal_item or (matched if not _is_useless_name(matched) else None)
+            if item:
+                return f"「{best_aisle_name}（{item}）」" if best_aisle_name else f"「{item}」區"
 
     # If Priority 1 found an aisle sign but it didn't mention the goal, still use it
     if best_aisle_name:
@@ -1347,7 +1370,8 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                             detected_items=None, image_path=None,
                             store_zone=None, ocr_items=None,
                             dino_sims=None, sensor_pos=None, dist_since_fix=None,
-                            fix_node=None, extra_evidence=None, sign_numbers=None):
+                            fix_node=None, extra_evidence=None, sign_numbers=None,
+                            debug_out: Optional[dict] = None):
     """Run Neo4j localization early (before VLM decide) so route context is available.
 
     Returns the LocalizationResult, or None if localization is skipped/failed.
@@ -1390,6 +1414,8 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             if not dino_sims and image_path and _config.LOC_SERVER_DINO:
                 server_ev = _server_dino_evidence(session_id, ref_for_v2, image_path,
                                                   detected_labels, ocr_texts, detected_items)
+                if debug_out is not None:
+                    debug_out["server_ev"] = server_ev
                 if server_ev:
                     v2_kwargs.update(server_evidence=server_ev.scores,
                                      server_best_photo=server_ev.best_photo,
@@ -2296,14 +2322,9 @@ async def _handle_photo(
             s, _early_loc.matched_nid if _early_loc else None,
             _ref_location_name(_early_loc) if _early_loc else None)
         if _far_q:
-            if _far_m is not None and _far_m > ARRIVAL_ASK_MAX_M:
-                log.info("[session %s] arrival too far (%.0f m) → silent MOVE", session_id, _far_m)
-                vlm_resp = VLMResponse(action=VLMAction.MOVE, guidance=vlm_resp.guidance,
-                                       question=None, vlm_summary=vlm_resp.vlm_summary)
-            else:
-                log.info("[session %s] arrival not near the goal node on the map → asking: %s", session_id, _far_q)
-                vlm_resp = VLMResponse(action=VLMAction.ASK, guidance=_far_q, question=_far_q,
-                                       vlm_summary=vlm_resp.vlm_summary)
+            vlm_resp = _gate_far_arrival(s, vlm_resp, _far_q, _far_m, goal_verified=goal_verified)
+            log.info("[session %s] arrival %.0f m from the goal node → %s", session_id, _far_m or 0,
+                     vlm_resp.action.value)
             arrival_downgraded = True
     if verified_labels:
         log.info("[session %s] confirmed goal items in this photo: %s", session_id, verified_labels)
@@ -2456,7 +2477,7 @@ async def _handle_photo(
     elif vlm_resp.action == VLMAction.ASK:
         s.pending_question = vlm_resp.question
         s.pending_is_confirm = arrival_downgraded
-        s.pending_next_instruction = _next_instr
+        s.pending_next_instruction = _resume_instruction(_next_instr, _retake_hint)
     else:  # MOVE
         s.last_planned_action = _final_guidance
 
@@ -2638,14 +2659,9 @@ def _handle_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
     if _raw_action == VLMAction.ARRIVED:
         _far_q, _far_m = _far_from_goal_question(s, s.last_corrected_nid)
         if _far_q:
-            if _far_m is not None and _far_m > ARRIVAL_ASK_MAX_M:
-                log.info("[session %s] answer: arrival too far (%.0f m) → silent MOVE", session_id, _far_m)
-                vlm_resp = VLMResponse(action=VLMAction.MOVE, guidance=vlm_resp.guidance,
-                                       question=None, vlm_summary=vlm_resp.vlm_summary)
-            else:
-                log.info("[session %s] arrival not near the goal node on the map → asking: %s", session_id, _far_q)
-                vlm_resp = VLMResponse(action=VLMAction.ASK, guidance=_far_q, question=_far_q,
-                                       vlm_summary=vlm_resp.vlm_summary)
+            vlm_resp = _gate_far_arrival(s, vlm_resp, _far_q, _far_m)
+            log.info("[session %s] answer: arrival %.0f m from the goal node → %s", session_id, _far_m or 0,
+                     vlm_resp.action.value)
             arrival_downgraded = True
 
     s.history.append({
@@ -3306,55 +3322,34 @@ async def localize_test(
                 img_w=img_w, img_h=img_h,
             )
 
-        detected_labels = [_vlm_localization_label(d) for d in perception.detections]
-        ocr_texts = [t.text for t in perception.ocr_texts]
-
+        # The same inputs and localization as a navigation photo (_handle_photo, VLM mode):
+        # boxes scaled to 0..1, cleaned OCR, aisle signs, server DINOv2 fused by v2.
+        detections = [PerceptionDetection(label=d.label, box=d.bbox, score=d.score, position=d.position)
+                      for d in perception.detections]
         ocr_engine = get_ocr()
-        if ocr_engine:
-            easyocr_results = ocr_engine.read(
-                tmp, min_confidence=OCR_MIN_CONFIDENCE, max_results=OCR_MAX_RESULTS)
-            ocr_texts = [r.text for r in easyocr_results] if easyocr_results else ocr_texts
-
-        # Build detected_items with bboxes for object relations
-        detected_items = [
-            {"label": _vlm_localization_label(d), "box": list(d.bbox) if d.bbox else None}
-            for d in perception.detections
-        ]
+        easyocr_results = (ocr_engine.read(tmp, min_confidence=OCR_MIN_CONFIDENCE, max_results=OCR_MAX_RESULTS)
+                           if ocr_engine else None)
+        ocr_results = easyocr_results or [OCRResult(text=t.text, confidence=t.score, bbox=t.bbox)
+                                          for t in perception.ocr_texts]
+        ocr_results = _clean_vlm_ocr(ocr_results, img_h)
+        ocr_texts = [r.text for r in ocr_results]
+        loc_dets = [PerceptionDetection(label=_vlm_localization_label(v), box=d.box, score=d.score,
+                                        position=d.position)
+                    for v, d in zip(perception.detections, detections)]
 
         the_place = place or None
         ref_map = neo4j.load_reference_map(the_place)
-
-        # Grid-based localization
-        result = _localize_photo(
-            detected_labels=detected_labels,
-            ocr_texts=ocr_texts,
-            neo4j=neo4j,
-            place=the_place,
-            grid_n=_config.GRID_N,
-            detected_items=detected_items,
-        )
-
-        # Server-side DINOv2 fusion
-        server_ev = None
-        if _config.LOC_SERVER_DINO:
-            from server.locate_fusion import server_image_evidence
-            try:
-                server_ev = server_image_evidence(
-                    ref_map, tmp, detected_labels, ocr_texts,
-                    _config.DINO_SIDECAR_PATH, q_items=detected_items,
-                    relation_weight=_config.LOC_RELATION_WEIGHT)
-            except Exception:
-                log.exception("localize-test: server DINOv2 failed")
-
-        # fuse_v2 if we have server evidence
-        fusion_candidates = None
-        if server_ev and _config.LOC_FUSION_V2:
-            from server.loc_fusion import fuse_v2, parse_image_k
-            node_positions = {nid: (n.pdr_x, n.pdr_y) for nid, n in ref_map.photos.items()}
-            fusion_candidates = fuse_v2(
-                server_ev.scores, node_positions,
-                image_k=parse_image_k(_config.LOC_SERVER_IMAGE_K),
-            )
+        probe = Session(id="localize-test", goal="定位", goal_objects=[], place=the_place or _config.NEO4J_PLACE)
+        debug: dict = {}
+        result = _run_early_localization(
+            probe, "localize-test", [d.label for d in loc_dets], ocr_texts,
+            detected_items=_build_localization_items(loc_dets, ocr_results, img_w, img_h),
+            image_path=tmp, store_zone=perception.store_zone or "",
+            ocr_items=_build_ocr_items(ocr_results, img_w, img_h),
+            sign_numbers=aisle_signs.numbers_from_ocr(ocr_results, img_w, img_h),
+            debug_out=debug,
+        ) or LocalizationResult(matched_nid=None, confidence=0.0, method="none", reasoning="localization failed")
+        server_ev = debug.get("server_ev")
 
         t_elapsed = time.time() - t_start
 
@@ -3362,9 +3357,12 @@ async def localize_test(
         if tmp and os.path.exists(tmp):
             os.remove(tmp)
 
+    # Photo URLs name the store, so a 系辦 node is not looked up in the default map
+    _place_q = f"?place={quote(the_place)}" if the_place else ""
+
     # Build Top-5 candidates with position and direction info
     top5 = []
-    raw_candidates = fusion_candidates or (result.top_candidates if result.top_candidates else [])
+    raw_candidates = result.top_candidates or []
     for i, c in enumerate(raw_candidates[:5]):
         nid = c[0]
         score = round(c[1], 4)
@@ -3381,14 +3379,14 @@ async def localize_test(
             entry["pdr_y"] = node.pdr_y
             entry["heading_deg"] = node.heading_deg
             entry["photo_file"] = node.photo_file
-            entry["photo_url"] = f"/reference-photo/{nid}.jpg"
+            entry["photo_url"] = f"/reference-photo/{nid}.jpg{_place_q}"
             # Find matched directional photo
             matched_dp = (server_ev.best_photo.get(nid) if server_ev else None)
             if matched_dp:
                 entry["matched_slot"] = matched_dp.slot
                 entry["matched_heading"] = matched_dp.heading_deg
                 entry["matched_photo_file"] = matched_dp.photo_file
-                entry["matched_photo_url"] = f"/reference-dir-photo/{nid}/{matched_dp.slot}.jpg"
+                entry["matched_photo_url"] = f"/reference-dir-photo/{nid}/{matched_dp.slot}.jpg{_place_q}"
             elif node.directional_photos:
                 dp = node.directional_photos[0]
                 entry["matched_slot"] = dp.slot
@@ -3429,7 +3427,7 @@ async def localize_test(
         if node:
             matched["pdr_x"] = node.pdr_x
             matched["pdr_y"] = node.pdr_y
-            matched["photo_url"] = f"/reference-photo/{result.matched_nid}.jpg"
+            matched["photo_url"] = f"/reference-photo/{result.matched_nid}.jpg{_place_q}"
 
     # Ground truth comparison
     gt = None
@@ -3439,7 +3437,7 @@ async def localize_test(
         if gt_node:
             gt["pdr_x"] = gt_node.pdr_x
             gt["pdr_y"] = gt_node.pdr_y
-            gt["photo_url"] = f"/reference-photo/{ground_truth_nid}.jpg"
+            gt["photo_url"] = f"/reference-photo/{ground_truth_nid}.jpg{_place_q}"
         for i, c in enumerate(top5):
             if c["nid"] == ground_truth_nid:
                 gt["found_in_top5"] = True
@@ -3479,22 +3477,23 @@ async def localize_test(
 
 
 @app.get("/reference-dir-photo/{nid}/{slot}.jpg")
-def serve_reference_dir_photo(nid: int, slot: str):
-    """Serve a directional reference photo (front/right/back/left)."""
+def serve_reference_dir_photo(nid: int, slot: str, place: str = Query(default="")):
+    """Serve a directional reference photo (front/right/back/left) of `place` (default store if empty)."""
     if slot not in ("front", "right", "back", "left"):
         raise HTTPException(status_code=400, detail=f"bad slot: {slot}")
     neo4j = get_neo4j()
     if not neo4j:
         raise HTTPException(status_code=503, detail="neo4j unavailable")
-    ref_map = neo4j.load_reference_map()
+    ref_map = neo4j.load_reference_map(place or None)
     if nid not in ref_map.photos:
         raise HTTPException(status_code=404, detail=f"node {nid} not found")
     node = ref_map.photos[nid]
     dp = next((d for d in node.directional_photos if d.slot == slot), None)
     if dp is None:
-        return FileResponse(str(OUTPUT_ROOT / node.session / "photo" / node.photo_file), media_type="image/jpeg") \
-            if (OUTPUT_ROOT / node.session / "photo" / node.photo_file).exists() \
-            else HTTPException(status_code=404, detail=f"no {slot} photo for node {nid}")
+        fallback = OUTPUT_ROOT / node.session / "photo" / node.photo_file
+        if not fallback.exists():
+            raise HTTPException(status_code=404, detail=f"no {slot} photo for node {nid}")
+        return FileResponse(str(fallback), media_type="image/jpeg")
     for p in [OUTPUT_ROOT / node.session / "photo" / dp.photo_file,
               OUTPUT_ROOT / node.session / "annotated" / dp.photo_file]:
         if p.exists():
@@ -3958,7 +3957,9 @@ def session_debug_page(session_id: str):
     if not html_path.exists():
         return HTMLResponse("<h1>debug_page.html not found</h1>", status_code=500)
     template = html_path.read_text(encoding="utf-8")
-    return HTMLResponse(template.replace("{{SESSION_ID}}", session_id))
+    # a JS string literal, not text pasted into quotes: the id comes from the URL
+    sid_js = json.dumps(session_id).replace("<", "\\u003c")
+    return HTMLResponse(template.replace("{{SESSION_ID_JSON}}", sid_js))
 
 
 @app.get("/session/{session_id}/photo/{node_id}.jpg")
@@ -3996,12 +3997,12 @@ def serve_original_photo(session_id: str, node_id: int):
 
 
 @app.get("/reference-photo/{nid}.jpg")
-def serve_reference_photo(nid: int):
-    """Serve a reference node's photo from the explore session output."""
+def serve_reference_photo(nid: int, place: str = Query(default="")):
+    """Serve a reference node's photo of `place` (default store if empty) from the explore session output."""
     neo4j = get_neo4j()
     if not neo4j:
         raise HTTPException(status_code=503, detail="neo4j unavailable")
-    ref_map = neo4j.load_reference_map()
+    ref_map = neo4j.load_reference_map(place or None)
     if nid not in ref_map.photos:
         raise HTTPException(status_code=404, detail=f"node {nid} not found")
     photo_file = ref_map.photos[nid].photo_file

@@ -72,7 +72,10 @@ def test_default_start_is_the_entrance_or_the_first_start_point():
             assert srv._default_start_wp("test") == 12
 
 
-def test_arrival_far_from_the_goal_asks_with_the_distance():
+def test_arrival_far_from_the_goal_builds_the_question_with_the_distance():
+    # 17 m is beyond ARRIVAL_ASK_MAX_M, so the caller keeps walking instead of asking
+    # (server._gate_far_arrival, tests in test_arrival_wording.py); the question is
+    # still what gets asked when the VLM checked the item in a close-up.
     with _neo():
         s = _session()
         q, far_m = srv._far_from_goal_question(s, 10, "「entrance」附近")
@@ -83,13 +86,16 @@ def test_arrival_far_from_the_goal_asks_with_the_distance():
         assert srv._far_from_goal_question(s, 10) == (None, None)  # the photo itself matched the goal
 
 
-def test_arrival_very_far_should_silent_move():
-    """Distance > ARRIVAL_ASK_MAX_M → caller should MOVE, not ASK."""
+def test_arrival_very_far_keeps_walking():
+    """Distance > ARRIVAL_ASK_MAX_M → MOVE toward the goal, not ASK, and not the VLM's "arrived"."""
+    from server.models import VLMAction, VLMResponse
     with _neo():
         s = _session()
         q, far_m = srv._far_from_goal_question(s, 10, "「entrance」附近")
-        assert q is not None and far_m is not None
         assert far_m > srv.ARRIVAL_ASK_MAX_M
+        arrived = VLMResponse(action=VLMAction.ARRIVED, guidance="你已經到達牛奶區了！", question=None, vlm_summary="")
+        out = srv._gate_far_arrival(s, arrived, q, far_m)
+        assert out.action == VLMAction.MOVE and "牛奶" in out.guidance and "到達" not in out.guidance
 
 
 def test_arrival_is_not_gated_without_a_goal_node_for_the_phase():

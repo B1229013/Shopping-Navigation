@@ -76,3 +76,12 @@ def test_ids_stay_unique():
     b = start_points._clean({"id": "gate", "name": "B", "x": 0, "y": 0, "heading_deg": 0}, used)
     c = start_points._clean({"name": "C", "x": 0, "y": 0, "heading_deg": 0}, used)
     assert len({a["id"], b["id"], c["id"]}) == 3
+
+
+def test_north_offset_ignores_a_malformed_value(tmp_path):
+    # a hand-edited "76°" must not take POST /session down (#14)
+    links = tmp_path / "neo4j_links"
+    links.mkdir()
+    for value, expected in (("76°", None), ("nan", None), (76, 76.0), ("12.5", 12.5), (None, None)):
+        (links / "store.json").write_text(json.dumps({"place": "店", "map_north_offset_deg": value}), encoding="utf-8")
+        assert start_points.load_north_offset("店", tmp_path) == expected

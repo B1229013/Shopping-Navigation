@@ -597,10 +597,11 @@ class NavigationViewModel : ViewModel() {
         }
     }
 
-    /** PDR arrival dismissed ("還沒到"): resume navigation without calling the server. */
+    /** PDR arrival dismissed ("還沒到"): ask for a photo to re-localize. */
     fun dismissPdrArrival() {
         pendingArrival = false
         arrivalFromPdr = false
+        guidance = "請拍一張照片重新定位"
     }
 
     /** Answer the "眼前有沒有看到要找的東西？" question with a button (有 / 沒有). */

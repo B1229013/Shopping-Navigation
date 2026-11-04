@@ -10,7 +10,7 @@
 <br />
 <div align="center">
   <a href="https://github.com/B1229013/Shopping-Navigation">
-    <img src="docs/architecture.jpg" alt="系統架構圖" width="720">
+    <img src="docs/system-architecture.png" alt="系統架構圖" width="880">
   </a>
 
   <h3 align="center">Shopping Navigation 室內購物導航</h3>

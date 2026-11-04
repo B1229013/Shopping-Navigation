@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>定位追蹤監控</title>
+<style>
+  :root {
+    --bg: #0e1016; --surface: #161922; --surface2: #1e2230;
+    --border: #2a2e3d; --text: #dfe1e8; --text2: #7c8097;
+    --accent: #4d8eff; --accent-dim: #4d8eff22;
+    --good: #34d399; --good-dim: #34d39922;
+    --warn: #fbbf24; --warn-dim: #fbbf2422;
+    --bad: #f87171; --bad-dim: #f8717122;
+    --pdr: #a78bfa; --fix: #fb923c;
+    color-scheme: dark;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+    font-size: 14px; line-height: 1.5; min-height: 100vh;
+  }
+  .top-bar {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  .top-bar h1 { font-size: 16px; font-weight: 700; color: var(--accent); }
+  .top-bar .status { font-size: 12px; color: var(--text2); margin-left: auto; }
+  .dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--good); margin-right: 4px; vertical-align: middle;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .main { display: flex; height: calc(100vh - 49px); }
+  .sidebar {
+    width: 240px; min-width: 240px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto; background: var(--surface);
+  }
+  .sidebar-header {
+    padding: 12px 16px 8px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text2);
+  }
+  .session-item {
+    display: block; padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer; transition: background 0.15s;
+  }
+  .session-item:hover { background: var(--surface2); }
+  .session-item.active { background: var(--accent-dim); border-left: 3px solid var(--accent); }
+  .session-item .sid { font-family: monospace; font-size: 13px; font-weight: 600; }
+  .session-item .meta { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 3px;
+    font-weight: 600; display: inline-block; margin-top: 4px;
+  }
+  .badge.photos { background: var(--accent-dim); color: var(--accent); }
+  .badge.arrived { background: var(--good-dim); color: var(--good); }
+  .badge.active { background: var(--warn-dim); color: var(--warn); }
+
+  .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .content.empty {
+    align-items: center; justify-content: center;
+    color: var(--text2); font-size: 15px;
+  }
+
+  .map-container {
+    flex: 1; position: relative; background: var(--bg); overflow: hidden;
+  }
+  #map-canvas { width: 100%; height: 100%; display: block; }
+
+  .legend {
+    position: absolute; bottom: 16px; left: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 16px;
+    display: flex; flex-direction: column; gap: 6px;
+    font-size: 12px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .legend-line {
+    width: 20px; height: 3px; border-radius: 2px; flex-shrink: 0;
+  }
+
+  .info-panel {
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding: 12px 20px; max-height: 240px; overflow-y: auto;
+  }
+  .info-panel h3 {
+    font-size: 13px; font-weight: 700; color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .fix-table {
+    width: 100%; border-collapse: collapse; font-size: 12px;
+  }
+  .fix-table th {
+    text-align: left; padding: 4px 8px; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text2); border-bottom: 1px solid var(--border);
+  }
+  .fix-table td {
+    padding: 4px 8px; border-bottom: 1px solid var(--border);
+    font-family: monospace; font-variant-numeric: tabular-nums;
+  }
+  .conf-high { color: var(--good); }
+  .conf-mid { color: var(--warn); }
+  .conf-low { color: var(--bad); }
+
+  @media (max-width: 700px) {
+    .main { flex-direction: column; height: auto; }
+    .sidebar { width: 100%; min-width: 0; max-height: 160px; border-right: none; border-bottom: 1px solid var(--border); }
+    .map-container { min-height: 50vh; }
+  }
+</style>
+</head>
+<body>
+<div class="top-bar">
+  <h1>定位追蹤監控</h1>
+  <span class="status"><span class="dot"></span>自動更新 3s</span>
+</div>
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-header">Sessions</div>
+    <div id="session-list"></div>
+  </div>
+  <div class="content empty" id="content">
+    <span>選擇一個 session 或等待新活動</span>
+  </div>
+</div>
+
+<script>
+let currentSession = null;
+let sessionsCache = [];
+let trackingData = null;
+
+// ── Helpers ──
+function confClass(c) { return c >= 0.6 ? 'conf-high' : c >= 0.3 ? 'conf-mid' : 'conf-low'; }
+
+async function fetchJSON(url) {
+  try { const r = await fetch(url); return r.ok ? r.json() : null; }
+  catch { return null; }
+}
+
+// ── Session list ──
+async function loadSessions() {
+  const data = await fetchJSON('/sessions');
+  if (!data) return;
+  sessionsCache = data.sessions;
+  renderSessionList();
+  if (!currentSession && sessionsCache.length) selectSession(sessionsCache[0].id);
+}
+
+function renderSessionList() {
+  document.getElementById('session-list').innerHTML = sessionsCache.map(s => {
+    const active = s.id === currentSession;
+    const time = new Date(s.created_at).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'});
+    return `<div class="session-item ${active?'active':''}" onclick="selectSession('${s.id}')">
+      <div class="sid">${s.id.slice(0,12)}</div>
+      <div class="meta">${time} · ${s.goal_objects?.slice(0,2).join(', ')||''}</div>
+      <span class="badge photos">${s.photo_count} photos</span>
+      ${s.arrived?'<span class="badge arrived">ARRIVED</span>':'<span class="badge active">ACTIVE</span>'}
+    </div>`;
+  }).join('');
+}
+
+async function selectSession(sid) {
+  currentSession = sid;
+  renderSessionList();
+  await loadTracking(sid);
+}
+
+// ── Tracking data + rendering ──
+async function loadTracking(sid) {
+  const data = await fetchJSON('/session/' + sid + '/tracking');
+  if (!data) return;
+  trackingData = data;
+
+  const el = document.getElementById('content');
+  el.classList.remove('empty');
+  el.innerHTML = `
+    <div class="map-container">
+      <canvas id="map-canvas"></canvas>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--text2)"></div>參考節點</div>
+        <div class="legend-item"><div class="legend-line" style="background:var(--text2);opacity:0.3"></div>參考邊</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--pdr)"></div>感測器 PDR 位置</div>
+        <div class="legend-item"><div class="legend-line" style="background:var(--pdr)"></div>PDR 路徑</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--fix)"></div>圖片定位修正點</div>
+        <div class="legend-item"><div class="legend-line" style="background:var(--fix);opacity:0.5"></div>PDR→定位 偏差</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div>地圖校正位置</div>
+      </div>
+    </div>
+    <div class="info-panel">
+      <h3>定位記錄 — ${data.place || '?'} — 目標: ${data.goal} (${data.photo_count} photos)</h3>
+      <table class="fix-table">
+        <thead><tr><th>#</th><th>PDR (x,y)</th><th>Map (x,y)</th><th>定位節點</th><th>信心值</th><th>校正節點</th></tr></thead>
+        <tbody>${data.pdr_path.map((p,i) => `<tr>
+          <td>${i+1}</td>
+          <td>${fmt(p.pdr_x)}, ${fmt(p.pdr_y)}</td>
+          <td>${fmt(p.map_x)}, ${fmt(p.map_y)}</td>
+          <td>${p.matched_nid ?? '—'}</td>
+          <td class="${confClass(p.confidence)}">${(p.confidence*100).toFixed(0)}%</td>
+          <td>${p.corrected_nid ?? '—'}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+  `;
+  drawMap();
+}
+
+function fmt(v) { return v != null ? v.toFixed(1) : '—'; }
+
+// ── Canvas map drawing ──
+function drawMap() {
+  const canvas = document.getElementById('map-canvas');
+  if (!canvas || !trackingData) return;
+  const container = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = container.clientWidth * dpr;
+  canvas.height = container.clientHeight * dpr;
+  canvas.style.width = container.clientWidth + 'px';
+  canvas.style.height = container.clientHeight + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = container.clientWidth, H = container.clientHeight;
+
+  const d = trackingData;
+
+  // Collect all points for bounding box
+  const allPts = [];
+  for (const n of d.ref_nodes) allPts.push([n.x, n.y]);
+  for (const p of d.pdr_path) {
+    if (p.pdr_x != null) allPts.push([p.pdr_x, p.pdr_y]);
+    if (p.map_x != null) allPts.push([p.map_x, p.map_y]);
+  }
+  if (d.sensor_map?.nodes) {
+    for (const n of d.sensor_map.nodes) allPts.push([n.x, n.y]);
+  }
+  if (!allPts.length) return;
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [x, y] of allPts) {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  }
+  const pad = 40;
+  const rangeX = maxX - minX || 1, rangeY = maxY - minY || 1;
+  const scale = Math.min((W - 2*pad) / rangeX, (H - 2*pad) / rangeY);
+  const offX = (W - rangeX * scale) / 2;
+  const offY = (H - rangeY * scale) / 2;
+
+  function toScreen(x, y) {
+    return [offX + (x - minX) * scale, H - offY - (y - minY) * scale];
+  }
+
+  ctx.clearRect(0, 0, W, H);
+
+  // 1. Reference edges
+  if (d.ref_edges.length) {
+    const nodeMap = {};
+    for (const n of d.ref_nodes) nodeMap[n.nid] = n;
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1;
+    for (const e of d.ref_edges) {
+      const a = nodeMap[e.from], b = nodeMap[e.to];
+      if (!a || !b) continue;
+      const [ax, ay] = toScreen(a.x, a.y);
+      const [bx, by] = toScreen(b.x, b.y);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    }
+  }
+
+  // 2. Reference nodes
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'center';
+  for (const n of d.ref_nodes) {
+    const [sx, sy] = toScreen(n.x, n.y);
+    ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillText('#' + n.nid, sx, sy - 7);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  }
+
+  // 3. PDR path (purple line + dots)
+  const pdrPts = d.pdr_path.filter(p => p.pdr_x != null);
+  if (pdrPts.length > 1) {
+    ctx.strokeStyle = '#a78bfa';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    for (let i = 0; i < pdrPts.length; i++) {
+      const [sx, sy] = toScreen(pdrPts[i].pdr_x, pdrPts[i].pdr_y);
+      if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // PDR dots
+  ctx.fillStyle = '#a78bfa';
+  for (let i = 0; i < pdrPts.length; i++) {
+    const [sx, sy] = toScreen(pdrPts[i].pdr_x, pdrPts[i].pdr_y);
+    ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(167,139,250,0.6)';
+    ctx.fillText(i+1, sx, sy - 8);
+    ctx.fillStyle = '#a78bfa';
+  }
+
+  // 4. Map-corrected positions (blue dots + line)
+  const mapPts = d.pdr_path.filter(p => p.map_x != null);
+  if (mapPts.length > 1) {
+    ctx.strokeStyle = '#4d8eff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < mapPts.length; i++) {
+      const [sx, sy] = toScreen(mapPts[i].map_x, mapPts[i].map_y);
+      if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#4d8eff';
+  for (const p of mapPts) {
+    const [sx, sy] = toScreen(p.map_x, p.map_y);
+    ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI*2); ctx.fill();
+  }
+
+  // 5. Photo fix: matched reference node positions (orange) + deviation lines
+  const nodeMap = {};
+  for (const n of d.ref_nodes) nodeMap[n.nid] = n;
+  for (let i = 0; i < d.pdr_path.length; i++) {
+    const p = d.pdr_path[i];
+    if (p.matched_nid == null) continue;
+    const refNode = nodeMap[p.matched_nid];
+    if (!refNode) continue;
+    const [rx, ry] = toScreen(refNode.x, refNode.y);
+
+    // Deviation line from PDR to matched ref node
+    if (p.pdr_x != null) {
+      const [px, py] = toScreen(p.pdr_x, p.pdr_y);
+      ctx.strokeStyle = 'rgba(251,146,60,0.4)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(rx, ry); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Orange circle on the matched ref node
+    ctx.fillStyle = '#fb923c';
+    ctx.beginPath(); ctx.arc(rx, ry, 6, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(rx, ry, 6, 0, Math.PI*2); ctx.stroke();
+    // Confidence label
+    ctx.fillStyle = '#fb923c';
+    ctx.font = 'bold 10px monospace';
+    ctx.fillText((p.confidence*100).toFixed(0) + '%', rx, ry + 15);
+    ctx.font = '10px monospace';
+  }
+
+  // 6. Sensor map nodes (if uploaded, shown as small triangles)
+  if (d.sensor_map?.nodes?.length) {
+    ctx.fillStyle = 'rgba(167,139,250,0.25)';
+    for (const n of d.sensor_map.nodes) {
+      const [sx, sy] = toScreen(n.x, n.y);
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - 3); ctx.lineTo(sx - 3, sy + 3); ctx.lineTo(sx + 3, sy + 3);
+      ctx.closePath(); ctx.fill();
+    }
+    // Sensor map edges
+    if (d.sensor_map.edges?.length) {
+      const sNodeMap = {};
+      for (const n of d.sensor_map.nodes) sNodeMap[n.id] = n;
+      ctx.strokeStyle = 'rgba(167,139,250,0.15)';
+      ctx.lineWidth = 1;
+      for (const e of d.sensor_map.edges) {
+        const a = sNodeMap[e.fromNodeID], b = sNodeMap[e.toNodeID];
+        if (!a || !b) continue;
+        const [ax, ay] = toScreen(a.x, a.y);
+        const [bx, by] = toScreen(b.x, b.y);
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      }
+    }
+  }
+}
+
+// ── Resize handling ──
+window.addEventListener('resize', () => { if (trackingData) drawMap(); });
+
+// ── Polling ──
+async function poll() {
+  await loadSessions();
+  if (currentSession) await loadTracking(currentSession);
+}
+poll();
+setInterval(poll, 3000);
+</script>
+</body>
+</html>

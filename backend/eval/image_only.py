@@ -558,7 +558,19 @@ def perceive_all_vlm(jobs, cache_path, srv, redetect=False):
             perc, debug, w, h = _server_perceive(srv, img)
             t2 = time.perf_counter()
             if calls and all("error" in c for c in calls):
-                sys.exit(f"{k}: every VLM call failed ({calls[-1]['error']}) — stopped, nothing cached for it")
+                err = calls[-1].get("error", "")
+                if "429" in str(err):
+                    print(f"  ⚠ {k}: rate limited — waiting 60s then retrying…", file=sys.stderr, flush=True)
+                    time.sleep(60)
+                    calls.clear()
+                    t0b = time.perf_counter()
+                    perc, debug, w, h = _server_perceive(srv, img)
+                    t2 = time.perf_counter()
+                    if calls and all("error" in c for c in calls):
+                        print(f"  ⚠ {k}: still failing after retry — skipping", file=sys.stderr, flush=True)
+                        continue
+                else:
+                    sys.exit(f"{k}: every VLM call failed ({err}) — stopped, nothing cached for it")
             cache[k] = _vlm_record(srv, perc, debug, w, h, q, list(calls), sig, {"quality": t1 - t0, "vlm": t2 - t1})
             _save_json(cache_path, cache)
             dets, ocr = cache[k]["detections"], cache[k]["ocr"]

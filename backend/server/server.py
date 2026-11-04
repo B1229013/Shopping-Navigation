@@ -3748,6 +3748,111 @@ def dashboard():
     return FileResponse(str(html_path), media_type="text/html")
 
 
+@app.get("/tracking")
+def tracking_page():
+    """Sensor path vs image localization monitoring page."""
+    html_path = Path(__file__).parent / "tracking.html"
+    return FileResponse(str(html_path), media_type="text/html")
+
+
+@app.get("/session/{session_id}/tracking")
+def session_tracking(session_id: str):
+    """Return sensor PDR path, photo localization fixes, and reference map nodes
+    for the tracking visualizer."""
+    s = _store.get(session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail={"error": "session_not_found"})
+
+    # Collect PDR positions and localization results from session history
+    sensor_points = []
+    photo_fixes = []
+    for i, h in enumerate(s.history):
+        if h.get("kind") != "photo":
+            continue
+        loc = h.get("localization")
+        nid = h.get("node_id")
+        sensor_points.append({"step": i, "node_id": nid})
+        if loc and loc.get("matched_nid") is not None:
+            matched_nid = loc["matched_nid"]
+            conf = loc.get("confidence", 0)
+            photo_fixes.append({
+                "step": i,
+                "node_id": nid,
+                "matched_nid": matched_nid,
+                "confidence": round(conf, 3),
+                "reasoning": loc.get("reasoning", ""),
+            })
+
+    # Collect PDR + map positions from the turn log files
+    pdr_path = []
+    out_dir = OUTPUT_ROOT / session_id
+    turn_log_path = out_dir / "turns.jsonl"
+    if turn_log_path.exists():
+        for line in turn_log_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            req = entry.get("request", {})
+            if entry.get("kind") == "photo" and req:
+                pdr_x = req.get("pdr_x")
+                pdr_y = req.get("pdr_y")
+                map_x = req.get("map_x")
+                map_y = req.get("map_y")
+                heading = req.get("heading")
+                loc_data = entry.get("localization", {}) or {}
+                loc_result = loc_data.get("result", {}) or {}
+                resp_data = entry.get("response", {}) or {}
+                pdr_path.append({
+                    "pdr_x": pdr_x, "pdr_y": pdr_y,
+                    "map_x": map_x, "map_y": map_y,
+                    "heading": heading,
+                    "matched_nid": loc_result.get("matched_nid"),
+                    "confidence": round(loc_result.get("confidence", 0), 3),
+                    "corrected_nid": resp_data.get("corrected_node_id"),
+                    "estimated_xy": loc_result.get("estimated_xy"),
+                })
+
+    # Reference map nodes (positions on the map)
+    ref_nodes = []
+    ref_edges = []
+    ref_map = neo4j.load_reference_map(s.place) if neo4j and s.place else None
+    if ref_map:
+        for nid_key, node in ref_map.photos.items():
+            ref_nodes.append({
+                "nid": nid_key,
+                "x": round(node.pdr_x, 2),
+                "y": round(node.pdr_y, 2),
+            })
+        for edge in ref_map.walkway_edges:
+            ref_edges.append({"from": edge.get("from", edge.get("from_nid")),
+                              "to": edge.get("to", edge.get("to_nid"))})
+
+    # Sensor map (phone's PDR topo nodes) if uploaded
+    sensor_map = None
+    sensor_map_path = out_dir / "sensor_map.json"
+    if sensor_map_path.exists():
+        try:
+            sensor_map = json.loads(sensor_map_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            pass
+
+    return {
+        "session_id": session_id,
+        "goal": s.goal,
+        "place": s.place,
+        "arrived": s.arrived,
+        "photo_count": sum(1 for h in s.history if h.get("kind") == "photo"),
+        "pdr_path": pdr_path,
+        "photo_fixes": photo_fixes,
+        "ref_nodes": ref_nodes,
+        "ref_edges": ref_edges,
+        "sensor_map": sensor_map,
+    }
+
+
 @app.get("/debug")
 def debug_latest():
     """Redirect to the latest session's debug page."""

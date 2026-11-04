@@ -92,9 +92,9 @@ MAP_BUILD_SOURCES = [Path(p) for p in os.environ.get("MAP_BUILD_SOURCES", "").sp
 
 # LLM service — OpenAI GPT-4o
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-# gpt-4o: what the README documents and every eval result (lab1019, 0916…) was measured with.
-# Set OPENAI_MODEL in .env for another model (check it accepts temperature 0.2, see vlm._generate).
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+# gpt-5.4-mini: the model the team runs (CGU gateway). Any OpenAI-compatible model works;
+# vlm._generate sends temperature 0.2. The 2026-10 eval results (lab1019, 0916) used gpt-4o.
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
 # Neo4j Aura

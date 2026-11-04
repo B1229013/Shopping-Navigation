@@ -143,6 +143,10 @@ let trackingData = null;
 
 // ── Helpers ──
 function confClass(c) { return c >= 0.6 ? 'conf-high' : c >= 0.3 ? 'conf-mid' : 'conf-low'; }
+// Text the phone sent (goal, place, ids) goes into innerHTML only through esc().
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch]);
+}
 
 async function fetchJSON(url) {
   try { const r = await fetch(url); return r.ok ? r.json() : null; }
@@ -162,14 +166,19 @@ function renderSessionList() {
   document.getElementById('session-list').innerHTML = sessionsCache.map(s => {
     const active = s.id === currentSession;
     const time = new Date(s.created_at).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'});
-    return `<div class="session-item ${active?'active':''}" onclick="selectSession('${s.id}')">
-      <div class="sid">${s.id.slice(0,12)}</div>
-      <div class="meta">${time} · ${s.goal_objects?.slice(0,2).join(', ')||''}</div>
-      <span class="badge photos">${s.photo_count} photos</span>
+    return `<div class="session-item ${active?'active':''}" data-sid="${esc(s.id)}">
+      <div class="sid">${esc(s.id.slice(0,12))}</div>
+      <div class="meta">${time} · ${esc(s.goal_objects?.slice(0,2).join(', '))}</div>
+      <span class="badge photos">${esc(s.photo_count)} photos</span>
       ${s.arrived?'<span class="badge arrived">ARRIVED</span>':'<span class="badge active">ACTIVE</span>'}
     </div>`;
   }).join('');
 }
+
+document.getElementById('session-list').addEventListener('click', e => {
+  const item = e.target.closest('.session-item');
+  if (item) selectSession(item.dataset.sid);
+});
 
 async function selectSession(sid) {
   currentSession = sid;
@@ -179,7 +188,7 @@ async function selectSession(sid) {
 
 // ── Tracking data + rendering ──
 async function loadTracking(sid) {
-  const data = await fetchJSON('/session/' + sid + '/tracking');
+  const data = await fetchJSON('/session/' + encodeURIComponent(sid) + '/tracking');
   if (!data) return;
   trackingData = data;
 
@@ -199,16 +208,16 @@ async function loadTracking(sid) {
       </div>
     </div>
     <div class="info-panel">
-      <h3>定位記錄 — ${data.place || '?'} — 目標: ${data.goal} (${data.photo_count} photos)</h3>
+      <h3>定位記錄 — ${esc(data.place || '?')} — 目標: ${esc(data.goal)} (${esc(data.photo_count)} photos)</h3>
       <table class="fix-table">
         <thead><tr><th>#</th><th>PDR (x,y)</th><th>Map (x,y)</th><th>定位節點</th><th>信心值</th><th>校正節點</th></tr></thead>
         <tbody>${data.pdr_path.map((p,i) => `<tr>
           <td>${i+1}</td>
           <td>${fmt(p.pdr_x)}, ${fmt(p.pdr_y)}</td>
           <td>${fmt(p.map_x)}, ${fmt(p.map_y)}</td>
-          <td>${p.matched_nid ?? '—'}</td>
+          <td>${esc(p.matched_nid ?? '—')}</td>
           <td class="${confClass(p.confidence)}">${(p.confidence*100).toFixed(0)}%</td>
-          <td>${p.corrected_nid ?? '—'}</td>
+          <td>${esc(p.corrected_nid ?? '—')}</td>
         </tr>`).join('')}</tbody>
       </table>
     </div>

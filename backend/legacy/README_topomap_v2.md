@@ -1,67 +1,45 @@
 # 拓樸地圖 v2 — 使用說明
 
-> **2026/08/29 更新（第二十四次）**：這兩輪都是在幫「照片定位」功能
-> （`locate_v2.py`）除錯時，順著追查挖出來、回頭修到這裡的既有問題，
-> 不是這個模組自己新增的需求。**第二十三輪**：`locate_v2.py` 除錯圖
-> 需要畫一個不接走道邊的獨立查詢節點，`_dead_reckon_tree()` 原本的
-> 後備邏輯只是貼著起點挪一點點小偏移，會直接疊到主路徑上——改成擺到
-> 整張地圖版面外、留足夠安全距離的空白區域。**第二十四輪（影響範圍
-> 較大）**：`build_subgraph_from_detections()` 的 `ocr_items` 參數
-> 從頭到尾接了但沒真的用來把 OCR 文字關聯到物件上，這是系統一開始就
-> 存在的既有漏洞，`build_topomap_v2.py` 建圖跟 `locate_v2.py` 定位都
-> 受影響——現在補上「OCR 關聯到最近物件」的邏輯，並處理 VLM 模式常見
-> 「好幾個物件共用同一個模板框」時的平手判斷（優先關聯給招牌類標籤）。
-> **這兩項修正都只影響「以後建圖/定位」的行為，既有地圖需要加
-> `--fresh` 重新建圖才會吃到修正**。細節見文件最下方「第二十三輪」
-> 「第二十四輪」。單元測試新增 5 個，現在總共 **54 個**，全過。
+## 現況
 
-> **2026/08/16 更新（第二十二次）**：你請我全面確認每個照片節點角度
-> 正確性——逐段比對「資料方向文字」「死算推位算出的原始角度」「最終
-> 渲染角度」，17 張照片 16 段裡 14 段完全一致，**發現 2 段角度跟資料
-> 對不上**：P10→P11（偏差 8.79 度）、P11→P12（偏差 28.14 度），都在
-> 折返路段（兩次「轉身返回」很密集的地方），根因是角度復原機制遇到
-> 空間真的不夠時整段放棄修正。改成漸進式修正（先試 100%，不行就試
-> 75%/50%/25%，取最大能安全套用的幅度），P10→P11 的偏差改善到只剩
-> 2.19 度；P11→P12 因為空間真的太緊（連 25% 的修正都會重新造成穿越）
-> 沒辦法再改善，這是空間限制、不是 bug。細節見文件最下方「這次改了
-> 什麼（第二十二輪）」。單元測試維持 49 個，全過。
+- 程式在 `backend/legacy/`：`server/topomap_v2.py`（資料結構）與 `build_topomap_v2.py`（CLI）。
+- 誰在用：`/snav` 後端（`backend/legacy/server/` 的 `session.py`、`server.py`、`sensor_nav.py`）和
+  照片定位 `locate_v2.py`（見 [README_locate_v2.md](README_locate_v2.md)）。
+- 目前的導航後端 `backend/server/` 不用這個格式：店家地圖存在 Neo4j（`Waypoint → DirPhoto → Object`），
+  新店建圖走 Sensor Lab ＋ `/topomap-builder`，見 [backend/README.md](../README.md)。
+- 單元測試 `backend/legacy/server/tests/test_topomap_v2.py` 共 **59 個**，全過。
+- 下面「第 N 輪」各段是每次修改的紀錄，當時的測試數量以當時為準。
 
-這次先做成「不跟系統整合」的獨立模組，符合你說的先拿導航輸出資料夾測試。
-
-## 檔案清單（放到專案對應路徑即可）
+## 檔案清單
 
 ```
-backend/server/topomap_v2.py          核心資料結構（兩種節點、四種邊、子圖）
-backend/build_topomap_v2.py           CLI：讀 output/sessions/<id>/ 生成地圖
-backend/tests_fixtures/make_sample_session.py   沒有真實資料時的假資料產生器
-backend/server/tests/test_topomap_v2.py         單元測試（54 個，全過）
+backend/legacy/server/topomap_v2.py               核心資料結構（兩種節點、四種邊、子圖）
+backend/legacy/build_topomap_v2.py                CLI：讀 output/sessions/<id>/ 生成地圖
+backend/legacy/server/tests/test_topomap_v2.py    單元測試（59 個）
 ```
 
-`topomap_v2.py` 完全獨立於現有的 `topomap.py`，不會動到你系統原本的邏輯，
-`session.py` / `server.py` 目前都沒有被修改。
+## 快速測試
 
-## 快速測試（不需要真實導航資料）
+在 `backend/legacy` 底下執行（腳本會把這個資料夾加進 `sys.path`，`import server...` 用的是這裡的模組）：
 
 ```bash
-cd backend
-python tests_fixtures/make_sample_session.py --out /tmp/demo_session
-python build_topomap_v2.py --input /tmp/demo_session --place "測試賣場 demo店"
+cd backend/legacy
+python -m pytest server/tests/test_topomap_v2.py -q
+python build_topomap_v2.py --input <導航輸出資料夾> --place "測試賣場"
 ```
 
 會輸出：
-- `output/topomaps/測試賣場_demo店/topomap.png` — 完整版（物件＋所有邊）
-- `output/topomaps/測試賣場_demo店/topomap_overview.png` — **總覽版**（只有照片節點
-  ＋走道邊，先看這張比較容易看懂整體路線走向）
-- `/tmp/demo_session/topomap_v2/` 底下也會各存一份，方便對照這次導航的輸出
+- `backend/legacy/output/topomaps/測試賣場/topomap.json` 與 `topomap.png`（`--output-root` 可改位置）
+- `<導航輸出資料夾>/topomap_v2/topomap.png`，方便對照這次導航的輸出
 
-再跑一次同一個 `--place`（用新的 session 資料夾）就可以看到它會接在舊地圖後面，
-而不是從頭重建。
+再跑一次同一個 `--place`（用新的 session 資料夾）就會接在舊地圖後面，不是從頭重建；加 `--fresh` 從空地圖開始。
+repo 裡沒有範例 session，要先有一份導航輸出資料夾（見下一節）。
 
 ## 用真實資料測試
 
-你系統現在每次導航會把資料存在 `output/sessions/<session_id>/`，裡面已經有
+導航後端每次導航會把資料存在 `output/sessions/<session_id>/`，裡面有
 `photo/`、`annotated/detections_*.json`、`map/map_*.json`，格式跟這支腳本預期的
-完全一樣，所以可以直接：
+一樣（目前的 `backend/server/` 也會寫這些檔案，存在 `backend/output/sessions/`），所以可以直接：
 
 ```bash
 python build_topomap_v2.py --input output/sessions/<session_id> --place "資工系系辦"
@@ -1085,4 +1063,4 @@ OCR 文字」，一旦某個物件（例如貼著房間牌子的門）透過這�
 （已有文字不被覆蓋）、`test_ocr_association_ties_prefer_sign_like_labels`
 （VLM 模式模板框共用座標打平手時，優先關聯給招牌類標籤）。
 
-單元測試現在總共 **54 個**，全過。
+單元測試現在總共 **54 個**，全過（之後又加到 59 個，見文件開頭「現況」）。

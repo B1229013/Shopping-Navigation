@@ -57,12 +57,22 @@ class TurnResponse(BaseModel):
     action: VLMAction
     guidance: str
     question: Optional[str] = None
+    # The question asks "have you arrived?": the app answers it with 是 / 不是 buttons.
+    confirm_question: bool = False
     node_id: int
     annotated_photo_url: Optional[str] = None
+    # Photo unusable (blurred / dark / occluded / nothing recognisable): ask for a retake.
+    # When set, the photo did not update the user's position.
+    retake_hint: Optional[str] = None
+    # Several places look alike: take one more photo after turning on the spot; the
+    # next photo is combined with this one.
+    second_photo_hint: Optional[str] = None
     # Neo4j visual localization (position correction)
     corrected_node_id: Optional[int] = None       # reference map node ID
     corrected_confidence: Optional[float] = None   # 0.0–1.0
     corrected_location: Optional[str] = None       # human-readable location name
+    estimated_x: Optional[float] = None            # map position between nodes (m)
+    estimated_y: Optional[float] = None
     # Heading estimation from directional photo matching
     heading_deg: Optional[float] = None            # estimated user heading [0, 360)
     heading_slot: Optional[str] = None             # "front"/"right"/"back"/"left"
@@ -159,42 +169,3 @@ class MapJSON(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     detail: str
-
-
-# ── Multi-target route planning ─────────────────────────────────────────
-
-class PlanRouteRequest(BaseModel):
-    """Request to plan an optimised multi-target route."""
-    targets: List[str] = Field(..., description="List of target queries (product names, locations)")
-    start_node: Optional[int] = Field(None, description="Starting node ID (from visual localization)")
-    checkout_node: Optional[int] = Field(None, description="Checkout/counter node ID")
-    exit_node: Optional[int] = Field(None, description="Exit node ID")
-    place: Optional[str] = Field(None, description="Map/place name")
-
-
-class RouteLegResponse(BaseModel):
-    from_node: int = Field(..., alias="from")
-    to: int
-    path: List[int]
-    cost: float
-    actions: List[str]
-    purpose: str  # "target" | "checkout" | "exit"
-
-    class Config:
-        populate_by_name = True
-
-
-class PlanRouteResponse(BaseModel):
-    visit_order: List[int] = Field(..., description="Target nodes in optimal visit order")
-    total_cost: float
-    full_path: List[int]
-    legs: List[RouteLegResponse]
-    resolved_targets: List[dict] = Field(default_factory=list, description="Query → node resolution results")
-    checkout_node: Optional[int] = None
-    exit_node: Optional[int] = None
-
-
-class ModifyRouteRequest(BaseModel):
-    """Add or remove targets mid-route."""
-    add: List[str] = Field(default_factory=list, description="Targets to add")
-    remove: List[str] = Field(default_factory=list, description="Targets to remove")

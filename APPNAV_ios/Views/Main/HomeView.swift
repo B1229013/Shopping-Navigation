@@ -17,8 +17,8 @@ struct HomeView: View {
         ("調味", "flame.fill", Color(hex: 0x7C3AED), Color(hex: 0xEDE9FE)),
     ]
 
-    private var pendingItems: [ShoppingItem] { shoppingItems.filter { !$0.isChecked } }
-    private var recentPurchased: [ShoppingItem] { Array(shoppingItems.filter { $0.isChecked }.suffix(6).reversed()) }
+    private var pendingItems: [ShoppingItem] { shoppingItems.filter { !$0.isChecked && ($0.source ?? "list") == "list" } }
+    private var recentPurchased: [ShoppingItem] { Array(shoppingItems.filter { $0.isChecked && ($0.source ?? "list") == "list" }.suffix(6).reversed()) }
     private var totalSpent: Int { shoppingItems.filter { $0.isChecked }.reduce(0) { $0 + $1.price * $1.qty } }
 
     private var filteredItems: [ShoppingItem] {
@@ -116,8 +116,10 @@ struct HomeView: View {
         HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.appTextSecondary)
-            TextField("搜尋商品...", text: $searchText)
-                .foregroundColor(.appTextPrimary)
+            ZStack(alignment: .leading) {
+                if searchText.isEmpty { Text("搜尋商品...").foregroundColor(.appTextSecondary) }
+                TextField("", text: $searchText).foregroundColor(.appTextPrimary)
+            }
         }
         .padding(14)
         .background(Color.appSurface)

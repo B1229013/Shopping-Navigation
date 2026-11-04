@@ -9,7 +9,8 @@ struct AIView: View {
     @State private var inputText = ""
     @State private var isLoading = false
 
-    private let groqApiKey = UserDefaults.standard.string(forKey: "groqApiKey") ?? AppConfig.groqApiKey
+    // Forced to the in-app key for the demo (ignore any stale value saved in Settings).
+    private var groqApiKey: String { AppConfig.groqApiKey }
 
     struct ChatMessage: Identifiable {
         let id = UUID()
@@ -141,12 +142,15 @@ struct AIView: View {
         VStack(spacing: 0) {
             Divider()
             HStack(spacing: 12) {
-                TextField("輸入問題...", text: $inputText, axis: .vertical)
-                    .lineLimit(1...4)
-                    .padding(12)
-                    .background(Color.appSurface)
-                    .cornerRadius(12)
-                    .foregroundColor(.appTextPrimary)
+                ZStack(alignment: .topLeading) {
+                    if inputText.isEmpty { Text("輸入問題...").foregroundColor(.appTextSecondary).padding(12) }
+                    TextField("", text: $inputText, axis: .vertical)
+                        .lineLimit(1...4)
+                        .padding(12)
+                        .foregroundColor(.appTextPrimary)
+                }
+                .background(Color.appSurface)
+                .cornerRadius(12)
 
                 Button {
                     sendMessage()
@@ -167,6 +171,13 @@ struct AIView: View {
     private func sendMessage() {
         let trimmed = inputText.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, !isLoading else { return }
+
+        guard !groqApiKey.isEmpty else {
+            messages.append(ChatMessage(role: "user", content: trimmed))
+            messages.append(ChatMessage(role: "assistant", content: "尚未設定 Groq API Key，請先到「設定」頁貼上你的 Key 後再試一次。"))
+            inputText = ""
+            return
+        }
 
         let userMsg = ChatMessage(role: "user", content: trimmed)
         messages.append(userMsg)
@@ -218,6 +229,20 @@ struct AIView: View {
 
 // MARK: - Sub Views
 
+func cleanMarkdown(_ text: String) -> String {
+    var lines: [String] = []
+    for raw in text.components(separatedBy: "\n") {
+        var l = raw
+        if let r = l.range(of: "^\\s*#{1,6}\\s*", options: .regularExpression) { l.removeSubrange(r) }
+        lines.append(l)
+    }
+    var s = lines.joined(separator: "\n")
+    s = s.replacingOccurrences(of: "**", with: "")
+    s = s.replacingOccurrences(of: "__", with: "")
+    s = s.replacingOccurrences(of: "`", with: "")
+    return s
+}
+
 struct MessageBubble: View {
     let message: AIView.ChatMessage
     private var isUser: Bool { message.role == "user" }
@@ -232,7 +257,7 @@ struct MessageBubble: View {
                 }
             }
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                Text(message.content)
+                Text(isUser ? message.content : cleanMarkdown(message.content))
                     .font(.subheadline)
                     .foregroundColor(isUser ? .white : .appTextPrimary)
                     .padding(.horizontal, 14)

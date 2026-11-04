@@ -1,0 +1,14 @@
+[
+  {
+    "photo": "0.jpg",
+    "goal": "find the milk",
+    "expected_action": "MOVE",
+    "is_goal_frame": false
+  },
+  {
+    "photo": "1.jpg",
+    "goal": "find the milk",
+    "expected_action": "ARRIVED",
+    "is_goal_frame": true
+  }
+]

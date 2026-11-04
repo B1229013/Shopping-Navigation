@@ -7,6 +7,10 @@ struct SettingsView: View {
     @AppStorage("paddleOcrApiUrl") private var paddleOcrApiUrl = AppConfig.paddleOcrApiUrl
     @AppStorage("paddleOcrToken") private var paddleOcrToken = AppConfig.paddleOcrToken
     @AppStorage("navigationBackendURL") private var navigationBackendURL = AppConfig.navigationBackendURL
+    @AppStorage("profileGender") private var profileGender = "其他"
+    @AppStorage("profileHeight") private var profileHeight = ""
+    @AppStorage("profileWeight") private var profileWeight = ""
+    @AppStorage("profileAllergies") private var profileAllergies = ""
     @State private var showSignOutAlert = false
     @State private var showSensorTest = false
     @State private var showTopoMapTest = false
@@ -37,6 +41,38 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 6)
+                }
+
+                // Personal profile (used by 食物分析: 過敏原提醒等)
+                Section("個人資料（選填）") {
+                    Picker("性別", selection: $profileGender) {
+                        Text("男").tag("男")
+                        Text("女").tag("女")
+                        Text("其他").tag("其他")
+                    }
+                    HStack {
+                        Text("身高")
+                        Spacer()
+                        TextField("cm", text: $profileHeight)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                        Text("cm").foregroundColor(.appTextTertiary)
+                    }
+                    HStack {
+                        Text("體重")
+                        Spacer()
+                        TextField("kg", text: $profileWeight)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                        Text("kg").foregroundColor(.appTextTertiary)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("過敏原（用逗號分隔，如：牛奶, 花生）")
+                            .font(.caption)
+                            .foregroundColor(.appTextSecondary)
+                        TextField("過敏原", text: $profileAllergies, axis: .vertical)
+                            .lineLimit(2...4)
+                    }
                 }
 
                 // API Configuration

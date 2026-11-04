@@ -58,6 +58,7 @@ class DirectionalRef:
     heading_deg: float    # absolute heading of this directional photo
     photo_file: str
     objects: List[RefObject] = field(default_factory=list)
+    dino: Optional[List[float]] = None   # DirPhoto.dino (DINOv2 vector) when stored in Neo4j
 
 
 @dataclass
@@ -84,6 +85,55 @@ class RefMap:
     photos: Dict[int, RefPhotoNode] = field(default_factory=dict)
     walkway_edges: List[dict] = field(default_factory=list)
     adjacent_map: Dict[tuple, Dict[tuple, str]] = field(default_factory=dict)
+
+
+_INVERSE = {"above": "below", "below": "above", "same_row": "same_row",
+            "left": "right", "right": "left", "same_col": "same_col"}
+
+
+def adjacent_relation(cell_pairs) -> Dict[str, str]:
+    """ADJACENT.cell_pairs → {"v_rel", "h_rel"}: where object **a** is relative to object **b**,
+    the way visual_localization.compute_query_spatial describes the photo's pairs.
+
+    A cell pair's "dir" says where b's cell is from a's (grid_utils._DIR_NAMES: (1, 0) →
+    "below" = b is one row lower), so "below" means a is ABOVE b. Reading "dir" as a's own
+    position flips every comparison: same layouts score as mismatches, flipped ones as
+    matches. Objects spanning several cells can have both "above" and "below" pairs; that
+    axis then says nothing ("same_row" / "same_col")."""
+    try:
+        pairs = json.loads(cell_pairs) if isinstance(cell_pairs, str) else (cell_pairs or [])
+    except (json.JSONDecodeError, TypeError):
+        pairs = []
+    dirs = {w for p in pairs or [] for w in ("above", "below", "left", "right") if w in p.get("dir", "")}
+    b_v = "same_row" if ("above" in dirs) == ("below" in dirs) else ("below" if "below" in dirs else "above")
+    b_h = "same_col" if ("left" in dirs) == ("right" in dirs) else ("right" if "right" in dirs else "left")
+    return {"v_rel": _INVERSE[b_v], "h_rel": _INVERSE[b_h]}
+
+
+def add_adjacent(rels: Dict[tuple, Dict[str, Any]], a_label: str, b_label: str, rel: Dict[str, Any]) -> None:
+    """Store a → b and the inverse b → a. Two objects with the same labels can appear more
+    than once in a photo (price tags); an axis on which those copies disagree says nothing."""
+    inv = {**rel, "v_rel": _INVERSE[rel["v_rel"]], "h_rel": _INVERSE[rel["h_rel"]]}
+    for key, r in (((a_label, b_label), rel), ((b_label, a_label), inv)):
+        old = rels.get(key)
+        if old is None:
+            rels[key] = dict(r)
+            continue
+        if old["v_rel"] != r["v_rel"]:
+            old["v_rel"] = "same_row"
+        if old["h_rel"] != r["h_rel"]:
+            old["h_rel"] = "same_col"
+
+
+def _link_neighbors(ref: "RefMap", a: int, b: int) -> None:
+    """A WALKWAY means a and b are walkable both ways, whichever way it is stored: each
+    node lists the other as a neighbour (once, also if the database holds both a→b and b→a)."""
+    if a == b or a not in ref.photos or b not in ref.photos:
+        return
+    if b not in ref.photos[a].neighbor_nids:
+        ref.photos[a].neighbor_nids.append(b)
+    if a not in ref.photos[b].neighbor_nids:
+        ref.photos[b].neighbor_nids.append(a)
 
 
 # ── HTTP-based Neo4j client ───────────────────────────────────────────────
@@ -369,6 +419,21 @@ class Neo4jClient:
         log.info("V2: loaded %d directional photos, %d objects",
                  len(dir_data), obj_count)
 
+        # 2b) DINOv2 vectors stored on DirPhoto (store_dino_v2.py) — a query of its own so the
+        #     768 floats are not repeated on every object row above
+        rows = self._query("""
+            MATCH (w:Waypoint {place: $place})-[hp:HAS_PHOTO]->(p:DirPhoto)
+            WHERE p.dino IS NOT NULL
+            RETURN w.nid AS nid, hp.slot AS slot, p.dino AS dino
+        """, {"place": place})
+        by_slot = {(nid, dr.slot): dr for nid, node in ref.photos.items() for dr in node.directional_photos}
+        for r in rows:
+            dr = by_slot.get((r["nid"], r["slot"]))
+            if dr is not None:
+                dr.dino = r["dino"]
+        if rows:
+            log.info("V2: %d DirPhoto DINOv2 vectors from Neo4j", len(rows))
+
         # 3) Walkway edges
         rows = self._query("""
             MATCH (a:Waypoint {place: $place})-[r:WALKWAY]->(b:Waypoint)
@@ -389,53 +454,29 @@ class Neo4jClient:
                 "distance_m": r["distance_m"] or 0.0,
                 "steps": r["steps"] or 0,
             })
-            if from_nid in ref.photos:
-                ref.photos[from_nid].neighbor_nids.append(to_nid)
+            _link_neighbors(ref, from_nid, to_nid)
 
         log.info("V2: loaded %d walkway edges", len(ref.walkway_edges))
 
-        # 4) ADJACENT spatial relationships (stored as cell_pairs, parsed to v_rel/h_rel)
-        rows = self._query("""
-            MATCH (w:Waypoint {place: $place})-[hp:HAS_PHOTO]->(d:DirPhoto)
-                  -[:DETECTED]->(a:Object)-[r:ADJACENT]->(b:Object)<-[:DETECTED]-(d)
-            RETURN w.nid AS nid, hp.slot AS slot,
-                   a.label_norm AS a_label, b.label_norm AS b_label,
-                   r.cell_pairs AS cell_pairs,
-                   r.overlap AS overlap, r.depth_diff AS depth_diff
-        """, {"place": place})
-
-        for r in rows:
-            key = (r["nid"], r["slot"])
-            if key not in ref.adjacent_map:
-                ref.adjacent_map[key] = {}
-            # Parse cell_pairs directions into simple v_rel/h_rel
-            cp_raw = r["cell_pairs"] or "[]"
-            try:
-                pairs = json.loads(cp_raw) if isinstance(cp_raw, str) else cp_raw
-            except (json.JSONDecodeError, TypeError):
-                pairs = []
-            dirs = set()
-            for p in (pairs or []):
-                d = p.get("dir", "")
-                if "above" in d:
-                    dirs.add("above")
-                if "below" in d:
-                    dirs.add("below")
-                if "left" in d:
-                    dirs.add("left")
-                if "right" in d:
-                    dirs.add("right")
-            v_rel = "above" if "above" in dirs else ("below" if "below" in dirs else "same_row")
-            h_rel = "left" if "left" in dirs else ("right" if "right" in dirs else "same_col")
-            ref.adjacent_map[key][(r["a_label"], r["b_label"])] = {
-                "v_rel": v_rel,
-                "h_rel": h_rel,
-                "overlap": r["overlap"] or False,
-                "depth_diff": r["depth_diff"] or "same_level",
-            }
-
-        log.info("V2: loaded %d ADJACENT groups", len(ref.adjacent_map))
-
+        # 4) ADJACENT spatial relationships (map_v2 / rebuild_objects_v2: objects of one photo
+        #    whose 3×3 grid cells touch) → adjacent_map[(nid, slot)][(label_a, label_b)], used
+        #    by the grid matcher's spatial bonus (visual_localization.weighted_grid_match).
+        from server.config import LOC_ADJACENT
+        if LOC_ADJACENT:
+            rows = self._query("""
+                MATCH (w:Waypoint {place: $place})-[hp:HAS_PHOTO]->(d:DirPhoto)
+                      -[:DETECTED]->(a:Object)-[r:ADJACENT]->(b:Object)<-[:DETECTED]-(d)
+                RETURN w.nid AS nid, hp.slot AS slot,
+                       coalesce(a.label_norm, a.label) AS a_label,
+                       coalesce(b.label_norm, b.label) AS b_label,
+                       r.cell_pairs AS cell_pairs, r.overlap AS overlap, r.depth_diff AS depth_diff
+            """, {"place": place})
+            for r in rows:
+                rel = {**adjacent_relation(r["cell_pairs"]), "overlap": bool(r["overlap"]),
+                       "depth_diff": r["depth_diff"] or "same_level"}
+                add_adjacent(ref.adjacent_map.setdefault((r["nid"], r["slot"]), {}),
+                             r["a_label"] or "", r["b_label"] or "", rel)
+            log.info("V2: loaded %d ADJACENT edges over %d photos", len(rows), len(ref.adjacent_map))
         return ref
 
     # ── Schema V1 (legacy): TopoNode:Photo → Object ─────────────────────
@@ -571,8 +612,7 @@ class Neo4jClient:
                 "distance_m": r["distance_m"] or 0.0,
                 "steps": r["steps"] or 0,
             })
-            if from_nid in ref.photos:
-                ref.photos[from_nid].neighbor_nids.append(to_nid)
+            _link_neighbors(ref, from_nid, to_nid)
 
         log.info("V1: loaded %d walkway edges", len(ref.walkway_edges))
         return ref

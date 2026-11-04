@@ -1,4 +1,9 @@
-"""Hand-corrected PDR waypoint map → one walkable store graph the phone can follow.
+"""Walkable store graph the phone can follow: planning, turn list, mini-map payload.
+
+Two sources build the same EditorGraph: the Neo4j reference map itself
+(``build_from_ref_map`` — the default, config ROUTE_MAP_SOURCE=neo4j, so routes and
+localization share one set of coordinates) or the hand-corrected PDR waypoint map
+below (ROUTE_MAP_SOURCE=editor).
 
 The map comes from the PDR Waypoint Editor (``backend/maps/*.editor.json``): a few
 recorded walks whose points were grid-snapped by hand. Here they become a single
@@ -124,6 +129,60 @@ def build_graph(data: dict, link_radius: float = LINK_RADIUS_M,
         if graph.number_of_nodes() else 0
     return EditorGraph(place=data.get("place", ""), graph=graph, entrance=entrance,
                        _walk_index=walk_index)
+
+
+ENTRANCE_ID = -1           # virtual entrance waypoint in a Neo4j-built graph (never a Neo4j nid)
+
+
+def build_from_ref_map(ref_map, extra: Optional[dict] = None) -> EditorGraph:
+    """The walkable graph straight from the Neo4j reference map, so routes and
+    localization share one set of coordinates: waypoint id = Neo4j nid, position =
+    (pdr_x, pdr_y), edges = WALKWAY (walkable both ways), labels = that node's own
+    object labels + OCR text.
+
+    ``extra`` (backend/maps/neo4j_links/*.json) adds what the Neo4j map lacks without
+    writing to it: ``links`` [{"from", "to"}] and an ``entrance`` {"x", "y", "links"}
+    that becomes a virtual waypoint (ENTRANCE_ID) — a route start, never a photo fix.
+    """
+    graph = nx.Graph()
+    for nid, node in ref_map.photos.items():
+        labels: List[str] = []
+        for o in node.objects:
+            for t in (o.label, o.ocr_text):
+                t = (t or "").strip()
+                if t and t not in labels:
+                    labels.append(t)
+        graph.add_node(nid, x=float(node.pdr_x), y=float(node.pdr_y), walk="neo4j", idx=nid,
+                       products=labels, neo_nids=[nid])
+
+    def link(a: int, b: int) -> None:
+        if a in graph and b in graph and a != b and not graph.has_edge(a, b):
+            (ax, ay), (bx, by) = (graph.nodes[a]["x"], graph.nodes[a]["y"]), (graph.nodes[b]["x"], graph.nodes[b]["y"])
+            graph.add_edge(a, b, length=math.hypot(bx - ax, by - ay))
+
+    for nid, node in ref_map.photos.items():
+        for nb in node.neighbor_nids:          # stored one-way; walkable both ways
+            link(nid, nb)
+    for e in getattr(ref_map, "walkway_edges", None) or []:
+        if e.get("from") is not None and e.get("to") is not None:
+            link(int(e["from"]), int(e["to"]))
+    extra = extra or {}
+    for e in extra.get("links", []):
+        link(int(e["from"]), int(e["to"]))
+
+    ent = extra.get("entrance")
+    if ent is not None:
+        graph.add_node(ENTRANCE_ID, x=float(ent.get("x", 0.0)), y=float(ent.get("y", 0.0)),
+                       walk="entrance", idx=0, products=[], neo_nids=[])
+        for nid in ent.get("links", []):
+            link(ENTRANCE_ID, int(nid))
+        entrance = ENTRANCE_ID
+    else:
+        entrance = min(graph.nodes, key=lambda n: math.hypot(graph.nodes[n]["x"], graph.nodes[n]["y"])) \
+            if graph.number_of_nodes() else 0
+
+    return EditorGraph(place=ref_map.place, graph=graph, entrance=entrance,
+                       _neo_to_wp={nid: nid for nid in ref_map.photos})
 
 
 def nearest_waypoint(g: EditorGraph, x: float, y: float) -> int:

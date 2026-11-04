@@ -61,6 +61,27 @@ def test_rerank_switching_node_recomputes_heading_for_new_node():
     assert s.heading_slot == "front"
 
 
+def test_rejected_rerank_keeps_grid_node_without_crashing():
+    """A rerank pick far below a clear grid winner is rejected; localization must still
+    return the grid node (it used to hit an unbound `new_ref` and return None)."""
+    ref_map = _ref_map()
+    s = Session(id="t", goal="milk", goal_objects=["milk"], place="test")
+    grid_result = LocalizationResult(
+        matched_nid=1, confidence=0.9, method="grid", reasoning="", ref_node=ref_map.photos[1],
+        matched_heading=90.0, matched_slot="right", heading_confidence=0.8,
+        top_candidates=[(1, 0.9, "grid"), (2, 0.5, "grid")],     # gap 0.4, drop 0.4 → reject
+    )
+    with patch("server.server.get_neo4j", return_value=_FakeNeo4j(ref_map)), \
+         patch("server.server._localize_photo", return_value=grid_result), \
+         patch("server.server._vlm_rerank", return_value=[(2, 0.95, "looks like node 2")]), \
+         patch("server.config.RERANK_ENABLED", True), \
+         patch("server.config.REF_PHOTO_ROOT", "/refs"):
+        out = srv._run_early_localization(s, "sid", ["sign"], [], image_path="p.jpg")
+
+    assert out is not None and out.matched_nid == 1
+    assert out.matched_slot == "right" and out.method == "grid"
+
+
 def test_top_candidates_include_hint_boosted_winner():
     """The proximity bonus can lift a node from outside the raw top-5 into first
     place. The re-ranker must then be shown that node — otherwise the system's

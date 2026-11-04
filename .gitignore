@@ -1,18 +1,69 @@
-# 本地機密設定
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
 .env
 .env.local
 
-# macOS
-.DS_Store
-
-# Xcode
+# Xcode (iOS app)
+xcuserdata/
 DerivedData/
 build/
 *.xcuserstate
-xcuserdata/
-*.xcscmblueprint
 *.xccheckout
+*.xcscmblueprint
 .swiftpm/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Large model weights and generated session output (photos, maps, graphs)
+*.pth
+*.pt
+backend/output/
+output/
+
+# Node / logs / OS
+node_modules/
+*.log
+Thumbs.db
+
+# Test data
+backend/testPDR/
+
+# Build artifacts
+.vite/
+
+# Tooling
+.claude/
+
+# Test data / scratch
+backend/test_topomap&locate/
+backend/*.bak-*
+backend/benchmark_results/
+
+# Old backend + localization research (backend/legacy/): data stays local
+backend/legacy/testPDR/
+backend/legacy/benchmark_results/
+backend/legacy/*.bak-*
+# 61 MB; regenerate with backend/legacy/import_neo4j_to_topomap.py
+backend/legacy/carrefour_a7_imported.json
 
 # CocoaPods / Carthage（若之後採用）
 Pods/

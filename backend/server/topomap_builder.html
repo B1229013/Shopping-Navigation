@@ -17,6 +17,7 @@
   --font-body: 'DM Sans', system-ui, sans-serif;
   --selected: #a78bfa;
   --merge-color: #f472b6;
+  --start-color: #facc15;
 }
 * { box-sizing: border-box; margin: 0; }
 body {
@@ -161,6 +162,96 @@ body {
   z-index: 5;
 }
 
+.tools {
+  position: absolute;
+  top: 12px; right: 12px;
+  width: 268px;
+  max-height: calc(100% - 70px);
+  overflow-y: auto;
+  background: rgba(20,28,40,.95);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--text);
+  z-index: 6;
+}
+.tools summary {
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--text-bright);
+  font-weight: 500;
+  user-select: none;
+}
+.tools-sec { padding: 8px 12px 10px; border-top: 1px solid var(--border); }
+.tools-sec h3 {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: .06em;
+  margin-bottom: 6px;
+}
+.tools-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.tools-row label { color: var(--text-dim); font-size: 10px; }
+.tools input[type=number], .tools select {
+  width: 62px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-bright);
+  font-family: var(--font-data);
+  font-size: 11px;
+  padding: 3px 5px;
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.tools select { width: auto; }
+.tools input[type=range] { flex: 1; accent-color: var(--selected); }
+.tools .btn { padding: 3px 8px; font-size: 11px; }
+.tools .check { display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text); font-size: 11px; }
+.tools .check input { accent-color: var(--selected); }
+.tools .hint { color: var(--text-dim); font-size: 10px; line-height: 1.5; }
+.sg-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.sg-row .check { flex: 1; font-size: 11px; }
+.sg-row .sg-score { color: var(--text-dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+.sg-row .btn { padding: 1px 6px; font-size: 10px; }
+.sg-group { color: var(--text-dim); font-size: 10px; margin: 6px 0 3px; }
+.place-sel {
+  background: var(--surface-raised); border: 1px solid var(--border); color: var(--text-bright);
+  font-family: var(--font-data); font-size: 12px; border-radius: 4px; padding: 3px 6px; max-width: 220px;
+}
+.toggle-label select {
+  background: var(--surface-raised); border: 1px solid var(--border); color: var(--text-bright);
+  font-family: var(--font-data); font-size: 10px; border-radius: 3px; padding: 1px 3px;
+}
+
+.modal-bg {
+  position: fixed; inset: 0; background: rgba(5,8,12,.7); z-index: 20;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.modal-bg[hidden] { display: none; }
+.modal {
+  width: min(640px, 100%); max-height: 100%; overflow: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 16px; font-family: var(--font-data); font-size: 11px; color: var(--text);
+}
+.modal h2 { font-size: 13px; color: var(--text-bright); font-weight: 500; margin-bottom: 10px; }
+.modal input[type=text] {
+  background: var(--surface-raised); border: 1px solid var(--border); color: var(--text-bright);
+  font-family: var(--font-data); font-size: 12px; padding: 4px 6px; border-radius: 3px;
+}
+.modal label { color: var(--text-dim); }
+.modal .hint { color: var(--text-dim); font-size: 10px; line-height: 1.5; margin: 4px 0 8px; }
+.modal-list { border: 1px solid var(--border); border-radius: 4px; max-height: 50vh; overflow: auto; }
+.wk-row { display: grid; grid-template-columns: 22px 34px 1fr auto; gap: 6px; align-items: center;
+  padding: 6px 8px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.wk-row:last-child { border-bottom: 0; }
+.wk-row:hover { background: var(--surface-raised); }
+.wk-row input { accent-color: var(--selected); }
+.wk-name { color: var(--text-bright); }
+.wk-meta { color: var(--text-dim); font-size: 10px; }
+.wk-set { font-size: 10px; padding: 1px 5px; border-radius: 3px; color: #fff; text-align: center; }
+.wk-num { color: var(--text-dim); font-size: 10px; text-align: right; white-space: nowrap; }
+
 .panel {
   width: 340px;
   background: var(--surface);
@@ -191,7 +282,7 @@ body {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
-.panel-section h2 {
+.panel-section h2, .merge-section h2 {
   font-family: var(--font-data);
   font-size: 11px;
   font-weight: 500;
@@ -356,6 +447,15 @@ body {
   border-color: var(--merge-color);
 }
 .btn-merge:hover { background: rgba(244,114,182,.1); }
+.start-dirs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+.start-dirs .btn { padding: 5px 6px; font-size: 11px; }
+.start-name { width: 100%; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface-raised); color: var(--text-bright); font-family: var(--font-body); font-size: 12px; }
+.start-list { display: grid; gap: 4px; margin-top: 6px; }
+.start-item { display: flex; align-items: center; gap: 8px; font-family: var(--font-data); font-size: 11px; color: var(--text); }
+.start-item b { color: var(--start-color); font-family: var(--font-body); font-weight: 600; }
+.start-item img { width: 34px; height: 45px; object-fit: cover; border-radius: 3px; }
+.start-item .x { margin-left: auto; background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 13px; }
+.start-hint { font-family: var(--font-data); font-size: 10px; color: var(--text-dim); margin-top: 6px; line-height: 1.5; }
 .btn-warn {
   background: transparent;
   color: var(--set03);
@@ -373,19 +473,10 @@ body {
 
 <div class="header">
   <h1>拓樸地圖建置器</h1>
+  <select id="placeSel" class="place-sel" title="店家（每間店有自己的建圖資料夾）" onchange="switchPlace(this.value)"></select>
   <span class="stat-chip" id="stat-nodes"></span>
   <span class="stat-chip" id="stat-merges">合併 <b>0</b></span>
-  <div class="legend">
-    <button class="filter-btn active" data-set="01" onclick="toggleSet('01',this)">
-      <span class="filter-dot" style="background:var(--set01)"></span>01
-    </button>
-    <button class="filter-btn active" data-set="02" onclick="toggleSet('02',this)">
-      <span class="filter-dot" style="background:var(--set02)"></span>02
-    </button>
-    <button class="filter-btn active" data-set="03" onclick="toggleSet('03',this)">
-      <span class="filter-dot" style="background:var(--set03)"></span>03
-    </button>
-  </div>
+  <div class="legend" id="setLegend"></div>
   <div class="toggle-group">
     <label class="toggle-label">
       <input type="checkbox" id="chkRef" checked onchange="showRef=this.checked;draw()">參考圖
@@ -393,6 +484,33 @@ body {
     <label class="toggle-label">
       <input type="checkbox" id="chkLabels" checked onchange="showLabels=this.checked;draw()">標號
     </label>
+    <label class="toggle-label" title="sensor_log.csv 每一步算出的 PDR 路線">CSV 軌跡
+      <select id="trackMode" onchange="trackMode=this.value;draw()">
+        <option value="follow">跟著節點</option>
+        <option value="raw">原始座標</option>
+        <option value="off">關閉</option>
+      </select>
+    </label>
+    <button class="btn" style="padding:3px 10px;font-size:11px" onclick="openWalks()">路線…</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="walksModal" hidden>
+  <div class="modal">
+    <h2>路線（Sensor Lab 匯出）</h2>
+    <div class="tools-row">
+      <label>店名（Neo4j place）</label>
+      <input type="text" id="wkPlace" style="flex:1">
+    </div>
+    <div class="hint" id="wkRoots"></div>
+    <div class="modal-list" id="wkList">載入中…</div>
+    <div class="tools-row" style="margin-top:10px">
+      <input type="file" id="wkFile" accept=".zip,application/zip" hidden>
+      <button class="btn" onclick="document.getElementById('wkFile').click()">上傳 zip…</button>
+      <span class="hint" id="wkMsg" style="flex:1"></span>
+      <button class="btn" onclick="closeWalks()">取消</button>
+      <button class="btn btn-primary" id="wkApply" onclick="applyWalks()">重建地圖</button>
+    </div>
   </div>
 </div>
 
@@ -400,6 +518,77 @@ body {
   <div class="map-wrap" id="mapWrap">
     <canvas id="mapCanvas"></canvas>
     <div class="coord-tooltip" id="coordTip"></div>
+    <details class="tools" id="toolsCard" open>
+      <summary>對齊工具</summary>
+      <div class="tools-sec">
+        <h3>DINO 自動調整</h3>
+        <div class="tools-row">
+          <button class="btn" onclick="runSuggest()" id="sgRunBtn">分析照片</button>
+          <button class="btn btn-merge" onclick="applySuggestions()" id="sgApplyBtn" disabled>套用勾選</button>
+          <button class="btn" onclick="undoAuto()" id="sgUndoBtn" disabled>復原</button>
+        </div>
+        <div id="sgList" class="hint">比對每個節點的四方向照片，找出閉環和不同路線的同一個位置；套用時會先閉環、再把其他路線旋轉平移對上第一條，最後合併重疊點。第一次分析約 1–2 分鐘。</div>
+      </div>
+      <div class="tools-sec">
+        <h3>平面圖底圖</h3>
+        <input type="file" id="fpFile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+        <div class="tools-row">
+          <button class="btn" onclick="document.getElementById('fpFile').click()" id="fpLoadBtn">載入平面圖</button>
+          <button class="btn" onclick="clearFloorplan()" id="fpClearBtn" disabled>清除</button>
+        </div>
+        <div id="fpControls">
+          <div class="tools-row">
+            <label>中心 X</label><input type="number" id="fpX" step="0.5">
+            <label>Y</label><input type="number" id="fpY" step="0.5">
+          </div>
+          <div class="tools-row">
+            <label>寬度 m</label><input type="number" id="fpW" step="0.5" min="0.5">
+            <label>旋轉°</label><input type="number" id="fpR" step="0.5">
+          </div>
+          <div class="tools-row">
+            <label>透明度</label><input type="range" id="fpA" min="0.05" max="1" step="0.05">
+          </div>
+          <label class="check"><input type="checkbox" id="fpDragMode">拖曳地圖時移動底圖（節點不動）</label>
+        </div>
+      </div>
+      <div class="tools-sec">
+        <h3>整體平移／旋轉節點</h3>
+        <div class="tools-row">
+          <label>對象</label><select id="xfScope"></select>
+          <label>繞著</label>
+          <select id="xfPivot">
+            <option value="origin">原點</option>
+            <option value="center">對象中心</option>
+            <option value="selected">選取的節點</option>
+          </select>
+        </div>
+        <div class="tools-row">
+          <label>平移</label>
+          <button class="btn" onclick="nudge(-1, 0)">←</button>
+          <button class="btn" onclick="nudge(0, 1)">↑</button>
+          <button class="btn" onclick="nudge(0, -1)">↓</button>
+          <button class="btn" onclick="nudge(1, 0)">→</button>
+          <input type="number" id="xfStep" value="0.5" step="0.1" min="0.1" title="每次平移幾公尺" style="width:48px"><label>m</label>
+        </div>
+        <div class="tools-row">
+          <label>旋轉</label>
+          <button class="btn" onclick="rotateTargets(-5)">↺5°</button>
+          <button class="btn" onclick="rotateTargets(-1)">↺1°</button>
+          <button class="btn" onclick="rotateTargets(1)">↻1°</button>
+          <button class="btn" onclick="rotateTargets(5)">↻5°</button>
+        </div>
+        <div class="tools-row">
+          <input type="number" id="xfDeg" value="90" step="0.5"><label>°（順時針為正）</label>
+          <button class="btn" onclick="rotateTargets(parseFloat(document.getElementById('xfDeg').value) || 0)">旋轉</button>
+        </div>
+        <label class="check"><input type="checkbox" id="xfDragMode">拖曳任一節點時整體一起移動</label>
+        <div class="tools-row" style="margin-top:6px">
+          <button class="btn" onclick="undoMove()" id="undoMoveBtn" disabled>復原移動</button>
+          <span class="hint" id="undoMoveInfo"></span>
+        </div>
+        <div class="hint">旋轉節點時，照片的拍攝方向也會跟著轉。</div>
+      </div>
+    </details>
     <div class="map-hint">拖曳節點移動 · Shift+點擊多選 · 滾輪縮放 · 空白處拖曳平移</div>
     <div class="zoom-controls">
       <button class="zoom-btn" onclick="zoomBy(1.3)">+</button>
@@ -416,14 +605,17 @@ body {
 
 <div class="bottombar">
   <button class="btn btn-primary" onclick="confirmMap()">確認並儲存</button>
-  <button class="btn btn-merge" id="btnMerge" style="display:none" onclick="mergeSelected()">合併選取</button>
+  <button class="btn btn-merge" id="btnMerge" style="display:none" onclick="loopPair() ? loopMergeSelected() : mergeSelected()">合併選取</button>
   <button class="btn" onclick="undoLastMerge()">復原合併</button>
+  <button class="btn btn-warn" onclick="resetEdits()" title="捨棄這個瀏覽器裡保存的編輯，回到 topomap.json 的原始位置">重設全部</button>
   <span class="status-msg" id="statusMsg">載入中…</span>
 </div>
 
 <script>
-const SET_COLORS = { '01': '#4ade80', '02': '#60a5fa', '03': '#fb923c' };
-const SET_COLORS_DIM = { '01': 'rgba(74,222,128,.3)', '02': 'rgba(96,165,250,.3)', '03': 'rgba(251,146,60,.3)' };
+// One colour per walk (set "01", "02", …), assigned from the data in setupSets()
+const SET_PALETTE = ['#4ade80', '#60a5fa', '#fb923c', '#f472b6', '#facc15', '#22d3ee', '#a3e635', '#e879f9'];
+const SET_COLORS = {};
+const SET_COLORS_DIM = {};
 const DIR_LABELS = { front: '前', right: '右', back: '後', left: '左' };
 const SELECTED_COLOR = '#a78bfa';
 const MERGE_COLOR = '#f472b6';
@@ -433,8 +625,14 @@ const REF_SESSION_COLORS = {
 };
 
 let mapData = null;
+// Which store is being edited: ?place=<店名>; every store has its own workspace on the server
+let PLACE = new URLSearchParams(location.search).get('place') || '';
+const withPlace = (url, place = PLACE) => url + (url.includes('?') ? '&' : '?') + 'place=' + encodeURIComponent(place);
+const builderUrl = place => '/topomap-builder?place=' + encodeURIComponent(place);
 let refMap = null;
-let visibleSets = new Set(['01', '02', '03']);
+// Start points of this store (GET/POST /starts): where the app's 「我在起點」 puts the user
+let starts = [];
+let visibleSets = new Set();
 let showRef = true;
 let showLabels = true;
 
@@ -523,7 +721,9 @@ function draw() {
   ctx.fillStyle = '#0c1018';
   ctx.fillRect(0, 0, W, H);
 
+  drawFloorplan();
   drawGrid(W, H);
+  drawTracks();
   if (showRef && refMap) drawRefMap(W, H);
 
   // Existing grid dots
@@ -540,14 +740,10 @@ function draw() {
   const nodeMap = {};
   for (const n of mapData.nodes) nodeMap[n.id] = n;
 
-  // Edges
-  for (const e of mapData.edges) {
-    let na = nodeMap[e.from], nb = nodeMap[e.to];
+  // Edges (after merges and inserted nodes)
+  for (const e of effectiveEdges()) {
+    const na = nodeMap[e.from], nb = nodeMap[e.to];
     if (!na || !nb) continue;
-    // Redirect absorbed nodes to their primary
-    if (absorbedInto[na.id] != null) na = nodeMap[absorbedInto[na.id]];
-    if (absorbedInto[nb.id] != null) nb = nodeMap[absorbedInto[nb.id]];
-    if (!na || !nb || na.id === nb.id) continue;
     if (!visibleSets.has(e.set)) continue;
 
     const pa = worldToScreen(na.x, na.y);
@@ -630,7 +826,29 @@ function draw() {
     }
   }
 
+  drawStarts();
   ctx.restore();
+}
+
+// Start points: a yellow arrow pointing the way the user faces (heading clockwise from +y)
+function drawStarts() {
+  for (const s of starts) {
+    const p = worldToScreen(s.x, s.y);
+    const a = s.heading_deg * Math.PI / 180;
+    const ux = Math.sin(a), uy = -Math.cos(a);           // screen y grows downward
+    ctx.fillStyle = '#facc15';
+    ctx.strokeStyle = '#0c1018';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(p.x + ux * 16, p.y + uy * 16);
+    ctx.lineTo(p.x - uy * 7 - ux * 4, p.y + ux * 7 - uy * 4);
+    ctx.lineTo(p.x + uy * 7 - ux * 4, p.y - ux * 7 - uy * 4);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.font = '11px "DM Sans", sans-serif';
+    ctx.fillStyle = '#facc15';
+    ctx.textAlign = 'center';
+    ctx.fillText('起點：' + s.name, p.x, p.y + 22);
+  }
 }
 
 function drawGrid(W, H) {
@@ -739,6 +957,18 @@ canvas.addEventListener('mousedown', e => {
   const rect = canvas.getBoundingClientRect();
   const sx = e.clientX - rect.left;
   const sy = e.clientY - rect.top;
+
+  if (edgePickFrom != null) {   // 「插入路線：選一條邊」: this click picks the edge
+    finishEdgePick(sx, sy);
+    return;
+  }
+
+  if (fp && document.getElementById('fpDragMode').checked) {
+    fpDrag = { sx: e.clientX, sy: e.clientY, cx: fp.cx, cy: fp.cy };
+    canvas.style.cursor = 'move';
+    return;
+  }
+
   const hit = hitTestNode(sx, sy);
 
   if (hit) {
@@ -747,9 +977,17 @@ canvas.addEventListener('mousedown', e => {
     dragStartSX = e.clientX;
     dragStartSY = e.clientY;
     canvas.style.cursor = 'grabbing';
+    pushMoveSnapshot();
 
-    // If dragging a selected node, prepare to drag all selected
-    if (selection.has(hit.id) && selection.size > 1) {
+    const targets = targetNodes();
+    if (document.getElementById('xfDragMode').checked && targets.includes(hit)) {
+      // Whole-map mode: every target node keeps its offset from the dragged one
+      dragOffsets = {};
+      for (const n of targets) {
+        if (n.id !== hit.id) dragOffsets[n.id] = { dx: n.x - hit.x, dy: n.y - hit.y };
+      }
+    } else if (selection.has(hit.id) && selection.size > 1) {
+      // If dragging a selected node, prepare to drag all selected
       dragOffsets = {};
       for (const nid of selection) {
         const n = nodeById(nid);
@@ -773,6 +1011,14 @@ canvas.addEventListener('mousemove', e => {
   const sx = e.clientX - rect.left;
   const sy = e.clientY - rect.top;
 
+  if (fpDrag) {
+    fp.cx = round2(fpDrag.cx + (e.clientX - fpDrag.sx) / camZoom);
+    fp.cy = round2(fpDrag.cy - (e.clientY - fpDrag.sy) / camZoom);
+    updateFpInputs();
+    draw();
+    return;
+  }
+
   if (dragNode) {
     const dsx = e.clientX - dragStartSX;
     const dsy = e.clientY - dragStartSY;
@@ -787,7 +1033,8 @@ canvas.addEventListener('mousemove', e => {
     // Move group
     for (const [nid, off] of Object.entries(dragOffsets)) {
       const n = nodeById(Number(nid));
-      if (n) { n.x = Math.round((nx + off.dx) * 10) / 10; n.y = Math.round((ny + off.dy) * 10) / 10; }
+      // keep exact offsets so a group keeps its shape (only the dragged node snaps to 0.1 m)
+      if (n) { n.x = round2(nx + off.dx); n.y = round2(ny + off.dy); }
     }
 
     coordTip.style.display = 'block';
@@ -811,13 +1058,33 @@ canvas.addEventListener('mousemove', e => {
     return;
   }
 
-  canvas.style.cursor = hitTestNode(sx, sy) ? 'pointer' : 'grab';
+  canvas.style.cursor = mergePickFrom != null || edgePickFrom != null ? 'crosshair'
+    : (hitTestNode(sx, sy) ? 'pointer' : 'grab');
 });
 
 canvas.addEventListener('mouseup', e => {
+  if (fpDrag) {
+    fpDrag = null;
+    canvas.style.cursor = 'grab';
+    saveDraft();
+    return;
+  }
   if (dragNode) {
+    if (dragDidMove) saveDraft();
+    else { moveStack.pop(); updateUndoMove(); }   // a click, not a move: drop its snapshot
     if (!dragDidMove) {
-      // Click — toggle selection
+      // Click — finishes a "合併：選另一個點" pick, otherwise toggles selection
+      if (mergePickFrom != null && mergePickFrom !== dragNode.id) {
+        const fromId = mergePickFrom, toId = dragNode.id;
+        cancelMergePick();
+        selection = new Set([fromId, toId]);
+        dragNode = null;
+        coordTip.style.display = 'none';
+        canvas.style.cursor = 'grab';
+        loopPair() ? loopMergeSelected() : mergeSelected();
+        return;
+      }
+      cancelMergePick();
       if (e.shiftKey) {
         if (selection.has(dragNode.id)) selection.delete(dragNode.id);
         else selection.add(dragNode.id);
@@ -868,27 +1135,700 @@ function zoomBy(factor) {
   camZoom = Math.max(2, Math.min(80, camZoom));
   draw();
 }
+function setupSets() {
+  const sets = [...new Set(mapData.nodes.map(n => n.set))].sort();
+  const legend = document.getElementById('setLegend');
+  legend.innerHTML = '';
+  sets.forEach((sid, i) => {
+    const c = SET_PALETTE[i % SET_PALETTE.length];
+    const r = parseInt(c.slice(1,3),16), g = parseInt(c.slice(3,5),16), b = parseInt(c.slice(5,7),16);
+    SET_COLORS[sid] = c;
+    SET_COLORS_DIM[sid] = `rgba(${r},${g},${b},.3)`;
+    visibleSets.add(sid);
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn active';
+    btn.dataset.set = sid;
+    btn.innerHTML = `<span class="filter-dot" style="background:${c}"></span>${sid}`;
+    btn.onclick = () => toggleSet(sid, btn);
+    const w = (mapData.walks || []).find(w => w.set === sid);
+    if (w) {
+      const name = w.source ? w.source.split(/[\\/]/).pop() : '';
+      const min = w.duration_s != null ? `${Math.floor(w.duration_s / 60)} 分 ${Math.round(w.duration_s % 60)} 秒` : '';
+      btn.title = `${name}\n${w.nodes} 個節點 · ${w.steps} 步 · ${w.distance_m} m · ${min}`;
+    }
+    legend.appendChild(btn);
+  });
+  return sets;
+}
+
 function toggleSet(sid, btn) {
   if (visibleSets.has(sid)) { visibleSets.delete(sid); btn.classList.remove('active'); }
   else { visibleSets.add(sid); btn.classList.add('active'); }
   draw();
 }
 
+// ── Floor plan underlay ──
+// fp = {img, cx, cy, widthM, rot, alpha}: image centre in map metres, its width in metres,
+// rotation in degrees (clockwise on screen, like headings) and opacity.
+
+let fp = null;
+let fpDrag = null;
+const round2 = v => Math.round(v * 100) / 100;
+
+function drawFloorplan() {
+  if (!fp || !fp.img) return;
+  const p = worldToScreen(fp.cx, fp.cy);
+  const w = fp.widthM * camZoom;
+  const h = w * fp.img.naturalHeight / fp.img.naturalWidth;
+  ctx.save();
+  ctx.globalAlpha = fp.alpha;
+  ctx.translate(p.x, p.y);
+  ctx.rotate(fp.rot * Math.PI / 180);
+  ctx.drawImage(fp.img, -w / 2, -h / 2, w, h);
+  ctx.restore();
+}
+
+function updateFpInputs() {
+  const on = !!fp;
+  document.getElementById('fpControls').style.opacity = on ? 1 : .4;
+  for (const id of ['fpX', 'fpY', 'fpW', 'fpR', 'fpA', 'fpDragMode']) document.getElementById(id).disabled = !on;
+  document.getElementById('fpClearBtn').disabled = !on;
+  document.getElementById('fpLoadBtn').textContent = on ? '更換平面圖' : '載入平面圖';
+  if (!on) return;
+  document.getElementById('fpX').value = fp.cx;
+  document.getElementById('fpY').value = fp.cy;
+  document.getElementById('fpW').value = fp.widthM;
+  document.getElementById('fpR').value = fp.rot;
+  document.getElementById('fpA').value = fp.alpha;
+}
+
+function nodesBBox() {
+  const xs = mapData.nodes.map(n => n.x), ys = mapData.nodes.map(n => n.y);
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+}
+
+// Show the image stored on the server; settings = saved placement, or null → cover the nodes
+function showFloorplan(settings) {
+  const img = new Image();
+  img.onload = () => {
+    if (settings) {
+      fp = { img, ...settings };
+    } else {
+      const b = nodesBBox();
+      fp = { img, cx: round2((b.minX + b.maxX) / 2), cy: round2((b.minY + b.maxY) / 2),
+             widthM: round2(Math.max(b.maxX - b.minX, b.maxY - b.minY, 10) * 1.2), rot: 0, alpha: 0.5 };
+    }
+    updateFpInputs();
+    draw();
+    saveDraft();
+  };
+  img.onerror = () => { fp = null; updateFpInputs(); };
+  img.src = withPlace('/topomap-floorplan?t=' + Date.now());
+}
+
+document.getElementById('fpFile').onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const msg = document.getElementById('statusMsg');
+  const form = new FormData();
+  form.append('file', file);
+  const resp = await fetch(withPlace('/topomap-floorplan'), { method: 'POST', body: form });
+  if (!resp.ok) {
+    msg.textContent = '平面圖上傳失敗：' + ((await resp.json().catch(() => ({}))).detail || resp.status);
+    return;
+  }
+  // A replaced image keeps the old placement so earlier alignment work is not lost
+  showFloorplan(fp ? { cx: fp.cx, cy: fp.cy, widthM: fp.widthM, rot: fp.rot, alpha: fp.alpha } : null);
+  msg.textContent = '已載入平面圖：調整中心、寬度、旋轉讓它對上節點';
+};
+
+async function clearFloorplan() {
+  if (!fp || !confirm('移除平面圖底圖？')) return;
+  await fetch(withPlace('/topomap-floorplan'), { method: 'DELETE' });
+  fp = null;
+  updateFpInputs();
+  draw();
+  saveDraft();
+}
+
+for (const [id, key] of [['fpX', 'cx'], ['fpY', 'cy'], ['fpW', 'widthM'], ['fpR', 'rot'], ['fpA', 'alpha']]) {
+  document.getElementById(id).addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    if (!fp || !isFinite(v) || (key === 'widthM' && v <= 0)) return;
+    fp[key] = key === 'alpha' ? v : round2(v);
+    draw();
+    saveDraft();
+  });
+}
+
+// ── Whole-map translate / rotate ──
+
+let moveStack = [];   // node position + heading snapshots for 復原移動
+
+function setupScope(sets) {
+  const sel = document.getElementById('xfScope');
+  sel.innerHTML = '<option value="all">全部節點</option>' +
+    sets.map(s => `<option value="${s}">路線 ${s}</option>`).join('');
+}
+
+function targetNodes() {
+  const scope = document.getElementById('xfScope').value;
+  return mapData.nodes.filter(n => scope === 'all' || n.set === scope);
+}
+
+function pushMoveSnapshot() {
+  moveStack.push(mapData.nodes.map(n => [n.id, n.x, n.y, n.headings ? { ...n.headings } : null]));
+  if (moveStack.length > 200) moveStack.shift();
+  updateUndoMove();
+}
+
+function updateUndoMove() {
+  document.getElementById('undoMoveBtn').disabled = moveStack.length === 0;
+  document.getElementById('undoMoveInfo').textContent = moveStack.length ? `可復原 ${moveStack.length} 步` : '';
+}
+
+function afterMove() {
+  updateUndoMove();
+  showDetail();
+  draw();
+  saveDraft();
+}
+
+function undoMove() {
+  const snap = moveStack.pop();
+  if (!snap) return;
+  for (const [id, x, y, h] of snap) {
+    const n = nodeById(id);
+    if (n) { n.x = x; n.y = y; n.headings = h; }
+  }
+  afterMove();
+}
+
+function nudge(sx, sy) {
+  const step = parseFloat(document.getElementById('xfStep').value) || 0.5;
+  const nodes = targetNodes();
+  if (!nodes.length) return;
+  pushMoveSnapshot();
+  for (const n of nodes) { n.x = round2(n.x + sx * step); n.y = round2(n.y + sy * step); }
+  afterMove();
+}
+
+function pivotPoint(nodes) {
+  const mode = document.getElementById('xfPivot').value;
+  if (mode === 'origin') return { x: 0, y: 0 };
+  if (mode === 'selected') {
+    if (selection.size !== 1) {
+      document.getElementById('statusMsg').textContent = '「繞著選取的節點」要先點選剛好一個節點';
+      return null;
+    }
+    const n = nodeById([...selection][0]);
+    return { x: n.x, y: n.y };
+  }
+  return { x: nodes.reduce((s, n) => s + n.x, 0) / nodes.length,
+           y: nodes.reduce((s, n) => s + n.y, 0) / nodes.length };
+}
+
+// Clockwise by deg (screen, y up) around the pivot; photo headings turn with the nodes
+function rotateTargets(deg) {
+  const nodes = targetNodes();
+  if (!nodes.length || !deg) return;
+  const pv = pivotPoint(nodes);
+  if (!pv) return;
+  pushMoveSnapshot();
+  const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+  for (const n of nodes) {
+    const dx = n.x - pv.x, dy = n.y - pv.y;
+    n.x = round2(pv.x + dx * c + dy * s);
+    n.y = round2(pv.y - dx * s + dy * c);
+    if (n.headings) {
+      for (const k of Object.keys(n.headings)) {
+        n.headings[k] = Math.round(((((n.headings[k] + deg) % 360) + 360) % 360) * 10) / 10;
+      }
+    }
+  }
+  afterMove();
+}
+
+// ── CSV trajectory (tracks from topomap.json) ──
+// "follow": bent along with the waypoints (each point moves like the two waypoints around it);
+// "raw": exactly as sensor_log.csv computed it, before any alignment.
+
+let trackMode = 'follow';
+let origPos = {};   // node id → [x, y] as in topomap.json
+
+function drawTracks() {
+  if (trackMode === 'off' || !mapData.tracks) return;
+  for (const [set, tr] of Object.entries(mapData.tracks)) {
+    if (!visibleSets.has(set) || !tr.pts || !tr.pts.length) continue;
+    const walk = mapData.nodes.filter(n => n.set === set).sort((a, b) => a.wp_num - b.wp_num);
+    const disp = walk.map(n => { const o = origPos[n.id] || [n.x, n.y]; return [n.x - o[0], n.y - o[1]]; });
+    const last = walk.length - 1;
+    ctx.save();
+    ctx.strokeStyle = SET_COLORS[set] || '#8899aa';
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1.5;
+    if (trackMode === 'raw') ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    tr.pts.forEach(([x, y], i) => {
+      if (trackMode === 'follow' && walk.length) {
+        const k = tr.seg[i], t = tr.t[i];
+        let d;
+        if (k < 0) d = disp[0];
+        else if (k >= last) d = disp[last];
+        else d = [disp[k][0] + (disp[k + 1][0] - disp[k][0]) * t, disp[k][1] + (disp[k + 1][1] - disp[k][1]) * t];
+        x += d[0]; y += d[1];
+      }
+      const p = worldToScreen(x, y);
+      i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ── 路線 dialog: choose which Sensor Lab exports make up the map ──
+
+let wkData = null;
+
+let wkNewStore = false;      // dialog opened from 「＋ 新增店家…」
+let wkUploadPlace = '';     // store whose imports/ folder the dialog's uploads went to
+
+async function openWalks(newStore = false) {
+  wkNewStore = newStore || !PLACE;
+  wkUploadPlace = '';
+  document.getElementById('walksModal').hidden = false;
+  document.getElementById('wkMsg').textContent = wkNewStore ? '新店家：填店名、勾選路線後按「重建地圖」' : '';
+  document.getElementById('wkList').textContent = '載入中…';
+  try {
+    const r = await fetch(wkNewStore ? '/topomap-sources' : withPlace('/topomap-sources'));
+    wkData = await r.json();
+    if (!r.ok) throw new Error(wkData.detail || r.status);
+  } catch (e) {
+    document.getElementById('wkList').textContent = '讀取失敗：' + e.message;
+    return;
+  }
+  document.getElementById('wkPlace').value = wkNewStore ? '' : (wkData.place || PLACE);
+  document.getElementById('wkRoots').textContent = '來源資料夾：' + wkData.roots.join('、') +
+    '（含 sensor_log.csv 的資料夾或 zip；可用 MAP_BUILD_SOURCES 設定）';
+  renderWalkList();
+}
+
+function closeWalks() { document.getElementById('walksModal').hidden = true; }
+
+function renderWalkList(extraChecked) {
+  const inUse = {};
+  for (const w of wkData.walks) if (w.source) inUse[w.source] = w.set;
+  const unknown = wkData.walks.filter(w => !w.source);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let html = '';
+  if (unknown.length) {
+    html += `<div class="wk-row" style="cursor:default"><span></span><span></span><span class="wk-meta">目前的路線 ${unknown.map(w => w.set).join('、')} 是用舊版指令建的，不知道來源；請在下面重新勾選（依錄製時間由舊到新編號）。</span><span></span></div>`;
+  }
+  for (const s of wkData.sources) {
+    const set = inUse[s.path];
+    const checked = set || (extraChecked && extraChecked.includes(s.path));
+    const meta = [s.rel !== s.name ? s.rel : '', s.kind === 'zip' ? 'zip' : '',
+                  s.waypoints ? '' : '沒有四方向拍照的節點'].filter(Boolean).join(' · ');
+    html += `<label class="wk-row" style="${s.waypoints ? '' : 'opacity:.45'}">
+      <input type="checkbox" data-path="${esc(s.path)}" ${checked ? 'checked' : ''}>
+      ${set ? `<span class="wk-set" style="background:${SET_COLORS[set] || '#556'}">${set}</span>` : '<span></span>'}
+      <span><div class="wk-name">${esc(s.name)}</div>${meta ? `<div class="wk-meta">${esc(meta)}</div>` : ''}</span>
+      <span class="wk-num">${s.waypoints} 個節點<br>${esc(s.recorded || '')}</span>
+    </label>`;
+  }
+  document.getElementById('wkList').innerHTML = html || '找不到 Sensor Lab 匯出（含 sensor_log.csv 的資料夾或 zip）。';
+}
+
+document.getElementById('wkFile').onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const msg = document.getElementById('wkMsg');
+  msg.textContent = `上傳 ${file.name}…`;
+  const uploadPlace = document.getElementById('wkPlace').value.trim() || PLACE;
+  if (!uploadPlace) { msg.textContent = '先填店名再上傳（zip 會存在那間店的資料夾）'; return; }
+  const form = new FormData();
+  form.append('file', file);
+  const r = await fetch(withPlace('/topomap-sources/upload', uploadPlace), { method: 'POST', body: form });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) { msg.textContent = '上傳失敗：' + (body.detail || r.status); return; }
+  wkUploadPlace = uploadPlace;
+  const checked = [...document.querySelectorAll('#wkList input:checked')].map(el => el.dataset.path);
+  const walks = wkData.walks;
+  wkData = await (await fetch(withPlace('/topomap-sources', uploadPlace))).json();
+  wkData.walks = walks;
+  renderWalkList([...checked, body.path]);
+  msg.textContent = `已上傳 ${body.name}，已勾選`;
+};
+
+async function applyWalks() {
+  const place = document.getElementById('wkPlace').value.trim();
+  const picked = [...document.querySelectorAll('#wkList input:checked')].map(el => el.dataset.path);
+  const msg = document.getElementById('wkMsg');
+  if (!place) { msg.textContent = '請填店名'; return; }
+  if (!picked.length) { msg.textContent = '至少勾一條路線'; return; }
+  const sameStore = !wkNewStore && place === PLACE;
+  if (!sameStore && placeList.some(p => p.place === place) &&
+      !confirm(`「${place}」已經有建圖資料，會用勾選的路線重建它（已在用的路線保留編號）。繼續？`)) return;
+  const removed = sameStore ? wkData.walks.filter(w => w.source && !picked.includes(w.source)).map(w => w.set) : [];
+  if (removed.length && !confirm(`拿掉路線 ${removed.join('、')}：它們的節點、合併和位置調整都會消失。繼續？`)) return;
+  // New walks get numbers in recording order (oldest first)
+  const byTime = wkData.sources.filter(s => picked.includes(s.path))
+    .sort((a, b) => (a.recorded || '').localeCompare(b.recorded || '')).map(s => s.path);
+  document.getElementById('wkApply').disabled = true;
+  msg.textContent = '重建中…（第一次要複製照片，可能要幾十秒）';
+  try {
+    const r = await fetch('/topomap-walks', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                              body: JSON.stringify({ place, sources: byTime, from_place: wkUploadPlace || PLACE }) });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.status);
+    msg.textContent = `完成：${body.nodes} 個節點（資料夾 ${body.folder}），載入中…`;
+    setTimeout(() => { location.href = builderUrl(body.place); }, 600);
+  } catch (e) {
+    msg.textContent = '重建失敗：' + e.message;
+    document.getElementById('wkApply').disabled = false;
+  }
+}
+
+// ── DINO auto-adjust: loop closures, align other walks, merge same spots ──
+
+let suggestions = null;
+let autoSnapshot = null;   // whole editing state before 套用勾選, for 復原
+
+const nodeLabel = id => { const n = nodeById(id); return n ? `${n.set}-${n.wp_num}` : '?'; };
+const rootOf = id => absorbedInto[id] ?? id;
+
+async function runSuggest() {
+  const btn = document.getElementById('sgRunBtn'), list = document.getElementById('sgList');
+  btn.disabled = true;
+  list.textContent = '分析中…（第一次要把每張照片算成 DINOv2 向量，約 1–2 分鐘）';
+  try {
+    const r = await fetch(withPlace('/topomap-suggest'));
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.status);
+    suggestions = body;
+    renderSuggestions();
+  } catch (e) {
+    list.textContent = '分析失敗：' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderSuggestions() {
+  const list = document.getElementById('sgList');
+  if (!suggestions) return;
+  const groups = [
+    ['閉環（同一條路線走回原地）', suggestions.loops, true],
+    ['重疊（不同路線的同一個位置）', suggestions.matches, true],
+    ['不確定（看起來像但有接近的第二名，請自己看照片）', suggestions.uncertain, false],
+  ];
+  let html = '';
+  const between = suggestions.between || [];
+  if (between.length) {
+    html += '<div class="sg-group">在路線上（站在另一條路線兩個節點之間 → 插入那條邊）</div>';
+    for (const it of between) {
+      const done = mergeHistory.some(m => m.type === 'split' && m.node === it.node);
+      html += `<div class="sg-row">
+        <label class="check"><input type="checkbox" data-kind="between" data-node="${it.node}" data-a="${it.a}" data-b="${it.b}" ${done ? 'disabled' : 'checked'}>
+          ${nodeLabel(it.node)} → ${nodeLabel(it.a)}～${nodeLabel(it.b)}${done ? '（已插入）' : ''}</label>
+        <span class="sg-score" title="和 ${nodeLabel(it.a)}、${nodeLabel(it.b)} 的相似度">${it.score.toFixed(2)}/${it.runner_up.toFixed(2)}</span>
+        <button class="btn" onclick="viewPair(${it.node},${it.a})">看</button></div>`;
+    }
+  }
+  for (const [title, items, checked] of groups) {
+    if (!items.length) continue;
+    html += `<div class="sg-group">${title}</div>`;
+    for (const it of items) {
+      const done = rootOf(it.a) === rootOf(it.b);
+      html += `<div class="sg-row">
+        <label class="check"><input type="checkbox" data-a="${it.a}" data-b="${it.b}" ${checked && !done ? 'checked' : ''} ${done ? 'disabled' : ''}>
+          ${nodeLabel(it.a)} ↔ ${nodeLabel(it.b)}${done ? '（已合併）' : ''}</label>
+        <span class="sg-score" title="相似度（第二名 ${it.runner_up}）">${it.score.toFixed(2)}</span>
+        <button class="btn" onclick="viewPair(${it.a},${it.b})">看</button></div>`;
+    }
+  }
+  list.innerHTML = html || '沒有找到明確的閉環或重疊點。';
+  document.getElementById('sgApplyBtn').disabled = !html;
+}
+
+function viewPair(a, b) {
+  selection = new Set([a, b]);
+  const na = nodeById(a), nb = nodeById(b);
+  camX = (na.x + nb.x) / 2;
+  camY = (na.y + nb.y) / 2;
+  updateMergeBtn();
+  showDetail();
+  draw();
+}
+
+function fullState() {
+  return { nodes: mapData.nodes.map(n => [n.id, n.x, n.y, n.headings ? { ...n.headings } : null]),
+           absorbedInto: { ...absorbedInto }, mergeHistory: mergeHistory.slice() };
+}
+
+// Least-squares rotation + translation (no scaling) moving walk w so pairs [src, dst] line up;
+// returns the remaining RMS distance between the pairs in metres
+function alignWalk(w, pairs) {
+  const k = pairs.length;
+  const cp = { x: pairs.reduce((s, [p]) => s + p.x, 0) / k, y: pairs.reduce((s, [p]) => s + p.y, 0) / k };
+  const cq = { x: pairs.reduce((s, [, q]) => s + q.x, 0) / k, y: pairs.reduce((s, [, q]) => s + q.y, 0) / k };
+  let sxx = 0, sxy = 0;
+  for (const [p, q] of pairs) {
+    const px = p.x - cp.x, py = p.y - cp.y, qx = q.x - cq.x, qy = q.y - cq.y;
+    sxx += px * qx + py * qy;
+    sxy += px * qy - py * qx;
+  }
+  const theta = k >= 2 ? Math.atan2(sxy, sxx) : 0;          // counter-clockwise
+  const c = Math.cos(theta), s = Math.sin(theta);
+  const move = (x, y) => ({ x: cq.x + c * (x - cp.x) - s * (y - cp.y), y: cq.y + s * (x - cp.x) + c * (y - cp.y) });
+  const turn = -theta * 180 / Math.PI;                      // headings are clockwise
+  for (const n of mapData.nodes.filter(n => n.set === w)) {
+    const m = move(n.x, n.y);
+    n.x = round2(m.x); n.y = round2(m.y);
+    if (n.headings) for (const key of Object.keys(n.headings)) {
+      n.headings[key] = Math.round(((((n.headings[key] + turn) % 360) + 360) % 360) * 10) / 10;
+    }
+  }
+  const rms = Math.sqrt(pairs.reduce((sum, [p, q]) => { const m = move(p.x, p.y); return sum + (m.x - q.x) ** 2 + (m.y - q.y) ** 2; }, 0) / k);
+  return { deg: turn, rms };
+}
+
+function applySuggestions() {
+  const boxes = [...document.querySelectorAll('#sgList input:checked')];
+  const picked = boxes.filter(el => el.dataset.kind !== 'between')
+    .map(el => [Number(el.dataset.a), Number(el.dataset.b)]);
+  const onEdge = boxes.filter(el => el.dataset.kind === 'between')
+    .map(el => [Number(el.dataset.node), Number(el.dataset.a), Number(el.dataset.b)]);
+  if (!picked.length && !onEdge.length) return;
+  autoSnapshot = fullState();
+  const setOf = id => nodeById(id).set;
+  const loops = picked.filter(([a, b]) => setOf(a) === setOf(b));
+  const matches = picked.filter(([a, b]) => setOf(a) !== setOf(b));
+  const report = [];
+
+  // 1. loop closures (spreads each walk's drift before it is aligned to the others)
+  for (const [a, b] of loops) {
+    if (rootOf(a) === rootOf(b)) continue;
+    selection = new Set([rootOf(a), rootOf(b)]);
+    if (loopPair()) { loopMergeSelected(); report.push(`閉環 ${nodeLabel(a)}↔${nodeLabel(b)}`); }
+  }
+
+  // 2. rotate + translate every other walk onto the walks already placed (first walk stays put)
+  const walks = [...new Set(mapData.nodes.map(n => n.set))].sort();
+  const placed = new Set([walks[0]]);
+  const posOf = id => { const n = nodeById(rootOf(id)); return { x: n.x, y: n.y }; };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const w of walks) {
+      if (placed.has(w)) continue;
+      const pairs = matches
+        .filter(([a, b]) => (setOf(a) === w && placed.has(setOf(b))) || (setOf(b) === w && placed.has(setOf(a))))
+        .map(([a, b]) => setOf(a) === w ? [posOf(a), posOf(b)] : [posOf(b), posOf(a)]);
+      if (!pairs.length) continue;
+      const { deg, rms } = alignWalk(w, pairs);
+      report.push(`路線 ${w} 旋轉 ${deg.toFixed(1)}°、對齊誤差 ${rms.toFixed(1)} m（${pairs.length} 組）`);
+      placed.add(w);
+      changed = true;
+    }
+  }
+
+  // 3. merge the same spots, keeping the earlier walk's node
+  for (const [a0, b0] of matches) {
+    const [a, b] = setOf(a0) < setOf(b0) ? [a0, b0] : [b0, a0];
+    if (rootOf(a) === rootOf(b)) continue;
+    selection = new Set([rootOf(a), rootOf(b)]);
+    mergeSelected();
+  }
+  if (matches.length) report.push(`合併重疊 ${matches.length} 組`);
+
+  // 4. waypoints standing on another walk's edge: insert them (only if alignment put them near it)
+  for (const [n, a, b] of onEdge) {
+    const r = insertIntoEdge(n, a, b, 5);
+    report.push(typeof r === 'string'
+      ? `${nodeLabel(n)} 沒插入（${r === 'far' ? '對齊後離那條邊超過 5 m' : r === 'no-edge' ? '那條邊已不存在' : r}）`
+      : `${nodeLabel(n)} 插入 ${nodeLabel(a)}—${nodeLabel(b)}（移動 ${r.dist.toFixed(1)} m）`);
+  }
+
+  selection.clear();
+  updateMergeBtn();
+  updateStats();
+  showDetail();
+  fitToData();
+  draw();
+  saveDraft();
+  renderSuggestions();
+  document.getElementById('sgUndoBtn').disabled = false;
+  document.getElementById('statusMsg').textContent = '已套用：' + report.join('；');
+}
+
+function undoAuto() {
+  if (!autoSnapshot || !confirm('還原到套用 DINO 建議之前？（之後做的修改也會一起還原）')) return;
+  for (const [id, x, y, h] of autoSnapshot.nodes) {
+    const n = nodeById(id);
+    n.x = x; n.y = y; n.headings = h;
+  }
+  absorbedInto = { ...autoSnapshot.absorbedInto };
+  mergeHistory = autoSnapshot.mergeHistory.slice();
+  autoSnapshot = null;
+  document.getElementById('sgUndoBtn').disabled = true;
+  document.getElementById('statusMsg').textContent = '已還原自動調整';
+  selection.clear();
+  updateMergeBtn();
+  updateStats();
+  showDetail();
+  draw();
+  saveDraft();
+  renderSuggestions();
+}
+
+// ── Draft: edits survive a reload (this browser only) ──
+
+// Keyed by place, nodes stored by uuid ("set01_wp5"): adding another walk to topomap.json
+// keeps the edits already made to the walks that were there (new nodes start where PDR put them).
+function draftKey() { return `topobuilder:${mapData.place || ''}`; }
+function legacyDraftKey() { return `${draftKey()}:${mapData.nodes.length}`; }   // place + node count, node ids
+const uuidOf = n => n.uuid || `set${n.set}_wp${n.wp_num}`;
+
+function saveDraft() {
+  if (!mapData) return;
+  const u = id => { const n = nodeById(Number(id)); return n ? uuidOf(n) : null; };
+  const uMap = m => Object.fromEntries(Object.entries(m).map(([k, v]) => [u(k), u(v)]));
+  try {
+    localStorage.setItem(draftKey(), JSON.stringify({
+      v: 2,
+      nodes: mapData.nodes.map(n => [uuidOf(n), n.x, n.y, n.headings || null]),
+      absorbedInto: uMap(absorbedInto),
+      mergeHistory: mergeHistory.map(m => ({
+        ...(m.type === 'split' ? { type: 'split', node: u(m.node), a: u(m.a), b: u(m.b) }
+                               : { primary: u(m.primary), absorbed: m.absorbed.map(u) }),
+        positions: m.positions ? m.positions.map(([id, x, y]) => [u(id), x, y]) : null,
+        prevAbsorbed: m.prevAbsorbed ? uMap(m.prevAbsorbed) : null,
+      })),
+      fp: fp ? { cx: fp.cx, cy: fp.cy, widthM: fp.widthM, rot: fp.rot, alpha: fp.alpha } : null,
+    }));
+  } catch (e) { /* storage unavailable or full: editing still works, just not across reloads */ }
+}
+
+function loadDraft() {
+  try {
+    const d = localStorage.getItem(draftKey()) || localStorage.getItem(legacyDraftKey());
+    return d ? JSON.parse(d) : null;
+  } catch (e) { return null; }
+}
+
+// Returns how many nodes got their saved position (0 = nothing restored)
+function applyDraft(d) {
+  if (!d || !Array.isArray(d.nodes)) return 0;
+  const v2 = d.v === 2;
+  const byKey = new Map(mapData.nodes.map(n => [v2 ? uuidOf(n) : n.id, n]));
+  const idOf = k => byKey.get(v2 ? k : Number(k))?.id;
+  let applied = 0;
+  for (const [k, x, y, h] of d.nodes) {
+    const n = byKey.get(k);
+    if (!n) continue;
+    n.x = x; n.y = y;
+    if (h) n.headings = h;
+    applied++;
+  }
+  if (!applied) return 0;
+  const idMap = m => {
+    const out = {};
+    for (const [k, v] of Object.entries(m || {})) {
+      const a = idOf(k), b = idOf(v);
+      if (a != null && b != null) out[a] = b;
+    }
+    return out;
+  };
+  absorbedInto = idMap(d.absorbedInto);
+  mergeHistory = (d.mergeHistory || []).map(m => ({
+    ...(m.type === 'split' ? { type: 'split', node: idOf(m.node), a: idOf(m.a), b: idOf(m.b) }
+                           : { primary: idOf(m.primary), absorbed: (m.absorbed || []).map(idOf).filter(x => x != null) }),
+    positions: m.positions ? m.positions.map(([k, x, y]) => [idOf(k), x, y]).filter(p => p[0] != null) : null,
+    prevAbsorbed: m.prevAbsorbed ? idMap(m.prevAbsorbed) : null,
+  })).filter(m => m.type === 'split' ? m.node != null && m.a != null && m.b != null
+                                     : m.primary != null && m.absorbed.length);
+  return applied;
+}
+
+function resetEdits() {
+  if (!confirm('捨棄所有移動、旋轉、合併與底圖位置，回到 topomap.json 的原始資料？（平面圖檔本身會保留）')) return;
+  try { localStorage.removeItem(draftKey()); localStorage.removeItem(legacyDraftKey()); } catch (e) {}
+  location.reload();
+}
+
 // ── Merge ──
 
 function updateMergeBtn() {
   const btn = document.getElementById('btnMerge');
-  // Enable merge when 2+ nodes from different sets are selected
-  if (selection.size >= 2) {
-    const sets = new Set();
-    for (const nid of selection) {
-      const n = nodeById(nid);
-      if (n) sets.add(n.set);
-    }
-    btn.style.display = sets.size >= 2 ? '' : 'none';
-  } else {
-    btn.style.display = 'none';
+  // Any 2+ nodes can be merged: the same spot seen on different walks, or a walk
+  // that came back to where it had been (loop closure)
+  btn.style.display = selection.size >= 2 ? '' : 'none';
+}
+
+function positionSnapshot() {
+  return mapData.nodes.map(n => [n.id, n.x, n.y]);
+}
+
+function restorePositions(snap) {
+  for (const [id, x, y] of snap) {
+    const n = nodeById(id);
+    if (n) { n.x = x; n.y = y; }
   }
+}
+
+// Merges stay one level deep: whatever had been merged into nodeId now belongs to primaryId
+// too (else its photos and edges would be dropped when 02-10→02-1 and then 02-1→01-6).
+function absorbInto(nodeId, primaryId) {
+  absorbedInto[nodeId] = primaryId;
+  for (const [k, v] of Object.entries(absorbedInto)) {
+    if (v === nodeId) absorbedInto[k] = primaryId;
+  }
+  delete absorbedInto[primaryId];
+}
+
+// Exactly two selected nodes of the same walk → they are a loop closure
+function loopPair() {
+  if (selection.size !== 2) return null;
+  const [a, b] = [...selection].map(nodeById);
+  if (!a || !b || a.set !== b.set || a.wp_num === b.wp_num) return null;
+  return a.wp_num < b.wp_num ? [a, b] : [b, a];
+}
+
+// Loop closure: the later node is merged onto the earlier one and the drift between them
+// is spread along the loop by walked distance (nodes after the loop shift by all of it).
+function loopMergeSelected() {
+  const pair = loopPair();
+  if (!pair) return;
+  const [first, last] = pair;
+  const walk = mapData.nodes.filter(n => n.set === first.set).sort((p, q) => p.wp_num - q.wp_num);
+  const i0 = walk.indexOf(first), i1 = walk.indexOf(last);
+  const cum = [0];
+  for (let k = i0 + 1; k <= i1; k++) {
+    cum.push(cum[cum.length - 1] + Math.hypot(walk[k].x - walk[k - 1].x, walk[k].y - walk[k - 1].y));
+  }
+  const total = cum[cum.length - 1] || 1;
+  const dx = first.x - last.x, dy = first.y - last.y;
+  const positions = positionSnapshot();
+  for (let k = i0 + 1; k < walk.length; k++) {
+    const f = k <= i1 ? cum[k - i0] / total : 1;
+    walk[k].x = round2(walk[k].x + dx * f);
+    walk[k].y = round2(walk[k].y + dy * f);
+  }
+  last.x = first.x; last.y = first.y;
+  const prevAbsorbed = { ...absorbedInto };
+  absorbInto(last.id, first.id);
+  mergeHistory.push({ primary: first.id, absorbed: [last.id], positions, prevAbsorbed });
+  document.getElementById('statusMsg').textContent =
+    `閉環合併 ${first.set}-${last.wp_num} → ${first.set}-${first.wp_num}：誤差 ${Math.hypot(dx, dy).toFixed(1)} m 已分攤到中間 ${i1 - i0} 個節點`;
+  selection.clear();
+  selection.add(first.id);
+  updateMergeBtn();
+  updateStats();
+  showDetail();
+  draw();
+  saveDraft();
 }
 
 function mergeSelected() {
@@ -897,6 +1837,8 @@ function mergeSelected() {
   const primary = nodeById(ids[0]);
   if (!primary) return;
 
+  const positions = positionSnapshot();
+  const prevAbsorbed = { ...absorbedInto };
   const absorbed = [];
   for (let i = 1; i < ids.length; i++) {
     const n = nodeById(ids[i]);
@@ -904,31 +1846,36 @@ function mergeSelected() {
     // Move absorbed node to primary's position
     n.x = primary.x;
     n.y = primary.y;
-    absorbedInto[n.id] = primary.id;
+    absorbInto(n.id, primary.id);
     absorbed.push(n.id);
   }
 
-  mergeHistory.push({ primary: primary.id, absorbed });
+  mergeHistory.push({ primary: primary.id, absorbed, positions, prevAbsorbed });
   selection.clear();
   selection.add(primary.id);
   updateMergeBtn();
   updateStats();
   showDetail();
   draw();
+  saveDraft();
 }
 
 function undoLastMerge() {
   if (mergeHistory.length === 0) return;
   const last = mergeHistory.pop();
-  for (const nid of last.absorbed) {
-    delete absorbedInto[nid];
+  if (last.prevAbsorbed) {
+    absorbedInto = { ...last.prevAbsorbed };              // also undoes re-pointed earlier merges
+  } else {
+    for (const nid of last.absorbed) delete absorbedInto[nid];
   }
+  if (last.positions) restorePositions(last.positions);   // also undoes a loop's drift spreading
   selection.clear();
-  selection.add(last.primary);
+  selection.add(last.type === 'split' ? last.node : last.primary);
   updateMergeBtn();
   updateStats();
   showDetail();
   draw();
+  saveDraft();
 }
 
 // ── Detail panel ──
@@ -941,7 +1888,7 @@ function showDetail() {
     panel.innerHTML = `<div class="panel-empty">
       <div class="panel-empty-icon">◎</div>
       <div class="panel-empty-text">拖曳節點調整位置<br>Shift+點擊多選後合併<br>點擊節點查看照片</div>
-    </div>`;
+    </div>` + startListHtml();
     return;
   }
 
@@ -959,14 +1906,25 @@ function showDetail() {
       </div>`;
     }
     html += '</div>';
-    // Check if mergeable
-    const sets = new Set(ids.map(id => nodeById(id)?.set).filter(Boolean));
-    if (sets.size >= 2) {
-      html += '<div class="merge-actions"><button class="btn btn-merge" onclick="mergeSelected()">合併這些節點</button></div>';
-    } else {
-      html += '<div style="font-family:var(--font-data);font-size:10px;color:var(--text-dim)">需要不同路線的節點才能合併</div>';
+    const loop = loopPair();
+    html += '<div class="merge-actions">';
+    if (loop) {
+      html += `<button class="btn btn-merge" onclick="loopMergeSelected()" title="${loop[1].set}-${loop[1].wp_num} 併到 ${loop[0].set}-${loop[0].wp_num}，中間節點依走過的距離分攤誤差">閉環合併（分攤誤差）</button>`;
     }
+    html += `<button class="btn${loop ? '' : ' btn-merge'}" onclick="mergeSelected()">${loop ? '只合併' : '合併這些節點'}</button></div>`;
+    html += '<div style="font-family:var(--font-data);font-size:10px;color:var(--text-dim);margin-top:6px;line-height:1.5">' +
+      (loop ? '同一趟走回同一個位置：建議用「閉環合併」，整圈會自然閉合；「只合併」只把後面那個點移過去。'
+            : `合併後位置用第一個點選的 ${nodeById(ids[0])?.set}-${nodeById(ids[0])?.wp_num}。`) + '</div>';
     html += '</div>';
+    // Two nodes: show both photo sets so you can judge whether they are the same spot
+    if (ids.length === 2) {
+      for (const nid of ids) {
+        const n = nodeById(nid);
+        if (!n) continue;
+        html += `<div class="panel-section" style="padding-bottom:0"><h2 style="margin:0">${n.set}-${n.wp_num}</h2></div>`;
+        html += buildPhotoSection(n);
+      }
+    }
     panel.innerHTML = html;
     return;
   }
@@ -979,7 +1937,7 @@ function showDetail() {
   const sets = allSetsOfNode(node);
 
   let html = `<div class="panel-section">
-    <h2>${node.set}-${node.wp_num}${sets.length > 1 ? ' (已合併)' : ''}</h2>
+    <h2>${node.set}-${node.wp_num}${allSources.length > 1 ? ' (已合併)' : ''}</h2>
     <div class="panel-row"><span class="panel-label">座標</span><span class="panel-value">(${node.x}, ${node.y})</span></div>
     <div class="panel-row"><span class="panel-label">路線</span>
       <span class="panel-value">${sets.map(s => '<span style="color:' + SET_COLORS[s] + '">' + s + '</span>').join(' ')}</span></div>`;
@@ -987,6 +1945,7 @@ function showDetail() {
     html += `<div class="panel-row"><span class="panel-label">合併來源</span><span class="panel-value">${allSources.length}</span></div>`;
   }
   html += '</div>';
+  html += mergeSectionHtml(node, allSources.length > 1);
 
   // Source tabs for merged nodes
   const activeSource = allSources[0];
@@ -1002,6 +1961,7 @@ function showDetail() {
   }
 
   html += buildPhotoSection(activeSource);
+  html += startSectionHtml(node, activeSource);
 
   // Neighbors
   const neighbors = findNeighbors(node);
@@ -1013,22 +1973,180 @@ function showDetail() {
     html += '</div></div>';
   }
 
-  // Unmerge button if merged
-  if (allSources.length > 1) {
-    html += `<div class="panel-section">
-      <button class="btn btn-warn" onclick="unmergeNode(${node.id})">拆分此合併節點</button>
-    </div>`;
-  }
-
   panel.innerHTML = html;
 }
+
+// ── Start points ──
+
+const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function loadStarts() {
+  try {
+    const r = await fetch(withPlace('/starts'));
+    starts = r.ok ? (await r.json()).starts || [] : [];
+  } catch (e) { starts = []; }
+}
+
+function startListHtml() {
+  if (!starts.length) {
+    return `<div class="panel-section"><h2>起點</h2>
+      <div class="start-hint">還沒有起點。點一個節點，在「設為起點」選要面向的照片。App 開始導航時會讓使用者選起點，站好、面向照片的方向再按。</div></div>`;
+  }
+  return `<div class="panel-section"><h2>起點（${starts.length}）</h2><div class="start-list">` +
+    starts.map(s => `<div class="start-item">
+      ${s.photo_url ? `<img src="${s.photo_url}" alt="">` : ''}
+      <span><b>${escHtml(s.name)}</b><br>(${s.x}, ${s.y}) · 面向 ${s.heading_deg}°</span>
+      <button class="x" title="刪除這個起點" onclick="removeStart('${s.id}')">✕</button></div>`).join('') +
+    '</div></div>';
+}
+
+// Set the selected node as a start: its position, and the heading of one of its photos
+function startSectionHtml(node, src) {
+  const slots = ['front', 'right', 'back', 'left'].filter(k => src.photos?.[k] && src.headings?.[k] != null);
+  if (!slots.length) return '';
+  return `<div class="panel-section"><h2>設為起點</h2>
+    <input class="start-name" id="startName" placeholder="起點名稱，例如 正門、電梯口" value="${starts.length ? '' : '入口'}">
+    <div class="start-dirs">${slots.map(k =>
+      `<button class="btn" onclick="addStart(${node.id}, ${src.id}, '${k}')">面向「${DIR_LABELS[k]}」照片（${Math.round(src.headings[k])}°）</button>`).join('')}</div>
+    <div class="start-hint">使用者站在這個點、面向選的那張照片，就是 App 上「我在起點」要面對的方向。請在地圖對齊完成後再設定；之後再移動或旋轉地圖，起點不會跟著動，要重設。</div>
+  </div>` + startListHtml();
+}
+
+async function addStart(nodeId, srcId, slot) {
+  const node = nodeById(nodeId), src = nodeById(srcId);
+  const name = (document.getElementById('startName')?.value || '').trim();
+  const msg = document.getElementById('statusMsg');
+  if (!name) { msg.textContent = '請先填起點名稱'; return; }
+  const next = [...starts.map(s => ({ id: s.id, name: s.name, x: s.x, y: s.y, heading_deg: s.heading_deg })),
+    { name, x: node.x, y: node.y, heading_deg: src.headings[slot], photo: { set: src.set, file: src.photos[slot] } }];
+  await saveStarts(next, `已新增起點「${name}」`);
+}
+
+async function removeStart(id) {
+  const s = starts.find(x => x.id === id);
+  const next = starts.filter(x => x.id !== id).map(x => ({ id: x.id, name: x.name, x: x.x, y: x.y, heading_deg: x.heading_deg }));
+  await saveStarts(next, `已刪除起點「${s ? s.name : id}」`);
+}
+
+async function saveStarts(list, okText) {
+  const msg = document.getElementById('statusMsg');
+  try {
+    const r = await fetch(withPlace('/starts'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ starts: list }) });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.status);
+    starts = body.starts || [];
+    msg.textContent = okText;
+  } catch (e) {
+    msg.textContent = '起點儲存失敗：' + e.message;
+  }
+  showDetail();
+  draw();
+}
+
+// Merge controls for one selected node: pick the other node on the map next
+function mergeSectionHtml(node, merged) {
+  return `<div class="panel-section">
+    <button class="btn btn-merge" onclick="startMergePick(${node.id})">合併：選另一個點…</button>
+    <button class="btn" onclick="startEdgePick(${node.id})">插入路線：選一條邊…</button>
+    ${merged ? `<button class="btn btn-warn" onclick="unmergeNode(${node.id})">拆分此合併節點</button>` : ''}
+    <div style="font-family:var(--font-data);font-size:10px;color:var(--text-dim);margin-top:6px;line-height:1.5">
+      「合併」：和另一個節點是同一個位置；同一趟走回原地會自動用「閉環合併」分攤誤差。<br>
+      「插入路線」：這個點站在另一條路線兩個節點之間的走道上——點那條邊，它會插進去（a—b 變 a—這點—b）並移到線上。</div>
+  </div>`;
+}
+
+// ── Insert a node into an edge of another walk (it stands on that route between two nodes) ──
+
+// a—b becomes a—n—b and n moves onto the segment. Returns {dist, t} or a reason string.
+function insertIntoEdge(nodeId, a0, b0, maxDist) {
+  const n = nodeById(rootOf(nodeId)), a = rootOf(a0), b = rootOf(b0);
+  if (!n || n.id === a || n.id === b) return 'same';
+  if (!effectiveEdges().some(e => (e.from === a && e.to === b) || (e.from === b && e.to === a))) return 'no-edge';
+  const A = nodeById(a), B = nodeById(b);
+  const vx = B.x - A.x, vy = B.y - A.y, L2 = vx * vx + vy * vy || 1;
+  const t = Math.max(0.05, Math.min(0.95, ((n.x - A.x) * vx + (n.y - A.y) * vy) / L2));
+  const px = A.x + vx * t, py = A.y + vy * t;
+  const dist = Math.hypot(n.x - px, n.y - py);
+  if (maxDist != null && dist > maxDist) return 'far';
+  const positions = positionSnapshot();
+  const dx = px - n.x, dy = py - n.y;
+  for (const m of [n, ...getAbsorbedNodes(n.id)]) { m.x = round2(m.x + dx); m.y = round2(m.y + dy); }
+  mergeHistory.push({ type: 'split', node: n.id, a, b, positions, prevAbsorbed: { ...absorbedInto } });
+  return { dist, t };
+}
+
+function hitTestEdge(sx, sy, exceptNode) {
+  let best = null, bestD = 9;
+  for (const e of effectiveEdges()) {
+    if (e.from === exceptNode || e.to === exceptNode) continue;
+    const A = nodeById(e.from), B = nodeById(e.to);
+    if (!A || !B || !isVisible(A) || !isVisible(B)) continue;
+    const pa = worldToScreen(A.x, A.y), pb = worldToScreen(B.x, B.y);
+    const vx = pb.x - pa.x, vy = pb.y - pa.y, L2 = vx * vx + vy * vy || 1;
+    const t = Math.max(0, Math.min(1, ((sx - pa.x) * vx + (sy - pa.y) * vy) / L2));
+    const d = Math.hypot(sx - (pa.x + vx * t), sy - (pa.y + vy * t));
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  return best;
+}
+
+let edgePickFrom = null;
+
+function startEdgePick(nodeId) {
+  cancelMergePick();
+  edgePickFrom = nodeId;
+  document.getElementById('statusMsg').textContent =
+    `請點 ${nodeLabel(nodeId)} 所在的那條邊（另一條路線上兩個節點之間的線，Esc 取消）`;
+  canvas.style.cursor = 'crosshair';
+}
+
+function finishEdgePick(sx, sy) {
+  const nid = edgePickFrom;
+  const e = hitTestEdge(sx, sy, rootOf(nid));
+  const msg = document.getElementById('statusMsg');
+  if (!e) { msg.textContent = '沒點到邊，再點一次（Esc 取消）'; return; }
+  edgePickFrom = null;
+  const r = insertIntoEdge(nid, e.from, e.to);
+  if (typeof r === 'string') { msg.textContent = '無法插入：' + r; return; }
+  msg.textContent = `${nodeLabel(nid)} 已插入 ${nodeLabel(e.from)}—${nodeLabel(e.to)} 之間（移動 ${r.dist.toFixed(1)} m）`;
+  selection = new Set([rootOf(nid)]);
+  updateMergeBtn();
+  showDetail();
+  draw();
+  saveDraft();
+}
+
+// ── "合併：選另一個點" pick mode ──
+
+let mergePickFrom = null;
+
+function startMergePick(nodeId) {
+  mergePickFrom = nodeId;
+  const n = nodeById(nodeId);
+  document.getElementById('statusMsg').textContent = `請在地圖上點要和 ${n.set}-${n.wp_num} 合併的節點（Esc 取消）`;
+  canvas.style.cursor = 'crosshair';
+}
+
+function cancelMergePick() {
+  if (mergePickFrom == null) return;
+  mergePickFrom = null;
+  document.getElementById('statusMsg').textContent = '';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (mergePickFrom != null) cancelMergePick();
+  if (edgePickFrom != null) { edgePickFrom = null; document.getElementById('statusMsg').textContent = ''; }
+});
 
 function buildPhotoSection(node) {
   let html = '<div class="photo-grid">';
   for (const dir of ['front', 'right', 'back', 'left']) {
     const filename = node.photos[dir];
+    if (!filename) continue;
     html += `<div class="photo-cell">
-      <img src="/test-photo/${node.set}/${filename}" loading="lazy">
+      <img src="${withPlace(`/test-photo/${node.set}/${encodeURIComponent(filename)}`)}" loading="lazy">
       <span class="dir-label">${DIR_LABELS[dir]}</span>
       <span class="set-badge" style="background:${SET_COLORS[node.set]}">${node.set}</span>
     </div>`;
@@ -1056,27 +2174,39 @@ function switchSource(primaryId, sourceId, btn) {
 function findNeighbors(node) {
   if (!mapData) return [];
   const result = [];
-  for (const e of mapData.edges) {
-    if (e.from === node.id) {
-      const nb = nodeById(e.to);
-      if (nb && absorbedInto[nb.id] == null) result.push(nb);
-    } else if (e.to === node.id) {
-      const nb = nodeById(e.from);
-      if (nb && absorbedInto[nb.id] == null) result.push(nb);
-    }
+  for (const e of effectiveEdges()) {
+    const other = e.from === node.id ? e.to : (e.to === node.id ? e.from : null);
+    if (other != null && !result.some(r => r.id === other)) result.push(nodeById(other));
   }
-  // Also show neighbors via absorbed nodes' edges
-  for (const ab of getAbsorbedNodes(node.id)) {
-    for (const e of mapData.edges) {
-      let other = null;
-      if (e.from === ab.id) other = nodeById(e.to);
-      else if (e.to === ab.id) other = nodeById(e.from);
-      if (other && other.id !== node.id && absorbedInto[other.id] == null) {
-        if (!result.find(r => r.id === other.id)) result.push(other);
-      }
-    }
+  return result.filter(Boolean);
+}
+
+// The map's edges as they will be saved: walk edges redirected to merged nodes (deduplicated,
+// self-loops dropped), then each inserted node splits the edge it was put on (a—b → a—n—b).
+function effectiveEdges() {
+  const out = [];
+  const keyOf = (a, b) => Math.min(a, b) + '-' + Math.max(a, b);
+  const seen = new Map();
+  const add = (from, to, set) => {
+    if (from === to) return;
+    const k = keyOf(from, to);
+    if (seen.has(k)) return;
+    const e = { from, to, set };
+    seen.set(k, e);
+    out.push(e);
+  };
+  for (const e of mapData.edges) add(rootOf(e.from), rootOf(e.to), e.set);
+  for (const m of mergeHistory) {
+    if (m.type !== 'split') continue;
+    const n = rootOf(m.node), a = rootOf(m.a), b = rootOf(m.b);
+    const old = seen.get(keyOf(a, b));
+    if (!old || n === a || n === b) continue;       // that edge is gone (e.g. undone / merged away)
+    out.splice(out.indexOf(old), 1);
+    seen.delete(keyOf(a, b));
+    add(old.from === a ? a : b, n, old.set);
+    add(n, old.from === a ? b : a, old.set);
   }
-  return result;
+  return out;
 }
 
 function selectNode(nid) {
@@ -1090,6 +2220,10 @@ function selectNode(nid) {
 function unmergeNode(primaryId) {
   // Find and undo the merge
   const idx = mergeHistory.findIndex(m => m.primary === primaryId);
+  if (idx >= 0 && idx === mergeHistory.length - 1) {
+    undoLastMerge();   // the latest merge: also put the moved nodes back
+    return;
+  }
   if (idx >= 0) {
     const m = mergeHistory.splice(idx, 1)[0];
     for (const nid of m.absorbed) delete absorbedInto[nid];
@@ -1104,6 +2238,7 @@ function unmergeNode(primaryId) {
   updateStats();
   showDetail();
   draw();
+  saveDraft();
 }
 
 // ── Stats ──
@@ -1136,6 +2271,7 @@ async function confirmMap() {
         wp_num: s.wp_num,
         uuid: s.uuid,
         photos: s.photos,
+        headings: s.headings,
       })),
       sets_present: allSetsOfNode(node),
     });
@@ -1143,15 +2279,9 @@ async function confirmMap() {
 
   // Build edges between visible nodes
   const visIds = new Set(outNodes.map(n => n.id));
-  const edgeSet = new Set();
-  for (const e of mapData.edges) {
-    let fromId = absorbedInto[e.from] != null ? absorbedInto[e.from] : e.from;
-    let toId = absorbedInto[e.to] != null ? absorbedInto[e.to] : e.to;
-    if (fromId === toId) continue;
+  for (const e of effectiveEdges()) {
+    const fromId = e.from, toId = e.to;
     if (!visIds.has(fromId) || !visIds.has(toId)) continue;
-    const key = Math.min(fromId, toId) + '-' + Math.max(fromId, toId);
-    if (edgeSet.has(key)) continue;
-    edgeSet.add(key);
     const na = nodeMap[fromId], nb = nodeMap[toId];
     const dx = na.x - nb.x, dy = na.y - nb.y;
     outEdges.push({ from: fromId, to: toId, distance: Math.round(Math.sqrt(dx*dx+dy*dy) * 100) / 100 });
@@ -1161,7 +2291,10 @@ async function confirmMap() {
     const resp = await fetch('/topomap-confirm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ place: mapData.place, nodes: outNodes, edges: outEdges }),
+      body: JSON.stringify({
+        place: mapData.place, nodes: outNodes, edges: outEdges,
+        floorplan: fp ? { cx: fp.cx, cy: fp.cy, widthM: fp.widthM, rot: fp.rot, alpha: fp.alpha } : null,
+      }),
     });
     const result = await resp.json();
     msg.textContent = result.message || '已送出';
@@ -1192,26 +2325,90 @@ function fitToData() {
 
 async function init() {
   resize();
+  // Narrow map area: start with the tool card folded so it does not hide the map
+  const mapW = document.getElementById('mapWrap').getBoundingClientRect().width;
+  if (mapW && mapW < 760) document.getElementById('toolsCard').open = false;
   const msg = document.getElementById('statusMsg');
   try {
+    placeList = (await (await fetch('/topomap-places')).json()).places || [];
+  } catch (e) { placeList = []; }
+  if (!PLACE && placeList.length) {           // no ?place=: open the store edited most recently
+    PLACE = placeList[0].place;
+    history.replaceState(null, '', builderUrl(PLACE));
+  }
+  fillPlacePicker();
+  if (!PLACE) {
+    msg.textContent = '還沒有任何店家：按「路線…」填店名、選 Sensor Lab 資料';
+    openWalks(true);
+    return;
+  }
+  document.title = `${PLACE} · 拓樸地圖建置器`;
+  try {
     const [dataResp, refResp] = await Promise.all([
-      fetch('/topomap-data').then(r => r.json()),
-      fetch('/existing-topomap').then(r => r.json()).catch(() => null),
+      fetch(withPlace('/topomap-data')).then(async r => {
+        if (r.status === 404) { openWalks(); }
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status);
+        return r.json();
+      }),
+      // No reference place configured (MAP_BUILD_REF_PLACE) → 404 → draw without one
+      fetch('/existing-topomap').then(r => r.ok ? r.json() : null).catch(() => null),
     ]);
     mapData = dataResp;
-    refMap = refResp;
+    refMap = refResp && refResp.nodes ? refResp : null;
+    origPos = Object.fromEntries(mapData.nodes.map(n => [n.id, [n.x, n.y]]));
+    const sets = setupSets();
+    setupScope(sets);
+    const draft = loadDraft();
+    const restored = applyDraft(draft);
+    updateStats();
+    updateFpInputs();
+    showFloorplan(restored && draft.fp ? draft.fp : null);
+    await loadStarts();
+    showDetail();
     fitToData();
     draw();
+    if (!canvas.width) {
+      // Loaded in a hidden tab/pane: the canvas has no size yet → fit once it gets one
+      new ResizeObserver((_, obs) => {
+        resize();
+        if (canvas.width) { obs.disconnect(); fitToData(); draw(); }
+      }).observe(canvas.parentElement);
+    }
 
-    const stats = dataResp.stats;
-    document.getElementById('stat-nodes').innerHTML =
-      `<span style="color:var(--set01)">01</span>×${stats.sets?.['01']||0} ` +
-      `<span style="color:var(--set02)">02</span>×${stats.sets?.['02']||0} ` +
-      `<span style="color:var(--set03)">03</span>×${stats.sets?.['03']||0}`;
-    msg.textContent = `${stats.total_nodes} 個獨立節點` + (refMap ? ` · 參考圖 ${refMap.nodes.length} 節點` : '');
+    const stats = dataResp.stats || {};
+    document.getElementById('stat-nodes').innerHTML = sets.map(sid =>
+      `<span style="color:${SET_COLORS[sid]}">${sid}</span>×${stats.sets?.[sid] ?? mapData.nodes.filter(n => n.set === sid).length}`
+    ).join(' ');
+    msg.textContent = `${mapData.place ? mapData.place + ' · ' : ''}${mapData.nodes.length} 個獨立節點` +
+      (refMap ? ` · 參考圖 ${refMap.nodes.length} 節點` : '') +
+      (restored ? ` · 已還原上次的編輯（「重設全部」可捨棄）` +
+        (restored < mapData.nodes.length ? `；新加入的 ${mapData.nodes.length - restored} 個節點在原始位置` : '') : '');
   } catch (err) {
     msg.textContent = '載入失敗: ' + err.message;
   }
+}
+
+let placeList = [];
+
+function fillPlacePicker() {
+  const sel = document.getElementById('placeSel');
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const names = placeList.map(p => p.place);
+  if (PLACE && !names.includes(PLACE)) names.unshift(PLACE);
+  sel.innerHTML = names.map(n => {
+    const p = placeList.find(x => x.place === n);
+    const note = p ? `（${p.nodes} 點${p.confirmed ? '・已確認' : ''}）` : '（新）';
+    return `<option value="${esc(n)}" ${n === PLACE ? 'selected' : ''}>${esc(n)} ${note}</option>`;
+  }).join('') + '<option value="__new__">＋ 新增店家…</option>';
+}
+
+function switchPlace(value) {
+  if (value === '__new__') {
+    document.getElementById('placeSel').value = PLACE;
+    openWalks(true);
+    return;
+  }
+  if (value !== PLACE) location.href = builderUrl(value);
 }
 
 init();

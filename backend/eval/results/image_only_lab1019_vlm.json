@@ -1,0 +1,5667 @@
+{
+ "set": "lab1019",
+ "n_photos": 376,
+ "generated": "2026-10-20 14:03",
+ "commit": "dbd013c",
+ "machine": "yixianlin / Intel64 Family 6 Model 154 Stepping 4, GenuineIntel / GPU no CUDA",
+ "map": {
+  "place": "A7家樂福（9/16)",
+  "nodes": 59,
+  "source": "neo4j",
+  "fingerprint": "05c705d52272",
+  "sidecar_sha1": "a81ca3312c9c"
+ },
+ "config": {
+  "locate_fusion_weights": [
+   5.0,
+   0.5,
+   0.5
+  ],
+  "server_image_k": "32,64,8",
+  "confident_threshold": 0.15,
+  "dino_model": "facebook/dinov2-base",
+  "perception": {
+   "model": "gpt-5.4-mini",
+   "base_url": "https://api.openai.com/v1",
+   "rounds": 1,
+   "pass3": true,
+   "goal": "定位",
+   "goal_objects": [],
+   "prompts_sha1": "9bb095df3ecc"
+  }
+ },
+ "perception": "vlm",
+ "vlm_calls": {
+  "total": 1128,
+  "by_kind": {
+   "pass1": 376,
+   "pass2": 376,
+   "pass3": 376
+  },
+  "errors": 0,
+  "pass3_useful_photos": 0
+ },
+ "live_comparison": null,
+ "timing_s": {
+  "quality": {
+   "mean": 0.02,
+   "median": 0.02
+  },
+  "vlm": {
+   "mean": 14.02,
+   "median": 14.06
+  },
+  "dino": {
+   "mean": 0.27,
+   "median": 0.26
+  },
+  "fusion": {
+   "mean": 1.79,
+   "median": 1.67
+  },
+  "total": {
+   "mean": 16.1,
+   "median": 16.06
+  }
+ },
+ "text_coverage": {
+  "photos": 376,
+  "with_ocr_text_in_map": 324,
+  "with_aisle_sign_evidence": 75
+ },
+ "sensor_modes": [
+  "none",
+  "replay",
+  "sim1",
+  "sim2",
+  "sim4",
+  "sim8"
+ ],
+ "variants": {
+  "prod": {
+   "metrics": {
+    "n": 376,
+    "top1": 44.7,
+    "top5": 74.7,
+    "within_1_hop": 67.3,
+    "error_m": {
+     "mean": 5.53,
+     "median": 3.24
+    },
+    "estimated_xy_error_m": {
+     "mean": 5.45,
+     "median": 3.62
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 87.0,
+      "n": 327,
+      "top1_when_confident": 45.6,
+      "within_1_hop_when_confident": 67.6
+     },
+     ">=0.6": {
+      "coverage": 48.4,
+      "n": 182,
+      "top1_when_confident": 55.5,
+      "within_1_hop_when_confident": 73.1
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 11,
+     "answered": 361,
+     "coverage": 96.0,
+     "top1_of_answered": 46.3
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 365,
+     "within_45deg": 38.6,
+     "n_correct_node": 167,
+     "within_45deg_on_correct_node": 40.7
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 50.0,
+      "within_1_hop": 75.0
+     },
+     "between": {
+      "n": 116,
+      "top1": 32.8,
+      "within_1_hop": 50.0
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 44.7,
+      "any_top1": 93.6,
+      "most_confident_top1": 55.3,
+      "most_confident_within_1_hop": 69.1
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 50.0,
+      "any_top1": 96.9,
+      "most_confident_top1": 66.2,
+      "most_confident_within_1_hop": 78.5
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 32.8,
+      "any_top1": 86.2,
+      "most_confident_top1": 31.0,
+      "most_confident_within_1_hop": 48.3
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 208,
+    "kind": {
+     "neighbour (1 hop)": 85,
+     "far (≥3 hops)": 79,
+     "2 hops": 44
+    },
+    "truth_in_top5": 113,
+    "between_nodes": 78,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 5,
+      "directions": {
+       "57->61": 2,
+       "61->57": 3
+      }
+     },
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 4,
+      "directions": {
+       "30->40": 2,
+       "40->30": 2
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 4,
+      "directions": {
+       "1->4": 2,
+       "4->1": 2
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 4,
+      "directions": {
+       "21->30": 2,
+       "30->21": 2
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 4,
+      "directions": {
+       "21->4": 4
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 3,
+      "directions": {
+       "26->6": 3
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 3,
+      "directions": {
+       "64->65": 3
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 3,
+      "directions": {
+       "56->58": 2,
+       "58->56": 1
+      }
+     },
+     {
+      "nodes": [
+       3,
+       4
+      ],
+      "count": 3,
+      "directions": {
+       "3->4": 2,
+       "4->3": 1
+      }
+     },
+     {
+      "nodes": [
+       43,
+       44
+      ],
+      "count": 3,
+      "directions": {
+       "43->44": 1,
+       "44->43": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 0.73,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 0.95,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 40,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.41,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 0.89,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.74,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp53_back",
+      "truth": 63,
+      "pred": 18,
+      "hop": 8,
+      "err_m": 27.6,
+      "conf": 0.34,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_left",
+      "truth": 42,
+      "pred": 13,
+      "hop": 9,
+      "err_m": 26.6,
+      "conf": 0.54,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.53,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.66,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 0.51,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp73_left",
+      "truth": 21,
+      "pred": 14,
+      "hop": 8,
+      "err_m": 24.7,
+      "conf": 0.38,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp45_left",
+      "truth": 17,
+      "pred": 29,
+      "hop": 10,
+      "err_m": 24.1,
+      "conf": 0.86,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp15_right",
+      "truth": 52,
+      "pred": 30,
+      "hop": 8,
+      "err_m": 23.9,
+      "conf": 0.94,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp9_left",
+      "truth": 26,
+      "pred": 4,
+      "hop": 9,
+      "err_m": 23.8,
+      "conf": 0.56,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "dino_only": {
+   "metrics": {
+    "n": 376,
+    "top1": 41.2,
+    "top5": 72.1,
+    "within_1_hop": 62.8,
+    "error_m": {
+     "mean": 6.05,
+     "median": 3.85
+    },
+    "estimated_xy_error_m": {
+     "mean": 5.81,
+     "median": 3.91
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 71.3,
+      "n": 268,
+      "top1_when_confident": 46.3,
+      "within_1_hop_when_confident": 66.8
+     },
+     ">=0.6": {
+      "coverage": 33.5,
+      "n": 126,
+      "top1_when_confident": 57.9,
+      "within_1_hop_when_confident": 71.4
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 33,
+     "answered": 339,
+     "coverage": 90.2,
+     "top1_of_answered": 44.5
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 342,
+     "within_45deg": 36.0,
+     "n_correct_node": 151,
+     "within_45deg_on_correct_node": 41.7
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 47.3,
+      "within_1_hop": 70.4
+     },
+     "between": {
+      "n": 116,
+      "top1": 27.6,
+      "within_1_hop": 45.7
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 41.2,
+      "any_top1": 86.2,
+      "most_confident_top1": 52.1,
+      "most_confident_within_1_hop": 68.1
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 47.3,
+      "any_top1": 90.8,
+      "most_confident_top1": 66.2,
+      "most_confident_within_1_hop": 80.0
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 27.6,
+      "any_top1": 75.9,
+      "most_confident_top1": 20.7,
+      "most_confident_within_1_hop": 41.4
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 221,
+    "kind": {
+     "far (≥3 hops)": 98,
+     "neighbour (1 hop)": 81,
+     "2 hops": 42
+    },
+    "truth_in_top5": 116,
+    "between_nodes": 84,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 5,
+      "directions": {
+       "21->30": 2,
+       "30->21": 3
+      }
+     },
+     {
+      "nodes": [
+       4,
+       50
+      ],
+      "count": 4,
+      "directions": {
+       "50->4": 4
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 4,
+      "directions": {
+       "21->4": 4
+      }
+     },
+     {
+      "nodes": [
+       25,
+       37
+      ],
+      "count": 3,
+      "directions": {
+       "25->37": 3
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 3,
+      "directions": {
+       "26->6": 3
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 3,
+      "directions": {
+       "64->65": 3
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 3,
+      "directions": {
+       "56->58": 2,
+       "58->56": 1
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 3,
+      "directions": {
+       "44->50": 2,
+       "50->44": 1
+      }
+     },
+     {
+      "nodes": [
+       3,
+       4
+      ],
+      "count": 3,
+      "directions": {
+       "3->4": 2,
+       "4->3": 1
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 3,
+      "directions": {
+       "57->61": 1,
+       "61->57": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 16,
+      "hop": 12,
+      "err_m": 38.7,
+      "conf": 0.41,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp60_left",
+      "truth": 32,
+      "pred": 60,
+      "hop": 12,
+      "err_m": 36.5,
+      "conf": 0.47,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 0.94,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 40,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.44,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 0.89,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.74,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_left",
+      "truth": 42,
+      "pred": 13,
+      "hop": 9,
+      "err_m": 26.6,
+      "conf": 0.57,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.53,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.66,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 0.51,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp48_left",
+      "truth": 30,
+      "pred": 47,
+      "hop": 9,
+      "err_m": 25.2,
+      "conf": 0.18,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp73_left",
+      "truth": 21,
+      "pred": 14,
+      "hop": 8,
+      "err_m": 24.7,
+      "conf": 0.38,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp45_left",
+      "truth": 17,
+      "pred": 29,
+      "hop": 10,
+      "err_m": 24.1,
+      "conf": 0.86,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp9_left",
+      "truth": 26,
+      "pred": 4,
+      "hop": 9,
+      "err_m": 23.8,
+      "conf": 0.56,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_front",
+      "truth": 56,
+      "pred": 25,
+      "hop": 6,
+      "err_m": 23.7,
+      "conf": 0.55,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "no_objects": {
+   "metrics": {
+    "n": 376,
+    "top1": 44.4,
+    "top5": 75.0,
+    "within_1_hop": 67.6,
+    "error_m": {
+     "mean": 5.5,
+     "median": 3.24
+    },
+    "estimated_xy_error_m": {
+     "mean": 5.41,
+     "median": 3.57
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 87.0,
+      "n": 327,
+      "top1_when_confident": 45.3,
+      "within_1_hop_when_confident": 67.9
+     },
+     ">=0.6": {
+      "coverage": 48.1,
+      "n": 181,
+      "top1_when_confident": 55.8,
+      "within_1_hop_when_confident": 74.0
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 11,
+     "answered": 361,
+     "coverage": 96.0,
+     "top1_of_answered": 46.0
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 365,
+     "within_45deg": 38.9,
+     "n_correct_node": 166,
+     "within_45deg_on_correct_node": 41.0
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 49.6,
+      "within_1_hop": 75.4
+     },
+     "between": {
+      "n": 116,
+      "top1": 32.8,
+      "within_1_hop": 50.0
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 44.4,
+      "any_top1": 93.6,
+      "most_confident_top1": 55.3,
+      "most_confident_within_1_hop": 69.1
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 49.6,
+      "any_top1": 96.9,
+      "most_confident_top1": 64.6,
+      "most_confident_within_1_hop": 76.9
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 32.8,
+      "any_top1": 86.2,
+      "most_confident_top1": 34.5,
+      "most_confident_within_1_hop": 51.7
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 209,
+    "kind": {
+     "neighbour (1 hop)": 87,
+     "far (≥3 hops)": 78,
+     "2 hops": 44
+    },
+    "truth_in_top5": 115,
+    "between_nodes": 78,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 5,
+      "directions": {
+       "57->61": 2,
+       "61->57": 3
+      }
+     },
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 4,
+      "directions": {
+       "30->40": 2,
+       "40->30": 2
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 4,
+      "directions": {
+       "1->4": 2,
+       "4->1": 2
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 4,
+      "directions": {
+       "21->30": 2,
+       "30->21": 2
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 4,
+      "directions": {
+       "21->4": 4
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 3,
+      "directions": {
+       "26->6": 3
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 3,
+      "directions": {
+       "64->65": 3
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 3,
+      "directions": {
+       "56->58": 2,
+       "58->56": 1
+      }
+     },
+     {
+      "nodes": [
+       3,
+       4
+      ],
+      "count": 3,
+      "directions": {
+       "3->4": 2,
+       "4->3": 1
+      }
+     },
+     {
+      "nodes": [
+       43,
+       44
+      ],
+      "count": 3,
+      "directions": {
+       "43->44": 1,
+       "44->43": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 0.73,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 0.95,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 40,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.41,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 0.89,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.74,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp53_back",
+      "truth": 63,
+      "pred": 18,
+      "hop": 8,
+      "err_m": 27.6,
+      "conf": 0.34,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_left",
+      "truth": 42,
+      "pred": 13,
+      "hop": 9,
+      "err_m": 26.6,
+      "conf": 0.54,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.53,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.66,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 0.51,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp73_left",
+      "truth": 21,
+      "pred": 14,
+      "hop": 8,
+      "err_m": 24.7,
+      "conf": 0.38,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp45_left",
+      "truth": 17,
+      "pred": 29,
+      "hop": 10,
+      "err_m": 24.1,
+      "conf": 0.86,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp15_right",
+      "truth": 52,
+      "pred": 30,
+      "hop": 8,
+      "err_m": 23.9,
+      "conf": 0.94,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp9_left",
+      "truth": 26,
+      "pred": 4,
+      "hop": 9,
+      "err_m": 23.8,
+      "conf": 0.56,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "no_text": {
+   "metrics": {
+    "n": 376,
+    "top1": 40.4,
+    "top5": 72.1,
+    "within_1_hop": 61.4,
+    "error_m": {
+     "mean": 6.49,
+     "median": 4.05
+    },
+    "estimated_xy_error_m": {
+     "mean": 6.19,
+     "median": 4.09
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 73.1,
+      "n": 275,
+      "top1_when_confident": 45.1,
+      "within_1_hop_when_confident": 64.4
+     },
+     ">=0.6": {
+      "coverage": 34.8,
+      "n": 131,
+      "top1_when_confident": 56.5,
+      "within_1_hop_when_confident": 68.7
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 28,
+     "answered": 344,
+     "coverage": 91.5,
+     "top1_of_answered": 43.3
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 347,
+     "within_45deg": 34.6,
+     "n_correct_node": 149,
+     "within_45deg_on_correct_node": 40.9
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 46.5,
+      "within_1_hop": 68.5
+     },
+     "between": {
+      "n": 116,
+      "top1": 26.7,
+      "within_1_hop": 45.7
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 40.4,
+      "any_top1": 85.1,
+      "most_confident_top1": 47.9,
+      "most_confident_within_1_hop": 62.8
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 46.5,
+      "any_top1": 90.8,
+      "most_confident_top1": 60.0,
+      "most_confident_within_1_hop": 72.3
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 26.7,
+      "any_top1": 72.4,
+      "most_confident_top1": 20.7,
+      "most_confident_within_1_hop": 41.4
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 224,
+    "kind": {
+     "far (≥3 hops)": 105,
+     "neighbour (1 hop)": 79,
+     "2 hops": 40
+    },
+    "truth_in_top5": 119,
+    "between_nodes": 85,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 5,
+      "directions": {
+       "21->30": 2,
+       "30->21": 3
+      }
+     },
+     {
+      "nodes": [
+       4,
+       50
+      ],
+      "count": 4,
+      "directions": {
+       "50->4": 4
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 4,
+      "directions": {
+       "21->4": 4
+      }
+     },
+     {
+      "nodes": [
+       25,
+       37
+      ],
+      "count": 3,
+      "directions": {
+       "25->37": 3
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 3,
+      "directions": {
+       "26->6": 3
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 3,
+      "directions": {
+       "64->65": 3
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 3,
+      "directions": {
+       "56->58": 2,
+       "58->56": 1
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 3,
+      "directions": {
+       "44->50": 2,
+       "50->44": 1
+      }
+     },
+     {
+      "nodes": [
+       3,
+       4
+      ],
+      "count": 3,
+      "directions": {
+       "3->4": 2,
+       "4->3": 1
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 3,
+      "directions": {
+       "57->61": 1,
+       "61->57": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 16,
+      "hop": 12,
+      "err_m": 38.7,
+      "conf": 0.41,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp60_left",
+      "truth": 32,
+      "pred": 60,
+      "hop": 12,
+      "err_m": 36.5,
+      "conf": 0.47,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp48_left",
+      "truth": 30,
+      "pred": 8,
+      "hop": 10,
+      "err_m": 34.1,
+      "conf": 0.23,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 0.94,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp59_back",
+      "truth": 40,
+      "pred": 8,
+      "hop": 9,
+      "err_m": 30.6,
+      "conf": 0.46,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 40,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.44,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 0.89,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.74,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp34_front",
+      "truth": 3,
+      "pred": 8,
+      "hop": 8,
+      "err_m": 27.7,
+      "conf": 0.35,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp36_back",
+      "truth": 44,
+      "pred": 8,
+      "hop": 8,
+      "err_m": 27.6,
+      "conf": 0.68,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_left",
+      "truth": 42,
+      "pred": 13,
+      "hop": 9,
+      "err_m": 26.6,
+      "conf": 0.57,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.53,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.66,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 0.51,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp73_left",
+      "truth": 21,
+      "pred": 14,
+      "hop": 8,
+      "err_m": 24.7,
+      "conf": 0.38,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "objects_only": {
+   "metrics": {
+    "n": 376,
+    "top1": 2.4,
+    "top5": 9.0,
+    "within_1_hop": 9.6,
+    "error_m": {
+     "mean": 14.87,
+     "median": 14.52
+    },
+    "estimated_xy_error_m": {
+     "mean": 14.81,
+     "median": 14.23
+    },
+    "photos_with_signal": 17.8,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 16.0,
+      "n": 60,
+      "top1_when_confident": 1.7,
+      "within_1_hop_when_confident": 6.7
+     },
+     ">=0.6": {
+      "coverage": 12.8,
+      "n": 48,
+      "top1_when_confident": 2.1,
+      "within_1_hop_when_confident": 6.2
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 305,
+     "answered": 67,
+     "coverage": 17.8,
+     "top1_of_answered": 1.5
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 67,
+     "within_45deg": 28.4,
+     "n_correct_node": 1,
+     "within_45deg_on_correct_node": 0.0
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 1.9,
+      "within_1_hop": 8.5
+     },
+     "between": {
+      "n": 116,
+      "top1": 3.4,
+      "within_1_hop": 12.1
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 2.4,
+      "any_top1": 3.2,
+      "most_confident_top1": 2.1,
+      "most_confident_within_1_hop": 9.6
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 1.9,
+      "any_top1": 3.1,
+      "most_confident_top1": 1.5,
+      "most_confident_within_1_hop": 9.2
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 3.4,
+      "any_top1": 3.4,
+      "most_confident_top1": 3.4,
+      "most_confident_within_1_hop": 10.3
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 367,
+    "kind": {
+     "far (≥3 hops)": 306,
+     "neighbour (1 hop)": 27,
+     "2 hops": 34
+    },
+    "truth_in_top5": 25,
+    "between_nodes": 112,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       1,
+       21
+      ],
+      "count": 15,
+      "directions": {
+       "21->1": 15
+      }
+     },
+     {
+      "nodes": [
+       1,
+       49
+      ],
+      "count": 13,
+      "directions": {
+       "49->1": 13
+      }
+     },
+     {
+      "nodes": [
+       1,
+       50
+      ],
+      "count": 12,
+      "directions": {
+       "50->1": 12
+      }
+     },
+     {
+      "nodes": [
+       1,
+       40
+      ],
+      "count": 11,
+      "directions": {
+       "40->1": 11
+      }
+     },
+     {
+      "nodes": [
+       1,
+       25
+      ],
+      "count": 10,
+      "directions": {
+       "25->1": 10
+      }
+     },
+     {
+      "nodes": [
+       1,
+       26
+      ],
+      "count": 8,
+      "directions": {
+       "26->1": 8
+      }
+     },
+     {
+      "nodes": [
+       1,
+       51
+      ],
+      "count": 8,
+      "directions": {
+       "51->1": 8
+      }
+     },
+     {
+      "nodes": [
+       1,
+       42
+      ],
+      "count": 8,
+      "directions": {
+       "42->1": 8
+      }
+     },
+     {
+      "nodes": [
+       1,
+       22
+      ],
+      "count": 8,
+      "directions": {
+       "22->1": 8
+      }
+     },
+     {
+      "nodes": [
+       1,
+       46
+      ],
+      "count": 7,
+      "directions": {
+       "46->1": 7
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "2/wp56_right",
+      "truth": 16,
+      "pred": 8,
+      "hop": 12,
+      "err_m": 37.8,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 8,
+      "hop": 10,
+      "err_m": 36.2,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp65_back",
+      "truth": 20,
+      "pred": 8,
+      "hop": 11,
+      "err_m": 35.5,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 4,
+      "hop": 11,
+      "err_m": 35.5,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_front",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_right",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_left",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp63_left",
+      "truth": 45,
+      "pred": 8,
+      "hop": 10,
+      "err_m": 32.2,
+      "conf": 0.5,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp25_front",
+      "truth": 18,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 32.1,
+      "conf": 0.02,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 32.1,
+      "conf": 0.02,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 32.1,
+      "conf": 0.02,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp21_front",
+      "truth": 60,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 31.3,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp21_back",
+      "truth": 60,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 31.3,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp21_left",
+      "truth": 60,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 31.3,
+      "conf": 0.02,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "text_only": {
+   "metrics": {
+    "n": 376,
+    "top1": 25.5,
+    "top5": 50.5,
+    "within_1_hop": 42.8,
+    "error_m": {
+     "mean": 10.09,
+     "median": 7.2
+    },
+    "estimated_xy_error_m": {
+     "mean": 9.66,
+     "median": 7.12
+    },
+    "photos_with_signal": 87.2,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 72.1,
+      "n": 271,
+      "top1_when_confident": 32.5,
+      "within_1_hop_when_confident": 50.6
+     },
+     ">=0.6": {
+      "coverage": 47.3,
+      "n": 178,
+      "top1_when_confident": 39.3,
+      "within_1_hop_when_confident": 55.6
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 65,
+     "answered": 307,
+     "coverage": 81.6,
+     "top1_of_answered": 30.6
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 311,
+     "within_45deg": 29.3,
+     "n_correct_node": 94,
+     "within_45deg_on_correct_node": 37.2
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 25.8,
+      "within_1_hop": 43.1
+     },
+     "between": {
+      "n": 116,
+      "top1": 25.0,
+      "within_1_hop": 42.2
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 25.5,
+      "any_top1": 72.3,
+      "most_confident_top1": 50.0,
+      "most_confident_within_1_hop": 59.6
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 25.8,
+      "any_top1": 73.8,
+      "most_confident_top1": 52.3,
+      "most_confident_within_1_hop": 61.5
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 25.0,
+      "any_top1": 69.0,
+      "most_confident_top1": 44.8,
+      "most_confident_within_1_hop": 55.2
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 280,
+    "kind": {
+     "far (≥3 hops)": 172,
+     "neighbour (1 hop)": 65,
+     "2 hops": 43
+    },
+    "truth_in_top5": 94,
+    "between_nodes": 87,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 7,
+      "directions": {
+       "30->40": 2,
+       "40->30": 5
+      }
+     },
+     {
+      "nodes": [
+       1,
+       50
+      ],
+      "count": 4,
+      "directions": {
+       "50->1": 4
+      }
+     },
+     {
+      "nodes": [
+       1,
+       16
+      ],
+      "count": 4,
+      "directions": {
+       "16->1": 4
+      }
+     },
+     {
+      "nodes": [
+       15,
+       59
+      ],
+      "count": 3,
+      "directions": {
+       "15->59": 2,
+       "59->15": 1
+      }
+     },
+     {
+      "nodes": [
+       1,
+       49
+      ],
+      "count": 3,
+      "directions": {
+       "49->1": 3
+      }
+     },
+     {
+      "nodes": [
+       1,
+       30
+      ],
+      "count": 3,
+      "directions": {
+       "1->30": 1,
+       "30->1": 2
+      }
+     },
+     {
+      "nodes": [
+       1,
+       21
+      ],
+      "count": 3,
+      "directions": {
+       "21->1": 3
+      }
+     },
+     {
+      "nodes": [
+       1,
+       18
+      ],
+      "count": 3,
+      "directions": {
+       "18->1": 3
+      }
+     },
+     {
+      "nodes": [
+       15,
+       25
+      ],
+      "count": 2,
+      "directions": {
+       "25->15": 2
+      }
+     },
+     {
+      "nodes": [
+       1,
+       11
+      ],
+      "count": 2,
+      "directions": {
+       "11->1": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "1/wp47_left",
+      "truth": 59,
+      "pred": 18,
+      "hop": 12,
+      "err_m": 42.6,
+      "conf": 0.91,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp49_front",
+      "truth": 59,
+      "pred": 60,
+      "hop": 11,
+      "err_m": 41.5,
+      "conf": 0.52,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp79_left",
+      "truth": 22,
+      "pred": 8,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 0.36,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp49_back",
+      "truth": 59,
+      "pred": 9,
+      "hop": 10,
+      "err_m": 37.2,
+      "conf": 0.1,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp79_back",
+      "truth": 22,
+      "pred": 9,
+      "hop": 11,
+      "err_m": 35.5,
+      "conf": 0.5,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp60_front",
+      "truth": 32,
+      "pred": 9,
+      "hop": 11,
+      "err_m": 35.1,
+      "conf": 0.1,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp77_right",
+      "truth": 22,
+      "pred": 60,
+      "hop": 11,
+      "err_m": 35.1,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 30,
+      "hop": 10,
+      "err_m": 34.5,
+      "conf": 0.5,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp3_front",
+      "truth": 25,
+      "pred": 22,
+      "hop": 10,
+      "err_m": 34.1,
+      "conf": 0.12,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_right",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 1,
+      "hop": 11,
+      "err_m": 33.9,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 32.1,
+      "conf": 0.02,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_front",
+      "truth": 18,
+      "pred": 40,
+      "hop": 9,
+      "err_m": 31.0,
+      "conf": 0.31,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp27_right",
+      "truth": 8,
+      "pred": 1,
+      "hop": 10,
+      "err_m": 31.0,
+      "conf": 0.02,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp23_front",
+      "truth": 54,
+      "pred": 31,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 1.0,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "prod+replay": {
+   "metrics": {
+    "n": 376,
+    "top1": 61.4,
+    "top5": 97.1,
+    "within_1_hop": 89.6,
+    "error_m": {
+     "mean": 2.38,
+     "median": 2.05
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.29,
+     "median": 1.77
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 376,
+      "top1_when_confident": 61.4,
+      "within_1_hop_when_confident": 89.6
+     },
+     ">=0.6": {
+      "coverage": 96.0,
+      "n": 361,
+      "top1_when_confident": 62.6,
+      "within_1_hop_when_confident": 89.5
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 0,
+     "answered": 372,
+     "coverage": 98.9,
+     "top1_of_answered": 61.6
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 376,
+     "within_45deg": 37.5,
+     "n_correct_node": 231,
+     "within_45deg_on_correct_node": 39.4
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 62.3,
+      "within_1_hop": 92.7
+     },
+     "between": {
+      "n": 116,
+      "top1": 59.5,
+      "within_1_hop": 82.8
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 61.4,
+      "any_top1": 94.7,
+      "most_confident_top1": 74.5,
+      "most_confident_within_1_hop": 91.5
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 62.3,
+      "any_top1": 93.8,
+      "most_confident_top1": 81.5,
+      "most_confident_within_1_hop": 95.4
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 59.5,
+      "any_top1": 96.6,
+      "most_confident_top1": 58.6,
+      "most_confident_within_1_hop": 82.8
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 145,
+    "kind": {
+     "neighbour (1 hop)": 106,
+     "2 hops": 28,
+     "far (≥3 hops)": 11
+    },
+    "truth_in_top5": 134,
+    "between_nodes": 47,
+    "occluded": 2,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 6,
+      "directions": {
+       "21->30": 3,
+       "30->21": 3
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 5,
+      "directions": {
+       "1->4": 3,
+       "4->1": 2
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 5,
+      "directions": {
+       "57->61": 2,
+       "61->57": 3
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 4,
+      "directions": {
+       "21->4": 4
+      }
+     },
+     {
+      "nodes": [
+       29,
+       53
+      ],
+      "count": 4,
+      "directions": {
+       "29->53": 4
+      }
+     },
+     {
+      "nodes": [
+       6,
+       36
+      ],
+      "count": 3,
+      "directions": {
+       "36->6": 3
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 3,
+      "directions": {
+       "64->65": 3
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 3,
+      "directions": {
+       "56->58": 2,
+       "58->56": 1
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 3,
+      "directions": {
+       "44->50": 1,
+       "50->44": 2
+      }
+     },
+     {
+      "nodes": [
+       3,
+       44
+      ],
+      "count": 3,
+      "directions": {
+       "3->44": 3
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp61_left",
+      "truth": 40,
+      "pred": 7,
+      "hop": 3,
+      "err_m": 12.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp37_right",
+      "truth": 15,
+      "pred": 13,
+      "hop": 4,
+      "err_m": 10.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp55_left",
+      "truth": 63,
+      "pred": 31,
+      "hop": 3,
+      "err_m": 9.8,
+      "conf": 0.73,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp57_right",
+      "truth": 44,
+      "pred": 21,
+      "hop": 3,
+      "err_m": 8.5,
+      "conf": 0.99,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp5_front",
+      "truth": 42,
+      "pred": 43,
+      "hop": 3,
+      "err_m": 8.3,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp2_right",
+      "truth": 25,
+      "pred": 46,
+      "hop": 3,
+      "err_m": 5.2,
+      "conf": 0.98,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp4_right",
+      "truth": 37,
+      "pred": 41,
+      "hop": 5,
+      "err_m": 0.5,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp4_back",
+      "truth": 37,
+      "pred": 41,
+      "hop": 5,
+      "err_m": 0.5,
+      "conf": 0.7,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "dino_only+replay": {
+   "metrics": {
+    "n": 376,
+    "top1": 60.4,
+    "top5": 96.5,
+    "within_1_hop": 88.3,
+    "error_m": {
+     "mean": 2.4,
+     "median": 2.01
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.31,
+     "median": 1.67
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 376,
+      "top1_when_confident": 60.4,
+      "within_1_hop_when_confident": 88.3
+     },
+     ">=0.6": {
+      "coverage": 94.9,
+      "n": 357,
+      "top1_when_confident": 62.2,
+      "within_1_hop_when_confident": 88.2
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 4,
+     "below_threshold": 0,
+     "answered": 372,
+     "coverage": 98.9,
+     "top1_of_answered": 60.2
+    },
+    "heading": {
+     "labelled": 376,
+     "with_prediction": 376,
+     "within_45deg": 38.0,
+     "n_correct_node": 227,
+     "within_45deg_on_correct_node": 40.5
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 260,
+      "top1": 62.7,
+      "within_1_hop": 92.3
+     },
+     "between": {
+      "n": 116,
+      "top1": 55.2,
+      "within_1_hop": 79.3
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 60.4,
+      "any_top1": 89.4,
+      "most_confident_top1": 74.5,
+      "most_confident_within_1_hop": 91.5
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 62.7,
+      "any_top1": 90.8,
+      "most_confident_top1": 83.1,
+      "most_confident_within_1_hop": 95.4
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 55.2,
+      "any_top1": 86.2,
+      "most_confident_top1": 55.2,
+      "most_confident_within_1_hop": 82.8
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 149,
+    "kind": {
+     "neighbour (1 hop)": 105,
+     "2 hops": 30,
+     "far (≥3 hops)": 14
+    },
+    "truth_in_top5": 136,
+    "between_nodes": 52,
+    "occluded": 1,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 7,
+      "directions": {
+       "21->30": 2,
+       "30->21": 5
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 5,
+      "directions": {
+       "57->61": 2,
+       "61->57": 3
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 4,
+      "directions": {
+       "21->4": 4
+      }
+     },
+     {
+      "nodes": [
+       29,
+       53
+      ],
+      "count": 4,
+      "directions": {
+       "29->53": 4
+      }
+     },
+     {
+      "nodes": [
+       43,
+       50
+      ],
+      "count": 4,
+      "directions": {
+       "43->50": 2,
+       "50->43": 2
+      }
+     },
+     {
+      "nodes": [
+       20,
+       31
+      ],
+      "count": 4,
+      "directions": {
+       "20->31": 3,
+       "31->20": 1
+      }
+     },
+     {
+      "nodes": [
+       6,
+       36
+      ],
+      "count": 3,
+      "directions": {
+       "36->6": 3
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 3,
+      "directions": {
+       "64->65": 3
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 3,
+      "directions": {
+       "56->58": 2,
+       "58->56": 1
+      }
+     },
+     {
+      "nodes": [
+       5,
+       23
+      ],
+      "count": 3,
+      "directions": {
+       "5->23": 3
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp61_left",
+      "truth": 40,
+      "pred": 7,
+      "hop": 3,
+      "err_m": 12.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_left",
+      "truth": 50,
+      "pred": 4,
+      "hop": 3,
+      "err_m": 11.4,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp37_right",
+      "truth": 15,
+      "pred": 13,
+      "hop": 4,
+      "err_m": 10.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp73_back",
+      "truth": 21,
+      "pred": 44,
+      "hop": 3,
+      "err_m": 9.9,
+      "conf": 0.75,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp55_left",
+      "truth": 63,
+      "pred": 31,
+      "hop": 3,
+      "err_m": 9.8,
+      "conf": 0.85,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp57_right",
+      "truth": 44,
+      "pred": 21,
+      "hop": 3,
+      "err_m": 8.5,
+      "conf": 0.99,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp57_left",
+      "truth": 44,
+      "pred": 21,
+      "hop": 3,
+      "err_m": 8.5,
+      "conf": 0.93,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp21_front",
+      "truth": 55,
+      "pred": 58,
+      "hop": 3,
+      "err_m": 7.1,
+      "conf": 0.73,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp2_right",
+      "truth": 25,
+      "pred": 46,
+      "hop": 3,
+      "err_m": 5.2,
+      "conf": 0.96,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp4_right",
+      "truth": 37,
+      "pred": 41,
+      "hop": 5,
+      "err_m": 0.5,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp4_back",
+      "truth": 37,
+      "pred": 41,
+      "hop": 5,
+      "err_m": 0.5,
+      "conf": 0.65,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "prod+sim1": {
+   "metrics": {
+    "n": 1128,
+    "top1": 70.6,
+    "top5": 99.3,
+    "within_1_hop": 93.7,
+    "error_m": {
+     "mean": 1.89,
+     "median": 0.0
+    },
+    "estimated_xy_error_m": {
+     "mean": 1.82,
+     "median": 0.73
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 70.6,
+      "within_1_hop_when_confident": 93.7
+     },
+     ">=0.6": {
+      "coverage": 96.5,
+      "n": 1088,
+      "top1_when_confident": 71.2,
+      "within_1_hop_when_confident": 93.8
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 70.6
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 38.5,
+     "n_correct_node": 796,
+     "within_45deg_on_correct_node": 37.3
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 73.1,
+      "within_1_hop": 95.6
+     },
+     "between": {
+      "n": 348,
+      "top1": 64.9,
+      "within_1_hop": 89.4
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 70.6,
+      "any_top1": 98.9,
+      "most_confident_top1": 81.9,
+      "most_confident_within_1_hop": 94.7
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 73.1,
+      "any_top1": 98.5,
+      "most_confident_top1": 90.3,
+      "most_confident_within_1_hop": 97.9
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 64.9,
+      "any_top1": 100.0,
+      "most_confident_top1": 63.2,
+      "most_confident_within_1_hop": 87.4
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 332,
+    "kind": {
+     "neighbour (1 hop)": 261,
+     "far (≥3 hops)": 22,
+     "2 hops": 49
+    },
+    "truth_in_top5": 324,
+    "between_nodes": 122,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 18,
+      "directions": {
+       "57->61": 6,
+       "61->57": 12
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 14,
+      "directions": {
+       "44->50": 8,
+       "50->44": 6
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 13,
+      "directions": {
+       "1->4": 7,
+       "4->1": 6
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 11,
+      "directions": {
+       "21->30": 6,
+       "30->21": 5
+      }
+     },
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 10,
+      "directions": {
+       "30->40": 6,
+       "40->30": 4
+      }
+     },
+     {
+      "nodes": [
+       6,
+       36
+      ],
+      "count": 9,
+      "directions": {
+       "36->6": 9
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 8,
+      "directions": {
+       "38->42": 5,
+       "42->38": 3
+      }
+     },
+     {
+      "nodes": [
+       20,
+       31
+      ],
+      "count": 8,
+      "directions": {
+       "20->31": 8
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 7,
+      "directions": {
+       "21->4": 7
+      }
+     },
+     {
+      "nodes": [
+       47,
+       52
+      ],
+      "count": 7,
+      "directions": {
+       "52->47": 7
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp43_left",
+      "truth": 29,
+      "pred": 61,
+      "hop": 4,
+      "err_m": 10.7,
+      "conf": 0.89,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.9,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.94,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp24_back",
+      "truth": 43,
+      "pred": 42,
+      "hop": 3,
+      "err_m": 8.3,
+      "conf": 0.97,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp32_back",
+      "truth": 3,
+      "pred": 17,
+      "hop": 6,
+      "err_m": 8.0,
+      "conf": 0.87,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp31_right",
+      "truth": 51,
+      "pred": 3,
+      "hop": 8,
+      "err_m": 7.2,
+      "conf": 0.78,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp2_right",
+      "truth": 25,
+      "pred": 46,
+      "hop": 3,
+      "err_m": 5.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp2_right",
+      "truth": 25,
+      "pred": 46,
+      "hop": 3,
+      "err_m": 5.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "dino_only+sim1": {
+   "metrics": {
+    "n": 1128,
+    "top1": 73.0,
+    "top5": 99.6,
+    "within_1_hop": 92.8,
+    "error_m": {
+     "mean": 1.81,
+     "median": 0.0
+    },
+    "estimated_xy_error_m": {
+     "mean": 1.72,
+     "median": 0.5
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 73.0,
+      "within_1_hop_when_confident": 92.8
+     },
+     ">=0.6": {
+      "coverage": 95.3,
+      "n": 1075,
+      "top1_when_confident": 74.5,
+      "within_1_hop_when_confident": 93.1
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 73.0
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 38.1,
+     "n_correct_node": 823,
+     "within_45deg_on_correct_node": 36.7
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 75.9,
+      "within_1_hop": 94.6
+     },
+     "between": {
+      "n": 348,
+      "top1": 66.4,
+      "within_1_hop": 88.8
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 73.0,
+      "any_top1": 98.6,
+      "most_confident_top1": 80.5,
+      "most_confident_within_1_hop": 93.3
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 75.9,
+      "any_top1": 98.5,
+      "most_confident_top1": 87.7,
+      "most_confident_within_1_hop": 96.4
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 66.4,
+      "any_top1": 98.9,
+      "most_confident_top1": 64.4,
+      "most_confident_within_1_hop": 86.2
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 305,
+    "kind": {
+     "far (≥3 hops)": 28,
+     "neighbour (1 hop)": 224,
+     "2 hops": 53
+    },
+    "truth_in_top5": 301,
+    "between_nodes": 117,
+    "occluded": 4,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 18,
+      "directions": {
+       "57->61": 6,
+       "61->57": 12
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 14,
+      "directions": {
+       "21->30": 2,
+       "30->21": 12
+      }
+     },
+     {
+      "nodes": [
+       6,
+       36
+      ],
+      "count": 8,
+      "directions": {
+       "36->6": 8
+      }
+     },
+     {
+      "nodes": [
+       20,
+       31
+      ],
+      "count": 8,
+      "directions": {
+       "20->31": 8
+      }
+     },
+     {
+      "nodes": [
+       25,
+       37
+      ],
+      "count": 7,
+      "directions": {
+       "25->37": 7
+      }
+     },
+     {
+      "nodes": [
+       5,
+       23
+      ],
+      "count": 7,
+      "directions": {
+       "5->23": 6,
+       "23->5": 1
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 7,
+      "directions": {
+       "21->4": 7
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 7,
+      "directions": {
+       "38->42": 3,
+       "42->38": 4
+      }
+     },
+     {
+      "nodes": [
+       48,
+       57
+      ],
+      "count": 7,
+      "directions": {
+       "48->57": 4,
+       "57->48": 3
+      }
+     },
+     {
+      "nodes": [
+       47,
+       52
+      ],
+      "count": 7,
+      "directions": {
+       "52->47": 7
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp55_left",
+      "truth": 63,
+      "pred": 53,
+      "hop": 3,
+      "err_m": 11.8,
+      "conf": 0.93,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp43_left",
+      "truth": 29,
+      "pred": 61,
+      "hop": 4,
+      "err_m": 10.7,
+      "conf": 0.89,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.9,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_right",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 0.94,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp37_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 8.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp32_back",
+      "truth": 3,
+      "pred": 17,
+      "hop": 6,
+      "err_m": 8.0,
+      "conf": 0.87,
+      "condition": "at_node"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_back",
+      "truth": 56,
+      "pred": 13,
+      "hop": 3,
+      "err_m": 7.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp31_right",
+      "truth": 51,
+      "pred": 3,
+      "hop": 8,
+      "err_m": 7.2,
+      "conf": 0.78,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp3_left",
+      "truth": 25,
+      "pred": 27,
+      "hop": 5,
+      "err_m": 5.3,
+      "conf": 0.44,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp3_left",
+      "truth": 25,
+      "pred": 27,
+      "hop": 5,
+      "err_m": 5.3,
+      "conf": 0.52,
+      "condition": "at_node"
+     }
+    ]
+   }
+  },
+  "prod+sim2": {
+   "metrics": {
+    "n": 1128,
+    "top1": 57.3,
+    "top5": 93.1,
+    "within_1_hop": 82.9,
+    "error_m": {
+     "mean": 2.81,
+     "median": 2.4
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.72,
+     "median": 2.02
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 57.3,
+      "within_1_hop_when_confident": 82.9
+     },
+     ">=0.6": {
+      "coverage": 94.7,
+      "n": 1068,
+      "top1_when_confident": 58.1,
+      "within_1_hop_when_confident": 83.2
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 57.3
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 38.1,
+     "n_correct_node": 646,
+     "within_45deg_on_correct_node": 38.9
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 60.5,
+      "within_1_hop": 87.6
+     },
+     "between": {
+      "n": 348,
+      "top1": 50.0,
+      "within_1_hop": 72.4
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 57.3,
+      "any_top1": 98.2,
+      "most_confident_top1": 68.4,
+      "most_confident_within_1_hop": 85.5
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 60.5,
+      "any_top1": 97.9,
+      "most_confident_top1": 77.4,
+      "most_confident_within_1_hop": 90.8
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 50.0,
+      "any_top1": 98.9,
+      "most_confident_top1": 48.3,
+      "most_confident_within_1_hop": 73.6
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 482,
+    "kind": {
+     "neighbour (1 hop)": 289,
+     "2 hops": 116,
+     "far (≥3 hops)": 77
+    },
+    "truth_in_top5": 404,
+    "between_nodes": 174,
+    "occluded": 6,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 17,
+      "directions": {
+       "57->61": 6,
+       "61->57": 11
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 13,
+      "directions": {
+       "21->30": 7,
+       "30->21": 6
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 13,
+      "directions": {
+       "21->4": 13
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 12,
+      "directions": {
+       "1->4": 6,
+       "4->1": 6
+      }
+     },
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 11,
+      "directions": {
+       "30->40": 6,
+       "40->30": 5
+      }
+     },
+     {
+      "nodes": [
+       4,
+       40
+      ],
+      "count": 11,
+      "directions": {
+       "40->4": 11
+      }
+     },
+     {
+      "nodes": [
+       38,
+       42
+      ],
+      "count": 9,
+      "directions": {
+       "38->42": 6,
+       "42->38": 3
+      }
+     },
+     {
+      "nodes": [
+       43,
+       44
+      ],
+      "count": 9,
+      "directions": {
+       "43->44": 3,
+       "44->43": 6
+      }
+     },
+     {
+      "nodes": [
+       11,
+       26
+      ],
+      "count": 8,
+      "directions": {
+       "11->26": 6,
+       "26->11": 2
+      }
+     },
+     {
+      "nodes": [
+       48,
+       57
+      ],
+      "count": 8,
+      "directions": {
+       "48->57": 5,
+       "57->48": 3
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "2/wp58_right",
+      "truth": 16,
+      "pred": 54,
+      "hop": 6,
+      "err_m": 20.3,
+      "conf": 0.89,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp58_right",
+      "truth": 16,
+      "pred": 54,
+      "hop": 6,
+      "err_m": 20.3,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp16_left",
+      "truth": 49,
+      "pred": 4,
+      "hop": 5,
+      "err_m": 17.4,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp26_right",
+      "truth": 50,
+      "pred": 25,
+      "hop": 8,
+      "err_m": 16.1,
+      "conf": 0.94,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp49_right",
+      "truth": 50,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.8,
+      "conf": 0.97,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp22_left",
+      "truth": 5,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.6,
+      "conf": 0.89,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp24_front",
+      "truth": 43,
+      "pred": 30,
+      "hop": 4,
+      "err_m": 14.4,
+      "conf": 0.6,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp16_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 4,
+      "err_m": 14.1,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp14_back",
+      "truth": 49,
+      "pred": 40,
+      "hop": 4,
+      "err_m": 13.7,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp16_left",
+      "truth": 49,
+      "pred": 14,
+      "hop": 10,
+      "err_m": 13.6,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 55,
+      "hop": 4,
+      "err_m": 13.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp31_right",
+      "truth": 51,
+      "pred": 41,
+      "hop": 5,
+      "err_m": 13.2,
+      "conf": 0.57,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp10_left",
+      "truth": 19,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 12.8,
+      "conf": 0.94,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_left",
+      "truth": 50,
+      "pred": 64,
+      "hop": 10,
+      "err_m": 12.6,
+      "conf": 0.92,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp28_left",
+      "truth": 50,
+      "pred": 64,
+      "hop": 10,
+      "err_m": 12.6,
+      "conf": 0.99,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "dino_only+sim2": {
+   "metrics": {
+    "n": 1128,
+    "top1": 57.4,
+    "top5": 92.3,
+    "within_1_hop": 81.7,
+    "error_m": {
+     "mean": 2.75,
+     "median": 2.25
+    },
+    "estimated_xy_error_m": {
+     "mean": 2.66,
+     "median": 1.99
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 99.9,
+      "n": 1127,
+      "top1_when_confident": 57.4,
+      "within_1_hop_when_confident": 81.7
+     },
+     ">=0.6": {
+      "coverage": 92.9,
+      "n": 1048,
+      "top1_when_confident": 58.6,
+      "within_1_hop_when_confident": 82.3
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 57.4
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 37.4,
+     "n_correct_node": 647,
+     "within_45deg_on_correct_node": 38.0
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 61.5,
+      "within_1_hop": 86.5
+     },
+     "between": {
+      "n": 348,
+      "top1": 48.0,
+      "within_1_hop": 71.0
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 57.4,
+      "any_top1": 96.5,
+      "most_confident_top1": 69.1,
+      "most_confident_within_1_hop": 83.0
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 61.5,
+      "any_top1": 95.9,
+      "most_confident_top1": 83.6,
+      "most_confident_within_1_hop": 92.3
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 48.0,
+      "any_top1": 97.7,
+      "most_confident_top1": 36.8,
+      "most_confident_within_1_hop": 62.1
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 481,
+    "kind": {
+     "neighbour (1 hop)": 275,
+     "far (≥3 hops)": 77,
+     "2 hops": 129
+    },
+    "truth_in_top5": 394,
+    "between_nodes": 181,
+    "occluded": 6,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 16,
+      "directions": {
+       "21->30": 5,
+       "30->21": 11
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 13,
+      "directions": {
+       "57->61": 6,
+       "61->57": 7
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 12,
+      "directions": {
+       "21->4": 12
+      }
+     },
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 11,
+      "directions": {
+       "30->40": 3,
+       "40->30": 8
+      }
+     },
+     {
+      "nodes": [
+       11,
+       26
+      ],
+      "count": 8,
+      "directions": {
+       "11->26": 6,
+       "26->11": 2
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 8,
+      "directions": {
+       "44->50": 3,
+       "50->44": 5
+      }
+     },
+     {
+      "nodes": [
+       4,
+       40
+      ],
+      "count": 8,
+      "directions": {
+       "40->4": 8
+      }
+     },
+     {
+      "nodes": [
+       48,
+       57
+      ],
+      "count": 8,
+      "directions": {
+       "48->57": 3,
+       "57->48": 5
+      }
+     },
+     {
+      "nodes": [
+       20,
+       31
+      ],
+      "count": 8,
+      "directions": {
+       "20->31": 6,
+       "31->20": 2
+      }
+     },
+     {
+      "nodes": [
+       25,
+       37
+      ],
+      "count": 7,
+      "directions": {
+       "25->37": 7
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "2/wp58_right",
+      "truth": 16,
+      "pred": 54,
+      "hop": 6,
+      "err_m": 20.3,
+      "conf": 0.89,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp58_right",
+      "truth": 16,
+      "pred": 54,
+      "hop": 6,
+      "err_m": 20.3,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp16_left",
+      "truth": 49,
+      "pred": 4,
+      "hop": 5,
+      "err_m": 17.4,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp49_right",
+      "truth": 50,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.8,
+      "conf": 0.97,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp22_left",
+      "truth": 5,
+      "pred": 4,
+      "hop": 4,
+      "err_m": 14.6,
+      "conf": 0.93,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp16_left",
+      "truth": 49,
+      "pred": 61,
+      "hop": 4,
+      "err_m": 14.1,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp14_back",
+      "truth": 49,
+      "pred": 40,
+      "hop": 4,
+      "err_m": 13.7,
+      "conf": 0.99,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp16_left",
+      "truth": 49,
+      "pred": 14,
+      "hop": 10,
+      "err_m": 13.6,
+      "conf": 0.97,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 55,
+      "hop": 4,
+      "err_m": 13.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp31_right",
+      "truth": 51,
+      "pred": 41,
+      "hop": 5,
+      "err_m": 13.2,
+      "conf": 0.57,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp10_left",
+      "truth": 19,
+      "pred": 61,
+      "hop": 3,
+      "err_m": 12.8,
+      "conf": 0.94,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp26_left",
+      "truth": 50,
+      "pred": 45,
+      "hop": 3,
+      "err_m": 12.6,
+      "conf": 0.98,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 57,
+      "hop": 3,
+      "err_m": 12.5,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 57,
+      "hop": 3,
+      "err_m": 12.5,
+      "conf": 0.78,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp61_left",
+      "truth": 40,
+      "pred": 7,
+      "hop": 3,
+      "err_m": 12.4,
+      "conf": 1.0,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "prod+sim4": {
+   "metrics": {
+    "n": 1128,
+    "top1": 47.7,
+    "top5": 80.0,
+    "within_1_hop": 71.5,
+    "error_m": {
+     "mean": 4.57,
+     "median": 3.0
+    },
+    "estimated_xy_error_m": {
+     "mean": 4.42,
+     "median": 2.97
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 47.7,
+      "within_1_hop_when_confident": 71.5
+     },
+     ">=0.6": {
+      "coverage": 95.3,
+      "n": 1075,
+      "top1_when_confident": 48.6,
+      "within_1_hop_when_confident": 72.5
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 47.9
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 39.0,
+     "n_correct_node": 538,
+     "within_45deg_on_correct_node": 40.0
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 52.1,
+      "within_1_hop": 77.7
+     },
+     "between": {
+      "n": 348,
+      "top1": 37.9,
+      "within_1_hop": 57.5
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 47.7,
+      "any_top1": 95.0,
+      "most_confident_top1": 55.7,
+      "most_confident_within_1_hop": 72.0
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 52.1,
+      "any_top1": 96.4,
+      "most_confident_top1": 65.1,
+      "most_confident_within_1_hop": 79.0
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 37.9,
+      "any_top1": 92.0,
+      "most_confident_top1": 34.5,
+      "most_confident_within_1_hop": 56.3
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 590,
+    "kind": {
+     "neighbour (1 hop)": 268,
+     "far (≥3 hops)": 182,
+     "2 hops": 140
+    },
+    "truth_in_top5": 364,
+    "between_nodes": 216,
+    "occluded": 9,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 15,
+      "directions": {
+       "30->40": 6,
+       "40->30": 9
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 15,
+      "directions": {
+       "57->61": 6,
+       "61->57": 9
+      }
+     },
+     {
+      "nodes": [
+       4,
+       40
+      ],
+      "count": 14,
+      "directions": {
+       "40->4": 14
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 13,
+      "directions": {
+       "21->4": 13
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 12,
+      "directions": {
+       "1->4": 6,
+       "4->1": 6
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 12,
+      "directions": {
+       "21->30": 6,
+       "30->21": 6
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 9,
+      "directions": {
+       "64->65": 9
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 9,
+      "directions": {
+       "56->58": 6,
+       "58->56": 3
+      }
+     },
+     {
+      "nodes": [
+       43,
+       44
+      ],
+      "count": 9,
+      "directions": {
+       "43->44": 3,
+       "44->43": 6
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 7,
+      "directions": {
+       "26->6": 7
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 0.98,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.56,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.92,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.98,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "dino_only+sim4": {
+   "metrics": {
+    "n": 1128,
+    "top1": 45.9,
+    "top5": 78.8,
+    "within_1_hop": 68.7,
+    "error_m": {
+     "mean": 4.55,
+     "median": 3.1
+    },
+    "estimated_xy_error_m": {
+     "mean": 4.33,
+     "median": 2.94
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 99.9,
+      "n": 1127,
+      "top1_when_confident": 45.9,
+      "within_1_hop_when_confident": 68.7
+     },
+     ">=0.6": {
+      "coverage": 93.6,
+      "n": 1056,
+      "top1_when_confident": 47.1,
+      "within_1_hop_when_confident": 69.6
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 46.1
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 36.6,
+     "n_correct_node": 518,
+     "within_45deg_on_correct_node": 39.4
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 50.9,
+      "within_1_hop": 75.0
+     },
+     "between": {
+      "n": 348,
+      "top1": 34.8,
+      "within_1_hop": 54.6
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 45.9,
+      "any_top1": 90.8,
+      "most_confident_top1": 60.6,
+      "most_confident_within_1_hop": 73.0
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 50.9,
+      "any_top1": 91.3,
+      "most_confident_top1": 74.4,
+      "most_confident_within_1_hop": 83.1
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 34.8,
+      "any_top1": 89.7,
+      "most_confident_top1": 29.9,
+      "most_confident_within_1_hop": 50.6
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 610,
+    "kind": {
+     "far (≥3 hops)": 201,
+     "neighbour (1 hop)": 257,
+     "2 hops": 152
+    },
+    "truth_in_top5": 371,
+    "between_nodes": 227,
+    "occluded": 9,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 18,
+      "directions": {
+       "21->30": 6,
+       "30->21": 12
+      }
+     },
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 12,
+      "directions": {
+       "30->40": 5,
+       "40->30": 7
+      }
+     },
+     {
+      "nodes": [
+       4,
+       40
+      ],
+      "count": 12,
+      "directions": {
+       "40->4": 12
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 12,
+      "directions": {
+       "57->61": 6,
+       "61->57": 6
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 10,
+      "directions": {
+       "21->4": 10
+      }
+     },
+     {
+      "nodes": [
+       25,
+       37
+      ],
+      "count": 9,
+      "directions": {
+       "25->37": 9
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 9,
+      "directions": {
+       "64->65": 9
+      }
+     },
+     {
+      "nodes": [
+       4,
+       50
+      ],
+      "count": 9,
+      "directions": {
+       "50->4": 9
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 9,
+      "directions": {
+       "44->50": 4,
+       "50->44": 5
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 8,
+      "directions": {
+       "56->58": 6,
+       "58->56": 2
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 0.96,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.56,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 8,
+      "err_m": 26.2,
+      "conf": 0.99,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.92,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "1/wp43_left",
+      "truth": 56,
+      "pred": 37,
+      "hop": 12,
+      "err_m": 25.6,
+      "conf": 0.98,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 0.91,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp31_right",
+      "truth": 48,
+      "pred": 32,
+      "hop": 8,
+      "err_m": 25.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp73_left",
+      "truth": 21,
+      "pred": 57,
+      "hop": 8,
+      "err_m": 25.2,
+      "conf": 0.88,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "prod+sim8": {
+   "metrics": {
+    "n": 1128,
+    "top1": 45.1,
+    "top5": 76.8,
+    "within_1_hop": 68.5,
+    "error_m": {
+     "mean": 5.28,
+     "median": 3.2
+    },
+    "estimated_xy_error_m": {
+     "mean": 5.18,
+     "median": 3.2
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 45.1,
+      "within_1_hop_when_confident": 68.5
+     },
+     ">=0.6": {
+      "coverage": 96.3,
+      "n": 1086,
+      "top1_when_confident": 45.6,
+      "within_1_hop_when_confident": 68.9
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 45.4
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 38.0,
+     "n_correct_node": 509,
+     "within_45deg_on_correct_node": 40.1
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 50.3,
+      "within_1_hop": 75.4
+     },
+     "between": {
+      "n": 348,
+      "top1": 33.6,
+      "within_1_hop": 53.2
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 45.1,
+      "any_top1": 92.9,
+      "most_confident_top1": 56.0,
+      "most_confident_within_1_hop": 69.1
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 50.3,
+      "any_top1": 95.9,
+      "most_confident_top1": 64.1,
+      "most_confident_within_1_hop": 76.4
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 33.6,
+      "any_top1": 86.2,
+      "most_confident_top1": 37.9,
+      "most_confident_within_1_hop": 52.9
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 619,
+    "kind": {
+     "neighbour (1 hop)": 264,
+     "far (≥3 hops)": 223,
+     "2 hops": 132
+    },
+    "truth_in_top5": 357,
+    "between_nodes": 231,
+    "occluded": 10,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 15,
+      "directions": {
+       "57->61": 6,
+       "61->57": 9
+      }
+     },
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 12,
+      "directions": {
+       "30->40": 6,
+       "40->30": 6
+      }
+     },
+     {
+      "nodes": [
+       4,
+       40
+      ],
+      "count": 12,
+      "directions": {
+       "40->4": 12
+      }
+     },
+     {
+      "nodes": [
+       1,
+       4
+      ],
+      "count": 12,
+      "directions": {
+       "1->4": 6,
+       "4->1": 6
+      }
+     },
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 12,
+      "directions": {
+       "21->30": 6,
+       "30->21": 6
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 12,
+      "directions": {
+       "21->4": 12
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 9,
+      "directions": {
+       "64->65": 9
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 9,
+      "directions": {
+       "56->58": 6,
+       "58->56": 3
+      }
+     },
+     {
+      "nodes": [
+       43,
+       44
+      ],
+      "count": 9,
+      "directions": {
+       "43->44": 3,
+       "44->43": 6
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 8,
+      "directions": {
+       "26->6": 8
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 32,
+      "hop": 12,
+      "err_m": 38.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_left",
+      "truth": 18,
+      "pred": 21,
+      "hop": 11,
+      "err_m": 36.4,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     }
+    ]
+   }
+  },
+  "dino_only+sim8": {
+   "metrics": {
+    "n": 1128,
+    "top1": 42.7,
+    "top5": 74.6,
+    "within_1_hop": 64.8,
+    "error_m": {
+     "mean": 5.64,
+     "median": 3.62
+    },
+    "estimated_xy_error_m": {
+     "mean": 5.42,
+     "median": 3.49
+    },
+    "photos_with_signal": 100.0,
+    "confidence": {
+     ">=0.3": {
+      "coverage": 100.0,
+      "n": 1128,
+      "top1_when_confident": 42.7,
+      "within_1_hop_when_confident": 64.8
+     },
+     ">=0.6": {
+      "coverage": 94.9,
+      "n": 1070,
+      "top1_when_confident": 43.8,
+      "within_1_hop_when_confident": 66.2
+     }
+    },
+    "production_gate": {
+     "rejected_quality": 0,
+     "rejected_occlusion": 12,
+     "below_threshold": 0,
+     "answered": 1116,
+     "coverage": 98.9,
+     "top1_of_answered": 43.0
+    },
+    "heading": {
+     "labelled": 1128,
+     "with_prediction": 1128,
+     "within_45deg": 36.1,
+     "n_correct_node": 482,
+     "within_45deg_on_correct_node": 41.5
+    },
+    "by_condition": {
+     "at_node": {
+      "n": 780,
+      "top1": 48.5,
+      "within_1_hop": 71.9
+     },
+     "between": {
+      "n": 348,
+      "top1": 29.9,
+      "within_1_hop": 48.9
+     }
+    },
+    "per_point": {
+     "all": {
+      "points": 94,
+      "mean_top1": 42.7,
+      "any_top1": 86.9,
+      "most_confident_top1": 57.4,
+      "most_confident_within_1_hop": 69.9
+     },
+     "at_node": {
+      "points": 65,
+      "mean_top1": 48.5,
+      "any_top1": 90.8,
+      "most_confident_top1": 71.8,
+      "most_confident_within_1_hop": 80.5
+     },
+     "between": {
+      "points": 29,
+      "mean_top1": 29.9,
+      "any_top1": 78.2,
+      "most_confident_top1": 25.3,
+      "most_confident_within_1_hop": 46.0
+     }
+    }
+   },
+   "failures": {
+    "n_wrong": 646,
+    "kind": {
+     "far (≥3 hops)": 267,
+     "neighbour (1 hop)": 249,
+     "2 hops": 130
+    },
+    "truth_in_top5": 360,
+    "between_nodes": 244,
+    "occluded": 10,
+    "low_quality": 0,
+    "confused_pairs": [
+     {
+      "nodes": [
+       21,
+       30
+      ],
+      "count": 16,
+      "directions": {
+       "21->30": 6,
+       "30->21": 10
+      }
+     },
+     {
+      "nodes": [
+       44,
+       50
+      ],
+      "count": 10,
+      "directions": {
+       "44->50": 6,
+       "50->44": 4
+      }
+     },
+     {
+      "nodes": [
+       4,
+       21
+      ],
+      "count": 10,
+      "directions": {
+       "21->4": 10
+      }
+     },
+     {
+      "nodes": [
+       25,
+       37
+      ],
+      "count": 9,
+      "directions": {
+       "25->37": 9
+      }
+     },
+     {
+      "nodes": [
+       64,
+       65
+      ],
+      "count": 9,
+      "directions": {
+       "64->65": 9
+      }
+     },
+     {
+      "nodes": [
+       56,
+       58
+      ],
+      "count": 9,
+      "directions": {
+       "56->58": 6,
+       "58->56": 3
+      }
+     },
+     {
+      "nodes": [
+       4,
+       50
+      ],
+      "count": 9,
+      "directions": {
+       "50->4": 9
+      }
+     },
+     {
+      "nodes": [
+       57,
+       61
+      ],
+      "count": 9,
+      "directions": {
+       "57->61": 3,
+       "61->57": 6
+      }
+     },
+     {
+      "nodes": [
+       6,
+       26
+      ],
+      "count": 8,
+      "directions": {
+       "26->6": 8
+      }
+     },
+     {
+      "nodes": [
+       30,
+       40
+      ],
+      "count": 7,
+      "directions": {
+       "30->40": 3,
+       "40->30": 4
+      }
+     }
+    ],
+    "far_errors": [
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 16,
+      "hop": 12,
+      "err_m": 38.7,
+      "conf": 0.92,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 16,
+      "hop": 12,
+      "err_m": 38.7,
+      "conf": 0.9,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp25_right",
+      "truth": 18,
+      "pred": 16,
+      "hop": 12,
+      "err_m": 38.7,
+      "conf": 0.97,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp60_left",
+      "truth": 32,
+      "pred": 60,
+      "hop": 12,
+      "err_m": 36.5,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp60_left",
+      "truth": 32,
+      "pred": 60,
+      "hop": 12,
+      "err_m": 36.5,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp46_left",
+      "truth": 4,
+      "pred": 60,
+      "hop": 10,
+      "err_m": 33.5,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 40,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.51,
+      "condition": "between"
+     },
+     {
+      "id": "2/wp40_right",
+      "truth": 40,
+      "pred": 60,
+      "hop": 9,
+      "err_m": 30.3,
+      "conf": 0.77,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp23_back",
+      "truth": 18,
+      "pred": 51,
+      "hop": 9,
+      "err_m": 29.2,
+      "conf": 1.0,
+      "condition": "at_node"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     },
+     {
+      "id": "3/wp7_right",
+      "truth": 42,
+      "pred": 16,
+      "hop": 10,
+      "err_m": 27.9,
+      "conf": 1.0,
+      "condition": "between"
+     }
+    ]
+   }
+  }
+ },
+ "grid": {
+  "prod": {
+   "at_node": {
+    "none": {
+     "n": 260,
+     "top1": 50.0,
+     "within_1_hop": 75.0,
+     "error_m_median": 0.25,
+     "estimated_xy_error_m_median": 2.3
+    },
+    "replay": {
+     "n": 260,
+     "top1": 62.3,
+     "within_1_hop": 92.7,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.02
+    },
+    "sim1": {
+     "n": 780,
+     "top1": 73.1,
+     "within_1_hop": 95.6,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.0
+    },
+    "sim2": {
+     "n": 780,
+     "top1": 60.5,
+     "within_1_hop": 87.6,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.27
+    },
+    "sim4": {
+     "n": 780,
+     "top1": 52.1,
+     "within_1_hop": 77.7,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.91
+    },
+    "sim8": {
+     "n": 780,
+     "top1": 50.3,
+     "within_1_hop": 75.4,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 1.2
+    }
+   },
+   "between": {
+    "none": {
+     "n": 116,
+     "top1": 32.8,
+     "within_1_hop": 50.0,
+     "error_m_median": 6.31,
+     "estimated_xy_error_m_median": 5.8
+    },
+    "replay": {
+     "n": 116,
+     "top1": 59.5,
+     "within_1_hop": 82.8,
+     "error_m_median": 4.95,
+     "estimated_xy_error_m_median": 4.24
+    },
+    "sim1": {
+     "n": 348,
+     "top1": 64.9,
+     "within_1_hop": 89.4,
+     "error_m_median": 4.9,
+     "estimated_xy_error_m_median": 4.24
+    },
+    "sim2": {
+     "n": 348,
+     "top1": 50.0,
+     "within_1_hop": 72.4,
+     "error_m_median": 5.0,
+     "estimated_xy_error_m_median": 4.9
+    },
+    "sim4": {
+     "n": 348,
+     "top1": 37.9,
+     "within_1_hop": 57.5,
+     "error_m_median": 5.08,
+     "estimated_xy_error_m_median": 5.08
+    },
+    "sim8": {
+     "n": 348,
+     "top1": 33.6,
+     "within_1_hop": 53.2,
+     "error_m_median": 5.74,
+     "estimated_xy_error_m_median": 5.73
+    }
+   }
+  },
+  "dino_only": {
+   "at_node": {
+    "none": {
+     "n": 260,
+     "top1": 47.3,
+     "within_1_hop": 70.4,
+     "error_m_median": 1.3,
+     "estimated_xy_error_m_median": 2.66
+    },
+    "replay": {
+     "n": 260,
+     "top1": 62.7,
+     "within_1_hop": 92.3,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.04
+    },
+    "sim1": {
+     "n": 780,
+     "top1": 75.9,
+     "within_1_hop": 94.6,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.0
+    },
+    "sim2": {
+     "n": 780,
+     "top1": 61.5,
+     "within_1_hop": 86.5,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 0.29
+    },
+    "sim4": {
+     "n": 780,
+     "top1": 50.9,
+     "within_1_hop": 75.0,
+     "error_m_median": 0.0,
+     "estimated_xy_error_m_median": 1.07
+    },
+    "sim8": {
+     "n": 780,
+     "top1": 48.5,
+     "within_1_hop": 71.9,
+     "error_m_median": 1.2,
+     "estimated_xy_error_m_median": 1.71
+    }
+   },
+   "between": {
+    "none": {
+     "n": 116,
+     "top1": 27.6,
+     "within_1_hop": 45.7,
+     "error_m_median": 7.3,
+     "estimated_xy_error_m_median": 6.27
+    },
+    "replay": {
+     "n": 116,
+     "top1": 55.2,
+     "within_1_hop": 79.3,
+     "error_m_median": 5.0,
+     "estimated_xy_error_m_median": 4.72
+    },
+    "sim1": {
+     "n": 348,
+     "top1": 66.4,
+     "within_1_hop": 88.8,
+     "error_m_median": 4.9,
+     "estimated_xy_error_m_median": 4.24
+    },
+    "sim2": {
+     "n": 348,
+     "top1": 48.0,
+     "within_1_hop": 71.0,
+     "error_m_median": 5.0,
+     "estimated_xy_error_m_median": 4.95
+    },
+    "sim4": {
+     "n": 348,
+     "top1": 34.8,
+     "within_1_hop": 54.6,
+     "error_m_median": 5.3,
+     "estimated_xy_error_m_median": 5.21
+    },
+    "sim8": {
+     "n": 348,
+     "top1": 29.9,
+     "within_1_hop": 48.9,
+     "error_m_median": 6.81,
+     "estimated_xy_error_m_median": 6.59
+    }
+   }
+  }
+ },
+ "paired": {
+  "prod vs prod+replay": {
+   "all": {
+    "both": 159,
+    "only_first": 9,
+    "only_second": 72,
+    "neither": 136
+   },
+   "at_node": {
+    "both": 123,
+    "only_first": 7,
+    "only_second": 39,
+    "neither": 91
+   },
+   "between": {
+    "both": 36,
+    "only_first": 2,
+    "only_second": 33,
+    "neither": 45
+   }
+  },
+  "dino_only vs dino_only+replay": {
+   "all": {
+    "both": 145,
+    "only_first": 10,
+    "only_second": 82,
+    "neither": 139
+   },
+   "at_node": {
+    "both": 115,
+    "only_first": 8,
+    "only_second": 48,
+    "neither": 89
+   },
+   "between": {
+    "both": 30,
+    "only_first": 2,
+    "only_second": 34,
+    "neither": 50
+   }
+  }
+ },
+ "notes": [
+  "感知＝伺服器模式 B（部署中的 .env：PERCEPTION_ENABLED=0、OCR_ENABLED=0）：三階段 VLM（gpt-5.4-mini），目標用中性的「定位」；每張照片只問一次並快取",
+  "答案＝拍照前設的點位標記（eval/data/lab1019_labels.csv）；中點在兩端任一節點都算對，誤差量到中點本身",
+  "+replay：手機 MapPositionEstimator 的 Python 版重播 Sensor Lab 的原始 PDR（入口對齊、每點拍完後用「正確位置」修正一次＝oracle），送出的 map_x/y、dist_since_fix、fix_node 和導航模式相同",
+  "朝向標註＝拍照當下 cal_yaw 經同一個估計器轉成地圖方向（入口面向賣場＝0°），是推算值",
+  "+simσ：手機位置＝真實位置＋σ 公尺的高斯誤差（每點 3 次平均），dist_since_fix 設成讓伺服器的 σ 等於該值，不給 fix_node",
+  "位置相同的兩個節點（9 和 24）互相算對"
+ ],
+ "detail_file": "image_only_lab1019_vlm_photos.jsonl"
+}

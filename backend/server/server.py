@@ -1,12 +1,14 @@
 """FastAPI app — endpoints for in-store navigation sessions."""
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -31,7 +33,7 @@ from server.config import (
     EDITOR_MAP_DIR,
     PERCEPTION_ENABLED, OCR_ENABLED, OCR_LANGUAGES,
     OCR_MIN_CONFIDENCE, OCR_MAX_RESULTS, ARRIVED_MIN_DETECTION_SCORE,
-    GOAL_CROP_VERIFY, GENERIC_INDOOR_OBJECTS, ensure_output_dir, OUTPUT_ROOT,
+    GOAL_CROP_VERIFY, GENERIC_INDOOR_OBJECTS, OCCLUDER_PROMPTS, ensure_output_dir, OUTPUT_ROOT,
     VLM_ROUNDS, VLM_PASS3, GRID_N,
 )
 import server.config as _config
@@ -42,9 +44,6 @@ from server.models import (
     AnswerRequest,
     ErrorResponse,
     ConfirmArrivalRequest,
-    ModifyRouteRequest,
-    PlanRouteRequest,
-    PlanRouteResponse,
     PathResponse,
     StartSessionRequest,
     StartSessionResponse,
@@ -56,6 +55,21 @@ from server.perception import Detection as PerceptionDetection, Perception, veri
 from server.ocr import OCRResult
 from server.session import SessionStore
 import re as _re
+
+
+# Debug images (the map PNG and the scene graph) are drawn after the reply instead of
+# before it — the scene graph alone grew to ~9 s per photo during a walk. One at a time:
+# matplotlib is not thread-safe.
+_RENDER_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
+
+
+def _render_later(fn, *args) -> None:
+    def run():
+        try:
+            fn(*args)
+        except Exception as e:
+            log.warning("background render failed: %s", e)
+    _RENDER_POOL.submit(run)
 
 
 def _has_cjk(text: str) -> bool:
@@ -97,8 +111,12 @@ from server.vlm import (
     perceive_and_decide as _vlm_perceive_and_decide,
     warm_up as _vlm_warm_up,
     ask_about_image as _vlm_ask_about_image,
+    localization_label as _vlm_localization_label,
 )
 from server.neo4j_client import get_neo4j
+from server import aisle_signs, photo_quality, session_log, start_points
+from server.loc_fusion import (adaptive_weights, dino_gap, parse_dino_topk, parse_image_k, parse_weights,
+                               sensor_sigma)
 from server.visual_localization import (
     localize as _localize_photo, vlm_rerank as _vlm_rerank,
     rerank_candidates as _rerank_candidates,
@@ -185,34 +203,116 @@ _USELESS_LANDMARK = frozenset({
     "柱子", "天花板", "地板", "白色地磚走道",
 })
 
-def _build_nav_graph(ref_map) -> "nx.Graph":
-    """Build a networkx graph from the reference map, auto-adding proximity edges."""
+def _route_nx_graph(place: Optional[str]):
+    """The one route graph — the mini-map's (_editor_graph_for: Neo4j walkways +
+    maps/neo4j_links) — as a weighted networkx graph for planning the visit order and
+    the legs, or None. It used to be a second graph that also joined every pair of nodes
+    within 6 m, which in A7 put 18 links straight through the shelves between aisles."""
     import networkx as _nx
-    import math as _m
-    g = _nx.Graph()
-    for nid in ref_map.photos:
-        g.add_node(nid)
-    for edge in ref_map.walkway_edges:
-        w = edge.get("distance_m", 1.0) or 1.0
-        g.add_edge(edge["from"], edge["to"], weight=w)
-    # Auto-connect nearby nodes that aren't already linked (< 6m)
-    nodes = list(ref_map.photos.items())
-    added = 0
-    for i in range(len(nodes)):
-        for j in range(i + 1, len(nodes)):
-            a_id, a = nodes[i]
-            b_id, b = nodes[j]
-            if g.has_edge(a_id, b_id):
-                continue
-            dx = a.pdr_x - b.pdr_x
-            dy = a.pdr_y - b.pdr_y
-            dist = _m.sqrt(dx * dx + dy * dy)
-            if dist < 6.0:
-                g.add_edge(a_id, b_id, weight=max(dist, 0.5))
-                added += 1
-    if added:
-        log.info("Auto-added %d proximity edges (< 6m)", added)
-    return g
+    g = _editor_graph_for(place)
+    if g is None:
+        return None
+    out = _nx.Graph()
+    out.add_nodes_from(g.graph.nodes)
+    for a, b, d in g.graph.edges(data=True):
+        out.add_edge(a, b, weight=d.get("length", 1.0))
+    return out
+
+
+# "Arrived" also needs the map to agree: the fused position or the photo's own best
+# match within this many route metres of the goal node. In the 2026-10-17 test the
+# noodle walk was "arrived" at node 52, ~20 m from the noodle aisle (node 40), after
+# the user answered an unsure-arrival question; the milk walk's fused position was off
+# (58) while the photo itself matched the milk fridge (16) — hence either one counts.
+ARRIVAL_NEAR_M = 6.0
+
+
+def _far_from_goal_question(s, matched_nid: Optional[int], where: Optional[str] = None) -> Optional[str]:
+    """None when an arrival is plausible on the map; otherwise the question to ask
+    instead ("App 認為你在…，離「牛奶」約 20 公尺…"). No map goal for this phase, or no
+    position at all, never blocks an arrival."""
+    import networkx as _nx
+    leg = _phase_leg(s)
+    g = _route_nx_graph(s.place) if leg is not None else None
+    if g is None or leg.to_node not in g:
+        return None
+    image_ev = (s.last_loc_log or {}).get("image_evidence") or {}
+    image_top = int(max(image_ev, key=image_ev.get)) if image_ev else None
+    dists = {}
+    for c in (matched_nid, image_top):
+        if c is not None and c in g and c not in dists:
+            try:
+                dists[c] = _nx.shortest_path_length(g, c, leg.to_node, weight="weight")
+            except _nx.NetworkXNoPath:
+                pass
+    if not dists or min(dists.values()) <= ARRIVAL_NEAR_M:
+        return None
+    if s.phase == "checkout":
+        item = "收銀台"
+    elif s.phase == "exit":
+        item = "出口"
+    else:
+        item = s.target_node_to_item.get(leg.to_node) or (s.target_objects or s.goal_objects or ["目標"])[0]
+    far = dists.get(matched_nid, min(dists.values()))
+    where = where or "目前的位置"
+    return f"App 認為你在{where}，離「{item}」還有約 {far:.0f} 公尺。你已經看到「{item}」了嗎？"
+
+
+_CONFIRM_NO = ("不是", "沒有", "沒看到", "不對", "不確定", "還沒", "繼續", "再找", "否", "no", "nope")
+_CONFIRM_YES = ("是", "對", "到了", "有", "看到", "找到", "yes", "ok", "好")
+
+
+def _confirm_answer(text: str) -> Optional[bool]:
+    """Yes / no to an arrival question; None when the reply is neither (it used to count
+    as yes — "在哪裡？" confirmed an arrival). "不是"/"沒有" are checked first since they
+    contain "是"/"有"."""
+    t = (text or "").strip().lower()
+    if any(k in t for k in _CONFIRM_NO):
+        return False
+    if any(k in t for k in _CONFIRM_YES):
+        return True
+    return None
+
+
+def _replan_from(s, start_nid: int) -> bool:
+    """Re-plan the rest of the walk from ``start_nid`` on the route graph: the targets not
+    yet visited, then checkout (unless already past it) and exit. False when it cannot."""
+    try:
+        from server.path_planner import plan_route as _plan_route
+        g = _route_nx_graph(s.place)
+        if g is None or start_nid not in g:
+            return False
+        remaining = [t for t in (s.target_nodes or []) if t not in (s.visited_targets or set())]
+        if s.phase == "shopping" and not remaining:
+            return False
+        route = _plan_route(
+            g, start_nid, remaining if s.phase == "shopping" else [],
+            checkout=getattr(s, "checkout_node", None) if s.phase in ("shopping", "checkout") else None,
+            exit_node=getattr(s, "exit_node", None),
+        )
+        if not route.legs:
+            return False
+        s.route_plan = route
+        s.current_leg_index = 0
+        return True
+    except Exception as e:
+        log.warning("[session %s] route re-plan failed: %s", s.id, e)
+        return False
+
+
+def _default_start_wp(place: Optional[str]) -> Optional[int]:
+    """Where the visit order is planned from before any photo or chosen start point: the
+    store's entrance, else its first start point, else the node nearest the origin —
+    never an arbitrary node (it used to be the lowest node id, mid-store in A7)."""
+    g = _editor_graph_for(place)
+    if g is None or not g.graph.number_of_nodes():
+        return None
+    if g.entrance == editor_map_mod.ENTRANCE_ID:
+        return g.entrance
+    starts = start_points.load_starts(place, EDITOR_MAP_DIR) if place else []
+    if starts:
+        return editor_map_mod.nearest_waypoint(g, starts[0]["x"], starts[0]["y"])
+    return g.entrance
 
 
 def _is_useless_name(name: str) -> bool:
@@ -510,12 +610,12 @@ def _infer_target_direction(matched_node, target_nid, ref_map,
                 current_nid = nid
                 break
         if current_nid is not None and hasattr(ref_map, 'walkway_edges'):
-            for edge in ref_map.walkway_edges:
-                neighbor_nid = None
-                if edge.get('from') == current_nid:
-                    neighbor_nid = edge['to']
-                elif edge.get('to') == current_nid:
-                    neighbor_nid = edge['from']
+            # each neighbour once, also when WALKWAY is stored both ways (a→b and b→a)
+            neighbor_nids = dict.fromkeys(
+                edge['to'] if edge.get('from') == current_nid else edge['from']
+                for edge in ref_map.walkway_edges
+                if current_nid in (edge.get('from'), edge.get('to')))
+            for neighbor_nid in neighbor_nids:
                 if neighbor_nid and neighbor_nid in ref_map.photos:
                     nb_scores, nb_landmarks = _score_node_slots(
                         ref_map.photos[neighbor_nid])
@@ -553,6 +653,42 @@ def _infer_target_direction(matched_node, target_nid, ref_map,
 PHONE_HEADING_CONFIDENCE = 0.85
 TURN_DIRECTION_MIN_HEADING_CONFIDENCE = 0.6
 LOCALIZE_FAILED_HINT = "這張照片對不到地圖上的位置，請換個角度、拍到走道標示牌或招牌再試一次"
+
+
+def _goal_node_score(objects, search_terms: list[str]) -> tuple[float, float]:
+    """How well a reference node's objects match a goal item, as a sortable (text, match) pair.
+
+    text  — summed over objects: text read off the photo (signs, shelf labels, packaging)
+            equal to a search term counts 1.0, containing one 0.8. The milk fridge with
+            「Milk」「Milk」「鮮乳」 beats a shelf where one drink reads 「milk」.
+    match — the old score, deciding ties on text: the best single object (text as above,
+            a detector label naming the item 0.7) plus 0.02 per matching object, up to 0.1.
+
+    Single-character text ("E", "D") is ignored: as a substring it "matches" almost any term.
+    """
+    terms = [t.lower() for t in search_terms]
+    text_sum = 0.0
+    best = 0.0
+    matches = 0
+    for obj in objects:
+        text_score = 0.0
+        label_score = 0.0
+        ocr = (obj.ocr_text or "").strip().lower()
+        label = obj.label.lower()
+        for term in terms:
+            if len(ocr) >= 2:
+                if term == ocr:
+                    text_score = max(text_score, 1.0)
+                elif term in ocr or ocr in term:
+                    text_score = max(text_score, 0.8)
+            if label and (term in label or label in term):
+                label_score = 0.7
+        obj_score = max(text_score, label_score)
+        if obj_score > 0:
+            matches += 1
+        text_sum += text_score
+        best = max(best, obj_score)
+    return round(text_sum, 4), best + min(matches * 0.02, 0.1)
 
 
 def _useful_area_name(area: str) -> Optional[str]:
@@ -612,7 +748,8 @@ def _path_from_current(ref_map, current_nid, leg_path: list[int], target_nid: in
 
 def _build_route_context(s, loc_result, detections=None,
                          img_w: int = 0, img_h: int = 0,
-                         ocr_results=None) -> tuple[str | None, str | None]:
+                         ocr_results=None,
+                         is_first_localization: bool = False) -> tuple[str | None, str | None]:
     """Build a route context string for the VLM prompt + a one-line next instruction.
 
     Returns (route_context_block, next_instruction).
@@ -681,37 +818,28 @@ def _build_route_context(s, loc_result, detections=None,
         if (localized and ref_map
                 and loc_result.confidence >= _replan_threshold
                 and loc_result.matched_nid not in current_leg.path):
-            try:
-                from server.path_planner import plan_route as _plan_route
-                _g = _build_nav_graph(ref_map)
-                if loc_result.matched_nid in _g:
-                    _remaining_targets = [t for t in (s.target_nodes or [])
-                                          if t not in (s.visited_targets or set())]
-                    if not _remaining_targets and current_leg.purpose == "target":
-                        _remaining_targets = [current_leg.to_node]
-                    new_route = _plan_route(
-                        _g, loc_result.matched_nid, _remaining_targets,
-                        checkout=getattr(s, "checkout_node", None),
-                        exit_node=getattr(s, "exit_node", None),
-                    )
-                    s.route_plan = new_route
-                    s.current_leg_index = 0
-                    leg_idx = 0
-                    current_leg = new_route.legs[0]
-                    log.info("🔄 [session %s] re-planned route from WP%d (was not on leg path %s)",
-                             s.id, loc_result.matched_nid, current_leg.path[:5])
-            except Exception as e:
-                log.warning("[session %s] route re-plan failed: %s", s.id, e)
+            if _replan_from(s, loc_result.matched_nid):
+                leg_idx = 0
+                current_leg = s.route_plan.legs[0]
+                log.info("🔄 [session %s] re-planned route from WP%d (was not on leg path %s)",
+                         s.id, loc_result.matched_nid, current_leg.path[:5])
+
+        # The node the user walks to now: the leg for the current phase, or none (a store
+        # without a detected checkout has no checkout leg — the last shopping leg must
+        # not stand in for it, or "地圖顯示您已在收銀台附近" shows up at the last item).
+        phase_leg = _phase_leg(s)
+        target_nid = phase_leg.to_node if phase_leg is not None else None
 
         # Friendly name for the target area — depends on current phase
         if s.phase == "checkout":
             target_area = "收銀台"
         elif s.phase == "exit":
             target_area = "出口"
+        elif target_nid is not None:
+            target_area = _node_area_name(target_nid, ref_map, goal_keywords=s.goal_objects)
         else:
-            target_area = _node_area_name(current_leg.to_node, ref_map,
-                                          goal_keywords=s.goal_objects)
-        at_target = localized and loc_result.matched_nid == current_leg.to_node
+            target_area = "目標區域"
+        at_target = localized and target_nid is not None and loc_result.matched_nid == target_nid
 
         # Which goal item is at this target? Phase first, then the product word
         # that the target node actually carries. ``target_objects`` is the split
@@ -722,15 +850,15 @@ def _build_route_context(s, loc_result, detections=None,
             goal_item = "收銀台"
         elif s.phase == "exit":
             goal_item = "出口"
-        elif current_leg.purpose in ("checkout", "exit"):
-            goal_item = "收銀台" if current_leg.purpose == "checkout" else "出口"
+        elif target_nid is not None and s.target_node_to_item.get(target_nid):
+            goal_item = s.target_node_to_item[target_nid]     # the item chosen for this node at session start
         else:
-            goal_item = current_leg.purpose
-            if goal_item == "target" and _targets:
+            goal_item = "target"
+            if _targets and target_nid is not None:
                 # Try to find which goal object maps to this target node
                 for g in _targets:
-                    if ref_map and current_leg.to_node in ref_map.photos:
-                        for obj in ref_map.photos[current_leg.to_node].objects:
+                    if ref_map and target_nid in ref_map.photos:
+                        for obj in ref_map.photos[target_nid].objects:
                             if (obj.ocr_text and g.lower() in obj.ocr_text.lower()) or \
                                g.lower() in obj.label.lower():
                                 goal_item = g
@@ -759,11 +887,11 @@ def _build_route_context(s, loc_result, detections=None,
                 f"重要：使用者的照片中已經可以看到目標相關物件（{obj_text}），"
                 f"位於畫面的「{photo_dir_zh}」。請直接引導使用者往那個方向走。\n"
             )
-        elif localized and loc_result.confidence >= 0.45:
+        elif localized and loc_result.confidence >= 0.45 and target_nid is not None:
             # --- Priority 2: infer from directional reference photos (needs reliable localization) ---
             matched_node = ref_map.photos.get(loc_result.matched_nid) if ref_map else None
             dir_zh, dir_slot, dir_landmarks = _infer_target_direction(
-                matched_node, current_leg.to_node, ref_map, loc_result.matched_slot,
+                matched_node, target_nid, ref_map, loc_result.matched_slot,
                 goal_keywords=goal_kws)
 
             if dir_zh:
@@ -788,11 +916,13 @@ def _build_route_context(s, loc_result, detections=None,
                     f"不要提供具體距離，也不要叫使用者自己去找標示。\n"
                 )
         else:
-            # Not localized — can't infer direction from map, but still guide toward target
+            # Not localized (or no map node for this phase's goal) — can't infer direction
+            # from the map, but still guide toward the target
             _clean_target = target_area.replace("「", "").replace("」", "")
             direction_hint = (
-                f"目前尚未精確定位，無法從地圖推斷方向。"
-                f"請根據照片中看得到的物件來引導使用者繼續前進。"
+                (f"目前尚未精確定位，無法從地圖推斷方向。" if not localized
+                 else f"地圖上沒有「{goal_item}」的確切位置，無法從地圖推斷方向。")
+                + f"請根據照片中看得到的物件來引導使用者繼續前進。"
                 f"目標「{goal_item}」在「{_clean_target}」區域。\n"
             )
 
@@ -806,10 +936,10 @@ def _build_route_context(s, loc_result, detections=None,
                             and loc_result.confidence >= 0.55)
         user_heading = loc_result.matched_heading if heading_reliable else None
 
-        # Steps are computed on the hand-corrected editor map when one exists —
-        # the same route the phone's PathFollower walks — so the 🗺 line and the
-        # VLM prompt agree with the mini-map. The Neo4j walkway graph (duplicate
-        # coordinates, a "路口" at every node) is only the fallback.
+        # Steps are computed on the route graph (_editor_graph_for: the Neo4j map +
+        # maps/neo4j_links, or the hand-corrected editor map) — the same route the
+        # phone's PathFollower walks — so the 🗺 line and the VLM prompt agree with
+        # the mini-map. The raw walkway-leg conversion below is only the fallback.
         steps_zh: list[str] = []      # for the VLM prompt: step + the area it leads to
         step_texts: list[str] = []    # for the app/TTS: the steps themselves
         next_zh: Optional[str] = None
@@ -819,28 +949,37 @@ def _build_route_context(s, loc_result, detections=None,
         # multi-step chain below must resume after exactly these, or a leg is lost.
         head_steps = 1
         editor = _editor_graph_for(s.place) if localized else None
+        editor_route_found = False
         if editor is not None:
             start_wp = editor.waypoint_for_neo(loc_result.matched_nid)
             if start_wp is None and ref_node is not None:
                 start_wp = editor_map_mod.nearest_waypoint(editor, ref_node.pdr_x, ref_node.pdr_y)
-            goal_wp = editor_map_mod.find_goal_waypoint(editor, goal_item)
+            # The session's leg first, as the mini-map's /path does, so the steps lead
+            # to the node the area name and the arrival check use (泡麵: 40, not the
+            # label search's 7); the label search only without a leg for this phase.
+            goal_wp = editor.waypoint_for_neo(target_nid) if target_nid is not None else None
             if goal_wp is None:
-                goal_wp = editor.waypoint_for_neo(current_leg.to_node)
-            if start_wp is not None and goal_wp is not None:
+                goal_wp = editor_map_mod.find_goal_waypoint(editor, goal_item)
+            path = (editor_map_mod.plan(editor, start_wp, goal_wp)
+                    if start_wp is not None and goal_wp is not None else [])
+            if path:   # unreachable on the route graph → the walkway-leg fallback below
+                editor_route_found = True
                 at_target = at_target or start_wp == goal_wp
-                route = editor_map_mod.route_payload(
-                    editor, editor_map_mod.plan(editor, start_wp, goal_wp), user_heading=user_heading)
+                route = editor_map_mod.route_payload(editor, path, user_heading=user_heading)
                 turns = route["turns"]
                 steps_zh = [t["text_zh"] for t in turns[:3]]
                 step_texts = [t["text_zh"] for t in turns]
                 next_zh = route.get("next_instruction_zh") or None
                 if len(turns) > 1 and turns[0]["direction"] == RelativeDirection.STRAIGHT:
                     head_steps = 2
-        elif heading_reliable:
+        if not editor_route_found and heading_reliable and phase_leg is not None:
             node_positions = {nid: (node.pdr_x, node.pdr_y) for nid, node in ref_map.photos.items()}
+            route_graph = _editor_graph_for(s.place)
+            if route_graph is not None:       # the virtual entrance is a waypoint too
+                node_positions.update({n: (d["x"], d["y"]) for n, d in route_graph.graph.nodes(data=True)})
             rel_instructions = convert_leg_to_relative(
                 _path_from_current(ref_map, loc_result.matched_nid,
-                                   current_leg.path, current_leg.to_node),
+                                   phase_leg.path, phase_leg.to_node),
                 node_positions,
                 loc_result.matched_heading,
                 distances=_walkway_distances(ref_map),
@@ -905,9 +1044,9 @@ def _build_route_context(s, loc_result, detections=None,
                 phase_status = f"還有 {len(remaining)} 項商品待尋找"
 
             area_steps = ""
-            if localized and ref_map and current_leg.path and len(current_leg.path) > 1:
+            if localized and ref_map and phase_leg is not None and len(phase_leg.path) > 1:
                 areas_on_route = []
-                for step_nid in current_leg.path[1:6]:
+                for step_nid in phase_leg.path[1:6]:
                     area = _node_area_name(step_nid, ref_map)
                     if area and area not in areas_on_route[-1:]:
                         areas_on_route.append(area)
@@ -943,11 +1082,30 @@ def _build_route_context(s, loc_result, detections=None,
     return context_block, next_instruction
 
 
+def _phase_leg(s):
+    """The route leg the user walks now — chosen when the session started — or None.
+
+    Only a leg serving the current phase counts: without a checkout node on the map
+    the plan has no checkout leg, and the checkout phase must not keep pointing at
+    the last shopping target.
+    """
+    if not (s.route_plan and getattr(s.route_plan, "legs", None)):
+        return None
+    leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
+    if leg.purpose == {"checkout": "checkout", "exit": "exit"}.get(s.phase, "target"):
+        return leg
+    # Checkout and exit at the same node (A7: node 25) plan as one leg labelled "exit"
+    if s.phase == "checkout" and leg.purpose == "exit" and leg.to_node == getattr(s, "checkout_node", None):
+        return leg
+    return None
+
+
 def _current_goal_node_id(s) -> int | None:
-    """Return the node the user should walk toward right now (for AR arrow)."""
+    """Return the node the user should walk toward right now (for AR arrow): the leg for
+    the current phase; None when the plan has none (e.g. no checkout node on the map)."""
     if s.route_plan and hasattr(s.route_plan, 'legs') and s.route_plan.legs:
-        leg_idx = min(s.current_leg_index, len(s.route_plan.legs) - 1)
-        return s.route_plan.legs[leg_idx].to_node
+        leg = _phase_leg(s)
+        return leg.to_node if leg is not None else None
     return s.goal_node
 
 
@@ -1019,6 +1177,8 @@ def _build_localization_items(detections, ocr_results, img_w, img_h):
     """
     items = []
     for d in detections:
+        if photo_quality.is_occluder(d.label):
+            continue   # people / carts move around — never part of the reference map
         box = getattr(d, 'box', None) or getattr(d, 'bbox', None)
         if box and len(box) == 4 and not isinstance(box[0], (list, tuple)):
             norm_box = [box[0] / img_w, box[1] / img_h,
@@ -1050,9 +1210,99 @@ def _build_ocr_items(ocr_results, img_w, img_h):
     return items
 
 
+def _finite(v) -> bool:
+    return v is not None and math.isfinite(v)
+
+
+def _phone_localization_inputs(dino_topk, dino_node_hint, map_x, map_y,
+                               dist_since_fix=None, fix_node=None) -> dict:
+    """The phone's own localization signals from the /photo form, for loc_fusion.
+    A position or distance that is not a finite number is dropped (NaN would poison
+    every node's score)."""
+    pos = (map_x, map_y) if _finite(map_x) and _finite(map_y) else None
+    if not (_finite(dist_since_fix) and dist_since_fix >= 0):
+        dist_since_fix = None
+    return {
+        "dino_sims": parse_dino_topk(dino_topk, dino_node_hint),
+        "sensor_pos": pos,
+        "dist_since_fix": dist_since_fix if pos is not None else None,
+        "fix_node": fix_node if pos is not None else None,
+    }
+
+
+def _reachable_nodes(ref_map, fix_node, dist_since_fix):
+    """Nodes walkable from the phone's last accepted fix within 1.5 × the distance
+    walked since + 8 m (walkway graph, so a node behind a shelf is far)."""
+    import heapq
+    if fix_node is None or dist_since_fix is None or fix_node not in ref_map.photos:
+        return None
+    limit = 1.5 * dist_since_fix + 8.0
+    # Walkway edges are stored one-way and sparsely (89 of 91 have no reverse link),
+    # so walk them both ways — as neighbourhood_nids and _build_nav_graph do.
+    adj: dict = {nid: set() for nid in ref_map.photos}
+    for a_nid, a_node in ref_map.photos.items():
+        for b_nid in a_node.neighbor_nids:
+            if b_nid in ref_map.photos:
+                adj[a_nid].add(b_nid)
+                adj[b_nid].add(a_nid)
+    best = {fix_node: 0.0}
+    heap = [(0.0, fix_node)]
+    while heap:
+        d, n = heapq.heappop(heap)
+        if d > best.get(n, float("inf")) or d > limit:
+            continue
+        a = ref_map.photos[n]
+        for m in adj[n]:
+            b = ref_map.photos[m]
+            nd = d + math.hypot(a.pdr_x - b.pdr_x, a.pdr_y - b.pdr_y)
+            if nd <= limit and nd < best.get(m, float("inf")):
+                best[m] = nd
+                heapq.heappush(heap, (nd, m))
+    return set(best)
+
+
+def _fusion_weights_for(dist_since_fix, n_objects, dino_sims=None):
+    """LOC_FUSION_WEIGHTS, adapted per photo (LOC_FUSION_ADAPTIVE): the sensor weight
+    follows the expected PDR error for the distance walked since the last photo fix,
+    and the DINOv2 weight follows DINOv2's own top-1 vs top-2 margin."""
+    base = parse_weights(_config.LOC_FUSION_WEIGHTS)
+    if not _config.LOC_FUSION_ADAPTIVE:
+        return base
+    sigma = sensor_sigma(dist_since_fix, _config.LOC_SENSOR_SIGMA0, _config.LOC_DRIFT_RATE)
+    return adaptive_weights(base, sigma, n_objects, c=_config.LOC_SENSOR_C,
+                            cap=_config.LOC_SENSOR_CAP, n_full=_config.LOC_GRID_NFULL,
+                            gap=dino_gap(dino_sims or {}), gap_full=_config.LOC_DINO_GAP_FULL)
+
+
+def _server_dino_evidence(session_id, ref_map, image_path, detected_labels, ocr_texts,
+                          detected_items=None):
+    """Server-side DINOv2 + object + OCR evidence (ServerImageEvidence) for a phone that
+    sent no dino_topk, or None (model / sidecar missing, or embedding failed) → grid
+    matching as before. detected_items (labels + 0..1 boxes) feed the optional
+    上下左右 relation term (config LOC_RELATION_WEIGHT)."""
+    from server.locate_fusion import server_image_evidence
+    t0 = time.time()
+    try:
+        ev = server_image_evidence(ref_map, image_path, detected_labels, ocr_texts,
+                                   _config.DINO_SIDECAR_PATH, q_items=detected_items,
+                                   relation_weight=_config.LOC_RELATION_WEIGHT)
+    except Exception:
+        log.exception("[session %s] server DINOv2 evidence failed — using grid matching", session_id)
+        return None
+    if ev:
+        top = sorted(ev.scores.items(), key=lambda kv: -kv[1])[:3]
+        log.info("⏱ server DINOv2: %.1fs, top3 %s", time.time() - t0,
+                 [(n, round(v, 2), getattr(ev.best_photo.get(n), "slot", None)) for n, v in top])
+    else:
+        log.info("[session %s] server DINOv2 unavailable — using grid matching", session_id)
+    return ev
+
+
 def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                             detected_items=None, image_path=None,
-                            store_zone=None, ocr_items=None):
+                            store_zone=None, ocr_items=None,
+                            dino_sims=None, sensor_pos=None, dist_since_fix=None,
+                            fix_node=None, extra_evidence=None, sign_numbers=None):
     """Run Neo4j localization early (before VLM decide) so route context is available.
 
     Returns the LocalizationResult, or None if localization is skipped/failed.
@@ -1069,7 +1319,36 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
     if not neo4j:
         log.warning("🔴 [session %s] _run_early_localization: Neo4j not connected — skipped", session_id)
         return None
+    s.last_loc_log = None
+    rerank_log: Optional[dict] = None
+    jump_log: Optional[float] = None
     try:
+        v2_kwargs = {}
+        if _config.LOC_FUSION_V2:
+            ref_for_v2 = neo4j.load_reference_map(s.place)
+            numbers = dict(aisle_signs.numbers_in_items(detected_items or []))
+            for n, a in (sign_numbers or {}).items():
+                numbers[n] = max(numbers.get(n, 0.0), a)
+            aisle_ev = (aisle_signs.sign_evidence(numbers, ref_for_v2, s.place)
+                        if numbers and s.place in _config.AISLE_SIGN_PLACES else None)
+            if numbers:
+                log.info("[session %s] aisle signs seen: %s", session_id,
+                         {n: round(a, 4) for n, a in sorted(numbers.items())})
+            v2_kwargs = dict(
+                v2=True,
+                sensor_sigma=sensor_sigma(dist_since_fix, _config.LOC_SENSOR_SIGMA0, _config.LOC_DRIFT_RATE),
+                reachable=_reachable_nodes(ref_for_v2, fix_node, dist_since_fix),
+                extra_evidence=extra_evidence,
+                aisle_evidence=aisle_ev,
+                phone_image_k=parse_image_k(_config.LOC_PHONE_IMAGE_K),
+            )
+            if not dino_sims and image_path and _config.LOC_SERVER_DINO:
+                server_ev = _server_dino_evidence(session_id, ref_for_v2, image_path,
+                                                  detected_labels, ocr_texts, detected_items)
+                if server_ev:
+                    v2_kwargs.update(server_evidence=server_ev.scores,
+                                     server_best_photo=server_ev.best_photo,
+                                     server_image_k=parse_image_k(_config.LOC_SERVER_IMAGE_K))
         loc_result = _localize_photo(
             detected_labels=detected_labels,
             ocr_texts=ocr_texts,
@@ -1080,6 +1359,12 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             store_zone=store_zone,
             ocr_items=ocr_items,
             grid_n=_config.GRID_N,
+            dino_sims=dino_sims,
+            sensor_pos=sensor_pos,
+            fusion_weights=None if v2_kwargs else _fusion_weights_for(
+                dist_since_fix, len(detected_items) if detected_items else len(detected_labels),
+                dino_sims),
+            **v2_kwargs,
         )
 
         ref_map = neo4j.load_reference_map(s.place)
@@ -1106,6 +1391,8 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                 backup_key=OPENAI_BACKUP_KEY,
             )
             log.info("⏱ rerank: %.1fs (%d candidate nodes)", time.time() - t_rerank, len(top))
+            rerank_log = {"candidates": [n for n, _, _ in top],
+                          "picked": reranked[0][0] if reranked else None, "accepted": False}
             if reranked and reranked[0][0] != loc_result.matched_nid:
                 new_nid = reranked[0][0]
                 grid_top_score = top[0][1] if top else 0
@@ -1113,6 +1400,7 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                 grid_gap = grid_top_score - grid_runner_score
                 rerank_nid_score = next((sc for nid, sc, _ in top if nid == new_nid), 0)
                 score_drop = grid_top_score - rerank_nid_score
+                new_ref = None  # stays None when rejected: keep the grid node and its heading
                 if grid_gap > 0.08 and score_drop > 0.1:
                     log.info("[session %s] rerank REJECTED: grid gap=%.3f, score drop=%.3f (WP%d→WP%d)",
                              session_id, grid_gap, score_drop, top[0][0], new_nid)
@@ -1124,34 +1412,18 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                     loc_result.ref_node = new_ref
                     loc_result.method = "grid+rerank"
                     loc_result.reasoning = reranked[0][2]
+                    loc_result.matched_photo = None   # it was the old node's photo
+                    rerank_log["accepted"] = True
 
                 if new_ref and new_ref.directional_photos:
-                    from server.heading import estimate_heading, best_matching_slot, DirectionalPhoto
-                    _live_labels = {l.lower().strip() for l in detected_labels if l}
-                    _live_ocr = {t.lower().strip() for t in ocr_texts if t}
-                    _dir_photos = [
-                        DirectionalPhoto(
-                            slot=dp.slot, heading_deg=dp.heading_deg,
-                            photo_file=dp.photo_file,
-                            objects=[{"label": o.label, "ocr_text": o.ocr_text}
-                                     for o in dp.objects],
-                        )
-                        for dp in new_ref.directional_photos
-                    ]
-                    new_heading = estimate_heading(_live_labels, _live_ocr, _dir_photos)
-                    new_slot = best_matching_slot(_live_labels, _live_ocr, _dir_photos)
-                    new_slot_str = new_slot if isinstance(new_slot, str) else (
-                        new_slot.value if new_slot else None)
-                    all_h = [dp.heading_deg for dp in new_ref.directional_photos]
-                    has_real = len(set(all_h)) > 1
-                    if has_real and new_heading is not None:
+                    best_photo = (v2_kwargs.get("server_best_photo") or {}).get(new_nid)
+                    loc_result.matched_photo = best_photo.photo_file if best_photo is not None else None
+                    new_heading, new_slot_str, new_conf = _estimate_node_heading(
+                        new_ref, detected_labels, ocr_texts, loc_result.confidence, best_photo=best_photo)
+                    if new_heading is not None:
                         loc_result.matched_heading = new_heading
                         loc_result.matched_slot = new_slot_str
-                        unique_sets = len({
-                            frozenset(o.label for o in dp.objects)
-                            for dp in new_ref.directional_photos
-                        })
-                        loc_result.heading_confidence = min(loc_result.confidence, 0.8) if unique_sets > 1 else 0.2
+                        loc_result.heading_confidence = new_conf
                         log.info("[session %s] rerank: recomputed heading=%.0f° slot=%s for WP%d",
                                  session_id, new_heading, new_slot_str, new_nid)
                     else:
@@ -1181,6 +1453,15 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
                     loc_result.matched_slot = None
                     loc_result.heading_confidence = 0.0
                     loc_result.confidence *= 0.6
+                    jump_log = jump_m
+
+        # what localization did, for output/sessions/<id>/turns.jsonl
+        s.last_loc_log = session_log.localization_record(
+            loc_result, sigma=v2_kwargs.get("sensor_sigma"), reachable=v2_kwargs.get("reachable"),
+            server_evidence=v2_kwargs.get("server_evidence"), aisle_evidence=v2_kwargs.get("aisle_evidence"),
+            rerank=rerank_log)
+        if jump_log is not None:
+            s.last_loc_log["spatial_jump_penalty_m"] = round(jump_log, 2)
 
         if loc_result.matched_nid is not None:
             s.last_corrected_nid = loc_result.matched_nid
@@ -1198,8 +1479,8 @@ def _run_early_localization(s, session_id, detected_labels, ocr_texts,
             log.info("[session %s] localization: no confident match (%.2f)",
                      session_id, loc_result.confidence)
         return loc_result
-    except Exception as e:
-        log.warning("[session %s] localization error: %s", session_id, e)
+    except Exception:
+        log.exception("[session %s] localization error", session_id)
         return None
 
 
@@ -1257,6 +1538,18 @@ def list_places():
 
 @app.post("/session", response_model=StartSessionResponse)
 def start_session(req: StartSessionRequest) -> StartSessionResponse:
+    resp = _handle_start_session(req)
+    s = _store.get(resp.session_id)
+    if s is not None:
+        out_dir = OUTPUT_ROOT / s.id
+        session_log.append_turn(out_dir, {"kind": "start", "request": {"goal": req.goal, "place": req.place},
+                                          "response": {"guidance": resp.guidance, "goal_objects": resp.goal_objects,
+                                                       "place": resp.place, "goal_node_id": resp.goal_node_id}})
+        session_log.write_session(out_dir, s)
+    return resp
+
+
+def _handle_start_session(req: StartSessionRequest) -> StartSessionResponse:
     if not req.goal.strip():
         raise HTTPException(status_code=400, detail={"error": "bad_request", "detail": "goal is empty"})
     goal_objects = decompose_goal(req.goal)
@@ -1358,31 +1651,13 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                 for item in goal_items:
                     search_terms = _expand_search_terms(item)
                     best_nid = None
-                    best_score = 0.0
+                    best_key = (0.0, 0.0)
                     for nid, node in ref_map.photos.items():
-                        node_best = 0.0
-                        match_count = 0
-                        for obj in node.objects:
-                            obj_score = 0.0
-                            for term in search_terms:
-                                term_lower = term.lower()
-                                if obj.ocr_text:
-                                    ocr_lower = obj.ocr_text.lower()
-                                    if term_lower == ocr_lower:
-                                        obj_score = max(obj_score, 1.0)
-                                    elif term_lower in ocr_lower or ocr_lower in term_lower:
-                                        obj_score = max(obj_score, 0.8)
-                                label_lower = obj.label.lower()
-                                if term_lower in label_lower or label_lower in term_lower:
-                                    obj_score = max(obj_score, 0.7)
-                            if obj_score > 0:
-                                match_count += 1
-                            node_best = max(node_best, obj_score)
-                        # Bonus for nodes with multiple matching objects (more relevant)
-                        node_score = node_best + min(match_count * 0.02, 0.1)
-                        if node_score > best_score:
-                            best_score = node_score
+                        key = _goal_node_score(node.objects, search_terms)
+                        if key > best_key:
+                            best_key = key
                             best_nid = nid
+                    best_score = best_key[1]
                     if best_nid is not None and best_score >= 0.5:
                         if best_nid not in target_nodes:
                             target_nodes.append(best_nid)
@@ -1423,10 +1698,10 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                     log.warning("🔴 [session %s] NO goal items matched any Neo4j node — route planning SKIPPED", s.id)
                 if target_nodes:
                     log.info("🟢 [session %s] %d goal items matched nodes: %s", s.id, len(target_nodes), target_nodes)
-                    # Build networkx graph from Neo4j walkway edges + proximity
+                    # Plan on the route graph the mini-map and the text steps use
                     from server.path_planner import plan_route as _plan_route
-                    neo4j_graph = _build_nav_graph(ref_map)
-                    if neo4j_graph.number_of_nodes() > 0:
+                    neo4j_graph = _route_nx_graph(selected_place)
+                    if neo4j_graph is not None and neo4j_graph.number_of_nodes() > 0:
                         # Auto-detect checkout and exit nodes (need exit_nid for default start)
                         checkout_nid, exit_nid = _find_checkout_exit_nodes(ref_map)
                         if checkout_nid and checkout_nid not in neo4j_graph:
@@ -1434,15 +1709,16 @@ def start_session(req: StartSessionRequest) -> StartSessionResponse:
                         if exit_nid and exit_nid not in neo4j_graph:
                             exit_nid = None
 
-                        # Placeholder start — will be re-planned from actual position after first photo
-                        start_nid = 0 if 0 in neo4j_graph else min(neo4j_graph.nodes())
+                        # From the entrance (or the first start point) until a chosen start
+                        # point or the first photo fix re-plans from where the user is
+                        start_nid = _default_start_wp(selected_place)
                         # Filter targets to only nodes that exist in graph
                         valid_targets = [t for t in target_nodes if t in neo4j_graph]
 
                         s.checkout_node = checkout_nid
                         s.exit_node = exit_nid
 
-                        if valid_targets:
+                        if valid_targets and start_nid is not None:
                             route = _plan_route(
                                 neo4j_graph, start_nid, valid_targets,
                                 checkout=checkout_nid, exit_node=exit_nid,
@@ -1481,9 +1757,49 @@ async def upload_photo(
     session_id: str,
     photo: UploadFile = File(...),
     dino_node_hint: Optional[int] = Form(None),
+    dino_topk: Optional[str] = Form(None),
     pdr_x: Optional[float] = Form(None),
     pdr_y: Optional[float] = Form(None),
+    map_x: Optional[float] = Form(None),
+    map_y: Optional[float] = Form(None),
+    dist_since_fix: Optional[float] = Form(None),
+    fix_node: Optional[int] = Form(None),
     heading: Optional[float] = Form(None),
+    source: Optional[str] = Form(None),
+) -> TurnResponse:
+    """Handle one navigation photo, then record the turn in output/sessions/<id>/."""
+    s = _store.get(session_id)
+    if s is not None:
+        s.last_loc_log = None
+    resp = await _handle_photo(session_id, photo, dino_node_hint, dino_topk, pdr_x, pdr_y, map_x, map_y,
+                               dist_since_fix, fix_node, heading, source)
+    if s is not None:
+        out_dir = OUTPUT_ROOT / session_id
+        session_log.append_turn(out_dir, {
+            "kind": "photo",
+            "request": {"source": source or "camera", "pdr_x": pdr_x, "pdr_y": pdr_y, "map_x": map_x, "map_y": map_y,
+                        "dist_since_fix": dist_since_fix, "fix_node": fix_node, "heading": heading,
+                        "dino_node_hint": dino_node_hint, "dino_topk": dino_topk},
+            "localization": s.last_loc_log,
+            "response": session_log.response_record(resp),
+        })
+        session_log.write_session(out_dir, s)
+    return resp
+
+
+async def _handle_photo(
+    session_id: str,
+    photo: UploadFile = File(...),
+    dino_node_hint: Optional[int] = Form(None),
+    dino_topk: Optional[str] = Form(None),
+    pdr_x: Optional[float] = Form(None),
+    pdr_y: Optional[float] = Form(None),
+    map_x: Optional[float] = Form(None),
+    map_y: Optional[float] = Form(None),
+    dist_since_fix: Optional[float] = Form(None),
+    fix_node: Optional[int] = Form(None),
+    heading: Optional[float] = Form(None),
+    source: Optional[str] = Form(None),
 ) -> TurnResponse:
     s = _store.get(session_id)
     if s is None:
@@ -1500,6 +1816,35 @@ async def upload_photo(
                  session_id, dino_node_hint,
                  pdr_x or 0, pdr_y or 0,
                  f"{heading:.1f}" if heading is not None else "N/A")
+    if source == "gallery":
+        # A gallery photo was taken some other time: the live heading / position
+        # describe where the phone is now, not where the photo was taken.
+        heading = map_x = map_y = dist_since_fix = fix_node = pdr_x = pdr_y = None
+    if not _finite(heading):
+        heading = None
+    _phone_loc = _phone_localization_inputs(dino_topk, dino_node_hint, map_x, map_y,
+                                            dist_since_fix, fix_node)
+    _prev_corrected_nid = s.last_corrected_nid
+    # A second photo asked for by the previous turn: combined only when we KNOW the user
+    # stayed put (both photos carry the phone's step-count position); unknown movement
+    # counts as "moved". The request is kept until a photo actually gets localized, so a
+    # blurred / blocked retake doesn't lose it.
+    _second_view = None
+    if s.pending_view is not None:
+        pv = s.pending_view
+        known = _finite(pdr_x) and _finite(pdr_y) and pv.get("raw") is not None
+        moved = math.hypot(pdr_x - pv["raw"][0], pdr_y - pv["raw"][1]) if known else float("inf")
+        if time.time() - pv["t"] > _config.SECOND_PHOTO_WINDOW_S or moved > _config.SECOND_PHOTO_MAX_MOVE_M:
+            s.pending_view = None
+        else:
+            _second_view = pv["evidence"]
+            log.info("[session %s] combining with the previous photo (moved %.1f m)", session_id, moved)
+    _phone_loc["extra_evidence"] = _second_view
+    if _phone_loc["dino_sims"] or _phone_loc["sensor_pos"]:
+        log.info("[session %s] phone localization: dino_topk=%s map_pos=%s dist_since_fix=%s",
+                 session_id,
+                 sorted(_phone_loc["dino_sims"].items(), key=lambda kv: -kv[1])[:5],
+                 _phone_loc["sensor_pos"], _phone_loc["dist_since_fix"])
 
     t_start = time.time()
     out_dir = ensure_output_dir(session_id)
@@ -1520,6 +1865,21 @@ async def upload_photo(
     im.save(photo_path, format="JPEG", quality=85)
     log.info("Photo %s %dx%d", "resized" if resized else "saved", img_w, img_h)
     im.close()
+
+    # Blurred / dark photos can't be localized — ask for a retake before spending
+    # any detector or VLM time on them.
+    _quality = photo_quality.assess_image(str(photo_path))
+    log.info("[session %s] photo quality: sharpness=%.0f brightness=%.0f",
+             session_id, _quality.sharpness, _quality.brightness)
+    if _quality.hint:
+        log.info("[session %s] photo rejected: %s", session_id, _quality.hint)
+        _g_items, _v_items, _c_target = _shopping_progress(s)
+        return TurnResponse(
+            action=VLMAction.MOVE, guidance=_quality.hint, retake_hint=_quality.hint,
+            node_id=-1, phase=s.phase, goal_item_names=_g_items,
+            visited_item_names=_v_items, current_target_name=_c_target,
+            goal_node_id=_current_goal_node_id(s),
+        )
 
     t_resize = time.time()
 
@@ -1542,7 +1902,7 @@ async def upload_photo(
 
     if has_grounding:
         # ══ 模式 A：GroundingDINO + (EasyOCR) + 單階段 VLM ══
-        combined_prompts = list(dict.fromkeys(s.goal_objects + GENERIC_INDOOR_OBJECTS))
+        combined_prompts = list(dict.fromkeys(s.goal_objects + GENERIC_INDOOR_OBJECTS + OCCLUDER_PROMPTS))
         log.info("GroundingDINO prompt: %s", combined_prompts)
         detections = perception_engine.detect(str(photo_path), combined_prompts)
         detected_labels = [d.label for d in detections]
@@ -1574,13 +1934,19 @@ async def upload_photo(
         # ── Early localization for route-aware VLM prompt ──────────────
         _loc_items = _build_localization_items(detections, ocr_results or [], img_w, img_h)
         _ocr_items = _build_ocr_items(ocr_results or [], img_w, img_h)
-        _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
-                                             detected_items=_loc_items,
-                                             image_path=str(photo_path),
-                                             ocr_items=_ocr_items)
+        # A blocked view must not move the user, re-plan the route or set the heading.
+        _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h, goals=s.goal_objects)
+        _early_loc = None if _occlusion.hint else _run_early_localization(
+            s, session_id, detected_labels, ocr_texts,
+            detected_items=_loc_items,
+            image_path=str(photo_path),
+            ocr_items=_ocr_items,
+            sign_numbers=aisle_signs.numbers_from_ocr(ocr_results, img_w, img_h),
+            **_phone_loc)
         _apply_phone_heading(s, _early_loc, heading)
         _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
-                                                       img_w=img_w, img_h=img_h, ocr_results=ocr_results)
+                                                       img_w=img_w, img_h=img_h, ocr_results=ocr_results,
+                                                       is_first_localization=_prev_corrected_nid is None)
 
         if _route_ctx:
             log.info("🟢 [session %s] VLM will receive route context (%d chars), next_instr=%s",
@@ -1730,19 +2096,30 @@ async def upload_photo(
 
         # ── Localize with detection labels + OCR + zone BEFORE decide ──
         _is_first_localization = s.last_corrected_nid is None
-        _loc_items = _build_localization_items(detections, ocr_results, img_w, img_h)
+        # Localization matches 「中文 English」 names (the map's label format); the rest of
+        # the turn keeps the VLM's 中文 label.
+        _loc_dets = [PerceptionDetection(label=_vlm_localization_label(v), box=d.box, score=d.score,
+                                         position=d.position)
+                     for v, d in zip(vlm_perception.detections, detections)]
+        _loc_items = _build_localization_items(_loc_dets, ocr_results, img_w, img_h)
         _ocr_items = _build_ocr_items(ocr_results, img_w, img_h)
         _store_zone = vlm_perception.store_zone or ""
         log.info("[session %s] VLM store_zone: %s | scene: %s",
                  session_id, _store_zone or "(none)", vlm_perception.scene_description[:80])
-        _early_loc = _run_early_localization(s, session_id, detected_labels, ocr_texts,
-                                             detected_items=_loc_items,
-                                             image_path=str(photo_path),
-                                             store_zone=_store_zone,
-                                             ocr_items=_ocr_items)
+        # A blocked view must not move the user, re-plan the route or set the heading.
+        _occlusion = photo_quality.assess_occlusion(detections, img_w, img_h, goals=s.goal_objects)
+        _early_loc = None if _occlusion.hint else _run_early_localization(
+            s, session_id, [d.label for d in _loc_dets], ocr_texts,
+            detected_items=_loc_items,
+            image_path=str(photo_path),
+            store_zone=_store_zone,
+            ocr_items=_ocr_items,
+            sign_numbers=aisle_signs.numbers_from_ocr(ocr_results, img_w, img_h),
+            **_phone_loc)
         _apply_phone_heading(s, _early_loc, heading)
         _route_ctx, _next_instr = _build_route_context(s, _early_loc, detections=detections,
-                                                       img_w=img_w, img_h=img_h, ocr_results=ocr_results)
+                                                       img_w=img_w, img_h=img_h, ocr_results=ocr_results,
+                                                       is_first_localization=_prev_corrected_nid is None)
 
         # ── Store debug info ──
         _loc_debug = {}
@@ -1866,6 +2243,16 @@ async def upload_photo(
         log.info("[session %s] verify_arrival: %s → %s | goal_verified=%s ocr_matches=%s",
                  session_id, _raw_action.value, vlm_resp.action.value,
                  goal_verified, bool(ocr_matches))
+    # ...and on the map: far from the goal node, ask instead (with where the map has the user)
+    if _raw_action == VLMAction.ARRIVED:
+        _far_q = _far_from_goal_question(
+            s, _early_loc.matched_nid if _early_loc else None,
+            _ref_location_name(_early_loc) if _early_loc else None)
+        if _far_q:
+            log.info("[session %s] arrival not near the goal node on the map → asking: %s", session_id, _far_q)
+            vlm_resp = VLMResponse(action=VLMAction.ASK, guidance=_far_q, question=_far_q,
+                                   vlm_summary=vlm_resp.vlm_summary)
+            arrival_downgraded = True
     if verified_labels:
         log.info("[session %s] confirmed goal items in this photo: %s", session_id, verified_labels)
 
@@ -1914,8 +2301,8 @@ async def upload_photo(
     map_dir.mkdir(parents=True, exist_ok=True)
     map_json = s.topomap.to_dict(current_node=nid, goal_node=s.goal_node)
     (map_dir / f"map_{nid}.json").write_text(json.dumps(map_json, ensure_ascii=False, indent=2), encoding="utf-8")
-    map_png = s.topomap.render_png(current_id=nid)
-    (map_dir / f"map_{nid}.png").write_bytes(map_png)
+    topo_now = copy.deepcopy(s.topomap)      # the next photo changes s.topomap
+    _render_later(lambda: (map_dir / f"map_{nid}.png").write_bytes(topo_now.render_png(current_id=nid)))
 
     _loc_for_hist = _early_loc
     s.history.append({
@@ -1938,8 +2325,8 @@ async def upload_photo(
     observations = _build_observations(s)
     graph_dir = out_dir / "graph"
     graph_dir.mkdir(parents=True, exist_ok=True)
-    render_scene_graph(observations, s.goal, s.goal_objects,
-                       str(graph_dir / f"scene_graph_{nid}.png"))
+    _render_later(render_scene_graph, observations, s.goal, list(s.goal_objects),
+                  str(graph_dir / f"scene_graph_{nid}.png"))
 
     # Save detection + OCR results as JSON
     det_json = {
@@ -1973,11 +2360,38 @@ async def upload_photo(
     # the decide step. Mode A ran it with GroundingDINO labels earlier.
     loc_result = _early_loc
 
+    # Occluded view (people / carts in front of the camera) or almost nothing
+    # recognisable: localization was skipped above, so this photo moved nothing.
+    _retake_hint = _occlusion.hint
+    if _retake_hint:
+        log.info("[session %s] retake: %s (occluded %.0f%%, %d useful objects) — "
+                 "localization not applied", session_id, _retake_hint,
+                 100 * _occlusion.fraction, _occlusion.useful_objects)
+        loc_result = None
+        # say why there is no map step this time, not "this photo doesn't match the map"
+        _next_instr = _retake_hint
+    elif _second_view is not None:
+        s.pending_view = None            # the requested second photo has been used
+
+    # Several places look alike: ask for one more photo from the same spot and combine.
+    # Only while walking (an ASK / ARRIVED turn blocks the next /photo) and only when
+    # the phone's position is known, so the next photo can be checked for "same spot".
+    _second_photo_hint = None
+    if (loc_result is not None and loc_result.image_evidence is not None and _second_view is None
+            and vlm_resp.action == VLMAction.MOVE and source != "gallery"
+            and _finite(pdr_x) and _finite(pdr_y)
+            and loc_result.confidence < _config.SECOND_PHOTO_BELOW):
+        s.pending_view = {"evidence": loc_result.image_evidence, "t": time.time(), "raw": (pdr_x, pdr_y)}
+        _second_photo_hint = "這附近有幾個地方很像，請原地向左轉 90° 再拍一張，兩張一起判斷"
+        log.info("[session %s] unsure (p=%.2f) — asking for a second photo", session_id, loc_result.confidence)
+
     # VLM already receives route_context (map + path plan) in its prompt,
     # so its guidance is photo-aware AND route-aware.  No override needed.
     _final_guidance = vlm_resp.guidance
     _route_step = _next_instr if _next_instr != LOCALIZE_FAILED_HINT else None
-    if vlm_resp.action == VLMAction.MOVE and _route_step:
+    if _retake_hint and vlm_resp.action == VLMAction.MOVE:
+        _final_guidance = _retake_hint
+    elif vlm_resp.action == VLMAction.MOVE and _route_step:
         _final_guidance = _route_step
         log.info("[session %s] route-first: overriding VLM guidance with next_instruction", session_id)
     elif vlm_resp.action == VLMAction.MOVE and not _route_step:
@@ -1998,11 +2412,16 @@ async def upload_photo(
         action=vlm_resp.action,
         guidance=_final_guidance,
         question=vlm_resp.question,
+        confirm_question=vlm_resp.action == VLMAction.ASK and arrival_downgraded,
         node_id=nid,
         annotated_photo_url=f"/session/{session_id}/photo/{nid}.jpg",
+        retake_hint=_retake_hint,
+        second_photo_hint=_second_photo_hint,
         corrected_node_id=loc_result.matched_nid if loc_result else None,
         corrected_confidence=round(loc_result.confidence, 3) if loc_result else None,
         corrected_location=_ref_location_name(loc_result) if loc_result else None,
+        estimated_x=round(loc_result.estimated_xy[0], 2) if loc_result and loc_result.estimated_xy else None,
+        estimated_y=round(loc_result.estimated_xy[1], 2) if loc_result and loc_result.estimated_xy else None,
         heading_deg=round(loc_result.matched_heading, 1) if loc_result and loc_result.matched_heading is not None else None,
         heading_slot=loc_result.matched_slot if loc_result else None,
         heading_confidence=round(loc_result.heading_confidence, 3) if loc_result else None,
@@ -2018,6 +2437,23 @@ async def upload_photo(
 
 @app.post("/session/{session_id}/answer", response_model=TurnResponse)
 def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
+    resp = _handle_answer(session_id, req)
+    _log_turn(session_id, "answer", {"answer": req.answer}, resp)
+    return resp
+
+
+def _log_turn(session_id: str, kind: str, request: dict, resp) -> None:
+    """Record a non-photo turn (/answer, /confirm) in output/sessions/<id>/."""
+    s = _store.get(session_id)
+    if s is None:
+        return
+    out_dir = OUTPUT_ROOT / session_id
+    session_log.append_turn(out_dir, {"kind": kind, "request": request,
+                                      "response": session_log.response_record(resp)})
+    session_log.write_session(out_dir, s)
+
+
+def _handle_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
     s = _store.get(session_id)
     if s is None:
         raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
@@ -2034,10 +2470,18 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
 
     # If this is answering a confirm-arrival question, handle directly
     # without re-asking VLM — user says yes/no, that's the answer.
-    _deny_keywords = ("不確定", "繼續", "不是", "沒有", "沒看到", "不對", "再找", "還沒", "no")
     if s.pending_is_confirm:
         nid = s.last_node_id
-        if any(k in req.answer for k in _deny_keywords):
+        _yes = _confirm_answer(req.answer)
+        if _yes is None:
+            log.info("[session %s] Unclear reply to an arrival question → asking again", session_id)
+            vlm_resp = VLMResponse(
+                action=VLMAction.ASK,
+                guidance=f"請回答「有」或「沒有」：{prior_question}",
+                question=prior_question,
+                vlm_summary="unclear reply to arrival question",
+            )
+        elif not _yes:
             log.info("[session %s] User denied confirm → continue MOVE", session_id)
             s.pending_question = None
             s.pending_is_confirm = False
@@ -2049,37 +2493,21 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
                 vlm_summary="user denied arrival",
             )
         else:
+            # 「有」 already is the arrival confirmation: finish it exactly like
+            # POST /confirm "confirmed" (one route advance, then checkout / exit /
+            # done), so the app does not ask "確認到達" a second time. This used to
+            # advance the route here and still leave pending_arrival set, so the
+            # next /photo got 409 confirm_pending and /confirm advanced it again.
             log.info("[session %s] User confirmed arrival via answer", session_id)
             s.pending_question = None
             s.pending_is_confirm = False
             s.pending_arrival = True
             s.goal_node = nid
-            _active_goals = _current_goal_objects(s)
-            # Auto-advance the route
-            if s.route_plan and s.target_nodes:
-                current_leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
-                s.mark_target_visited(current_leg.to_node)
-                s.current_leg_index = min(s.current_leg_index + 1, len(s.route_plan.legs) - 1)
-                log.info("[session %s] route advanced: visited node #%d, leg %d/%d",
-                         session_id, current_leg.to_node, s.current_leg_index, len(s.route_plan.legs))
-
-            next_goals = _current_goal_objects(s)
-            remaining = len(s.remaining_targets) if s.target_nodes else 0
-            if remaining > 0:
-                vlm_resp = VLMResponse(
-                    action=VLMAction.MOVE,
-                    guidance=f"已找到「{'、'.join(_active_goals)}」！接下來找「{'、'.join(next_goals)}」，請拍一張照片讓我定位。",
-                    question=None,
-                    vlm_summary=f"confirmed {_active_goals}, moving to next",
-                )
-            else:
-                vlm_resp = VLMResponse(
-                    action=VLMAction.ARRIVED,
-                    guidance=f"已找到「{'、'.join(_active_goals)}」！所有商品都找到了！",
-                    question=None,
-                    vlm_summary="all items found",
-                )
-                s.arrived = True
+            s.history.append({
+                "kind": "answer", "user_answer": req.answer,
+                "vlm_action": "CONFIRM", "vlm_guidance": None,
+            })
+            return _handle_confirm(session_id, ConfirmArrivalRequest(kind="confirmed"))
 
         s.history.append({
             "kind": "answer", "user_answer": req.answer,
@@ -2090,6 +2518,7 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
             action=vlm_resp.action,
             guidance=vlm_resp.guidance,
             question=vlm_resp.question,
+            confirm_question=vlm_resp.action == VLMAction.ASK,
             node_id=nid,
             remaining_targets=len(s.remaining_targets) if s.target_nodes else None,
             phase=s.phase,
@@ -2146,6 +2575,13 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
         prior_was_confirm=False,
     )
     arrival_downgraded = _raw_action == VLMAction.ARRIVED and vlm_resp.action != VLMAction.ARRIVED
+    if _raw_action == VLMAction.ARRIVED:
+        _far_q = _far_from_goal_question(s, s.last_corrected_nid)
+        if _far_q:
+            log.info("[session %s] arrival not near the goal node on the map → asking: %s", session_id, _far_q)
+            vlm_resp = VLMResponse(action=VLMAction.ASK, guidance=_far_q, question=_far_q,
+                                   vlm_summary=vlm_resp.vlm_summary)
+            arrival_downgraded = True
 
     s.history.append({
         "kind": "answer",
@@ -2171,6 +2607,7 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
         action=vlm_resp.action,
         guidance=vlm_resp.guidance,
         question=vlm_resp.question,
+        confirm_question=vlm_resp.action == VLMAction.ASK and arrival_downgraded,
         node_id=s.last_node_id,
         annotated_photo_url=f"/session/{session_id}/photo/{s.last_node_id}.jpg",
         phase=s.phase,
@@ -2183,6 +2620,13 @@ def post_answer(session_id: str, req: AnswerRequest) -> TurnResponse:
 
 @app.post("/session/{session_id}/confirm", response_model=TurnResponse)
 def confirm_arrival(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse:
+    """User confirms or rejects the ARRIVED decision."""
+    resp = _handle_confirm(session_id, req)
+    _log_turn(session_id, "confirm", {"kind": req.kind}, resp)
+    return resp
+
+
+def _handle_confirm(session_id: str, req: ConfirmArrivalRequest) -> TurnResponse:
     """User confirms or rejects the ARRIVED decision."""
     s = _store.get(session_id)
     if s is None:
@@ -2482,6 +2926,12 @@ def _check_vlm_and_warm():
 
     if not os.environ.get("UNIGOAL_TEST_MODE"):
         _vlm_warm_up()
+        # DINOv2 for photo localization: load it now, in the background, instead of on
+        # the first photo (~9 s on this CPU-only torch).
+        if _config.LOC_SERVER_DINO:
+            import threading
+            from server import dino_embed
+            threading.Thread(target=dino_embed.available, name="dino-preload", daemon=True).start()
 
     # Neo4j: connect and pre-load reference map
     neo4j = get_neo4j()
@@ -2635,7 +3085,7 @@ async def localize_photo(photo: UploadFile = File(...), place: str = Query(defau
                 img_w=img_w, img_h=img_h,
             )
 
-        detected_labels = [d.label for d in perception.detections]
+        detected_labels = [_vlm_localization_label(d) for d in perception.detections]
         ocr_texts = [t.text for t in perception.ocr_texts]
 
         # Also try EasyOCR if available
@@ -2714,9 +3164,18 @@ def get_reference_map(place: str = Query(default="")):
 
 
 @app.post("/test/config")
-def set_test_config(grid_n: int = Query(default=None), vlm_rounds: int = Query(default=None), vlm_pass3: bool = Query(default=None)):
-    """Runtime config override for testing different grid sizes and VLM rounds."""
+def set_test_config(grid_n: int = Query(default=None), vlm_rounds: int = Query(default=None), vlm_pass3: bool = Query(default=None),
+                    fusion_weights: str = Query(default=None)):
+    """Runtime config override for testing different grid sizes, VLM rounds and
+    localization fusion weights ("dino,sensor,grid", e.g. "5,1,1")."""
     changed = {}
+    if fusion_weights is not None:
+        try:
+            parse_weights(fusion_weights)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail={"error": "bad_fusion_weights", "detail": str(e)})
+        _config.LOC_FUSION_WEIGHTS = fusion_weights
+        changed["fusion_weights"] = fusion_weights
     if grid_n is not None and grid_n in (3, 4, 5):
         _config.GRID_N = grid_n
         changed["grid_n"] = grid_n
@@ -2726,28 +3185,55 @@ def set_test_config(grid_n: int = Query(default=None), vlm_rounds: int = Query(d
     if vlm_pass3 is not None:
         _config.VLM_PASS3 = vlm_pass3
         changed["vlm_pass3"] = vlm_pass3
-    return {"status": "ok", "changed": changed, "current": {"grid_n": _config.GRID_N, "vlm_rounds": _config.VLM_ROUNDS, "vlm_pass3": _config.VLM_PASS3}}
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Multi-target route planning endpoints
-# ══════════════════════════════════════════════════════════════════════════
-
-from server.navigator import resolve_targets, plan_multi_target_route, replan_route
-from server.store_map import get_store_topomap
+    return {"status": "ok", "changed": changed, "current": {"grid_n": _config.GRID_N, "vlm_rounds": _config.VLM_ROUNDS, "vlm_pass3": _config.VLM_PASS3,
+                                                    "fusion_weights": _config.LOC_FUSION_WEIGHTS}}
 
 
 # ── Editor-map path following ──────────────────────────────────────────
 _editor_graphs: dict = {}
 
 
+def _neo4j_route_graph(place: str):
+    """Route graph built from the Neo4j reference map (+ maps/neo4j_links/*.json for
+    that place), or None when Neo4j has no map for it."""
+    neo4j = get_neo4j()
+    ref_map = neo4j.load_reference_map(place) if neo4j else None
+    if not ref_map or not ref_map.photos:
+        return None
+    extra = None
+    for path in sorted((EDITOR_MAP_DIR / "neo4j_links").glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:  # a broken links file must not take the server down
+            log.warning("neo4j links %s unreadable: %s", path.name, e)
+            continue
+        if data.get("place") == place:
+            extra = data
+            break
+    graph = editor_map_mod.build_from_ref_map(ref_map, extra)
+    if graph.graph.number_of_edges() == 0:
+        log.warning("route map for %s: Neo4j has no WALKWAY edges — no route graph", place)
+        return None
+    log.info("route map for %s from Neo4j: %d nodes, %d edges (extra links: %s, entrance: %s)",
+             place, graph.graph.number_of_nodes(), graph.graph.number_of_edges(),
+             len((extra or {}).get("links", [])), graph.entrance)
+    return graph
+
+
 def _editor_graph_for(place: Optional[str]):
-    """The walkable editor graph for ``place`` (cached), with Neo4j product labels
-    merged in on first use; None when no ``maps/*.json`` declares that place."""
+    """The walkable route graph for ``place`` (cached). ROUTE_MAP_SOURCE=neo4j (default)
+    builds it from the Neo4j reference map, so routes and localization share one set of
+    coordinates; "editor" uses the hand-corrected maps/*.json with Neo4j labels merged
+    in. None when neither has the place."""
     if not place:
         return None
     if place in _editor_graphs:
         return _editor_graphs[place]
+    if _config.ROUTE_MAP_SOURCE == "neo4j":
+        graph = _neo4j_route_graph(place)
+        if graph is not None:      # not cached when Neo4j was unreachable: retry next time
+            _editor_graphs[place] = graph
+        return graph
     graph = None
     for path in sorted(EDITOR_MAP_DIR.glob("*.json")):
         try:
@@ -2782,8 +3268,9 @@ def get_session_path(session_id: str,
 
     Start = the phone's dead-reckoned position (``x``/``y``) when given, else the
     waypoint of the last photo localization, else the entrance. Target = the
-    current route leg's Neo4j node mapped onto the editor map, else the waypoint
-    whose product/sign labels name the current goal item.
+    current route leg's Neo4j node (chosen when the session started — the same
+    node the text guidance and the arrival check use) mapped onto the editor map,
+    else the waypoint whose product/sign labels name the current goal item.
     """
     s = _store.get(session_id)
     if s is None:
@@ -2792,17 +3279,18 @@ def get_session_path(session_id: str,
     if g is None:
         raise HTTPException(status_code=404, detail={
             "error": "no_editor_map",
-            "detail": f"no editor map for place {s.place!r} in {EDITOR_MAP_DIR}"})
+            "detail": f"no route map for place {s.place!r} (ROUTE_MAP_SOURCE={_config.ROUTE_MAP_SOURCE})"})
 
     goals = _current_goal_objects(s)
     goal_item = goals[0] if goals else (s.target_objects[0] if s.target_objects else s.goal)
 
-    # Sign-weighted label search first (a "牛奶區" category sign beats scattered
-    # product mentions); the session's Neo4j route leg is the fallback.
-    target_wp = editor_map_mod.find_goal_waypoint(g, goal_item)
-    if target_wp is None and s.route_plan and getattr(s.route_plan, "legs", None):
-        leg = s.route_plan.legs[min(s.current_leg_index, len(s.route_plan.legs) - 1)]
-        target_wp = g.waypoint_for_neo(leg.to_node)
+    # The session's route leg first, so the mini-map heads where the text guidance
+    # does (a separate label search picked other nodes: 「牛奶」 misses a 「牛乳」 sign).
+    leg = _phase_leg(s)
+    target_wp = g.waypoint_for_neo(leg.to_node) if leg is not None else None
+    if target_wp is None:
+        # Sign-weighted label search: a "牛奶區" category sign beats scattered product mentions
+        target_wp = editor_map_mod.find_goal_waypoint(g, goal_item)
     if target_wp is None:
         raise HTTPException(status_code=404, detail={
             "error": "goal_not_on_map",
@@ -2834,173 +3322,27 @@ def get_session_path(session_id: str,
     )
 
 
-@app.post("/session/{session_id}/plan-route", response_model=PlanRouteResponse)
-def plan_session_route(session_id: str, req: PlanRouteRequest):
-    """Plan an optimised route for a navigation session.
-
-    Resolves target queries to map nodes, then runs A* + TSP to find the
-    shortest total path:  current_position → [targets in best order] → checkout → exit.
-    """
+@app.post("/session/{session_id}/start")
+def set_session_start(session_id: str, payload: dict = Body(...)):
+    """The user stands at a start point ({"x", "y"} in the map frame, from 「我在起點」):
+    re-plan the visit order from the waypoint there instead of the default start."""
     s = _store.get(session_id)
     if s is None:
         raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
-
-    # Resolve target queries to node IDs
-    resolved = resolve_targets(req.targets)
-    target_nodes = [r["node_id"] for r in resolved if r["node_id"] is not None]
-
-    if not target_nodes:
-        raise HTTPException(status_code=400, detail={
-            "error": "no_targets_resolved",
-            "detail": "None of the target queries could be matched to map locations",
-        })
-
-    # Determine start node: explicit > visual localization > lobby
-    start = req.start_node
-    if start is None:
-        start = getattr(s, "last_corrected_nid", None)
-    if start is None:
-        from server.store_map import NODE_LOBBY
-        start = NODE_LOBBY
-
-    topo = get_store_topomap()
-    route = plan_multi_target_route(
-        topo.graph, start, target_nodes,
-        checkout_node=req.checkout_node,
-        exit_node=req.exit_node,
-    )
-
-    # Save to session
-    s.target_nodes = target_nodes
-    s.visited_targets = set()
-    s.route_plan = route
-    s.current_leg_index = 0
-    s.checkout_node = req.checkout_node
-    s.exit_node = req.exit_node
-
-    log.info("[session %s] Route planned: %d targets, cost=%.1f, order=%s",
-             session_id, len(target_nodes), route.total_cost, route.visit_order)
-
-    return PlanRouteResponse(
-        visit_order=route.visit_order,
-        total_cost=route.total_cost,
-        full_path=route.full_path,
-        legs=[
-            {"from": leg.from_node, "to": leg.to_node, "path": leg.path,
-             "cost": leg.cost, "actions": leg.actions, "purpose": leg.purpose}
-            for leg in route.legs
-        ],
-        resolved_targets=resolved,
-        checkout_node=req.checkout_node,
-        exit_node=req.exit_node,
-    )
-
-
-@app.post("/session/{session_id}/arrive-target")
-def arrive_at_target(session_id: str, node_id: int = Body(..., embed=True)):
-    """Mark a target as reached and re-plan the remaining route.
-
-    Call this when the user arrives at a target node. The route is re-planned
-    from the current position through the remaining targets → checkout → exit.
-    """
-    s = _store.get(session_id)
-    if s is None:
-        raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
-
-    if node_id not in s.target_nodes:
-        raise HTTPException(status_code=400, detail={
-            "error": "not_a_target",
-            "detail": f"Node {node_id} is not in the target list",
-        })
-
-    s.mark_target_visited(node_id)
-
-    remaining = s.remaining_targets
-    log.info("[session %s] Arrived at target node %d. Remaining: %s",
-             session_id, node_id, remaining)
-
-    if not remaining and s.checkout_node is None and s.exit_node is None:
-        # All done
-        return {"status": "complete", "message": "所有目標都已到達！"}
-
-    topo = get_store_topomap()
-    route = replan_route(
-        topo.graph, node_id, remaining,
-        checkout_node=s.checkout_node,
-        exit_node=s.exit_node,
-    )
-    s.route_plan = route
-    s.current_leg_index = 0
-
-    return {
-        "status": "replanned",
-        "visited": list(s.visited_targets),
-        "remaining": remaining,
-        "route": route.to_dict(),
-    }
-
-
-@app.post("/session/{session_id}/modify-route")
-def modify_route(session_id: str, req: ModifyRouteRequest):
-    """Add or remove targets mid-route, then re-plan.
-
-    The user can change their shopping list while walking — this re-runs
-    the full TSP from their current position.
-    """
-    s = _store.get(session_id)
-    if s is None:
-        raise HTTPException(status_code=404, detail={"error": "session_not_found", "detail": session_id})
-
-    added_nodes = []
-    removed_nodes = []
-
-    # Add new targets
-    if req.add:
-        resolved = resolve_targets(req.add)
-        for r in resolved:
-            if r["node_id"] is not None:
-                s.add_target(r["node_id"])
-                added_nodes.append(r)
-
-    # Remove targets
-    if req.remove:
-        resolved = resolve_targets(req.remove)
-        for r in resolved:
-            if r["node_id"] is not None:
-                s.remove_target(r["node_id"])
-                removed_nodes.append(r)
-
-    remaining = s.remaining_targets
-
-    # Determine current position
-    current = getattr(s, "last_corrected_nid", None) or s.last_node_id
-    if current is None:
-        from server.store_map import NODE_LOBBY
-        current = NODE_LOBBY
-
-    topo = get_store_topomap()
-    route = replan_route(
-        topo.graph, current, remaining,
-        checkout_node=s.checkout_node,
-        exit_node=s.exit_node,
-    )
-    s.route_plan = route
-    s.current_leg_index = 0
-
-    log.info("[session %s] Route modified: added=%s removed=%s remaining=%s",
-             session_id,
-             [n["query"] for n in added_nodes],
-             [n["query"] for n in removed_nodes],
-             remaining)
-
-    return {
-        "status": "replanned",
-        "added": added_nodes,
-        "removed": removed_nodes,
-        "remaining": remaining,
-        "visited": list(s.visited_targets),
-        "route": route.to_dict(),
-    }
+    try:
+        x, y = float(payload["x"]), float(payload["y"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="body needs numeric 'x' and 'y'")
+    g = _editor_graph_for(s.place)
+    if g is None:
+        raise HTTPException(status_code=404, detail={"error": "no_editor_map", "detail": f"no route map for {s.place!r}"})
+    wp = editor_map_mod.nearest_waypoint(g, x, y)
+    replanned = _replan_from(s, wp)
+    log.info("[session %s] start point (%.1f, %.1f) → WP%s, re-planned=%s, order=%s",
+             session_id, x, y, wp, replanned, s.route_plan.visit_order if s.route_plan else None)
+    return {"start_node": wp, "replanned": replanned,
+            "visit_order": list(s.route_plan.visit_order) if s.route_plan else [],
+            "goal_node_id": _current_goal_node_id(s)}
 
 
 @app.get("/session/{session_id}/route")
@@ -3036,6 +3378,111 @@ def dashboard():
     """Live monitoring dashboard."""
     html_path = Path(__file__).parent / "dashboard.html"
     return FileResponse(str(html_path), media_type="text/html")
+
+
+@app.get("/tracking")
+def tracking_page():
+    """Sensor path vs image localization monitoring page."""
+    html_path = Path(__file__).parent / "tracking.html"
+    return FileResponse(str(html_path), media_type="text/html")
+
+
+@app.get("/session/{session_id}/tracking")
+def session_tracking(session_id: str):
+    """Return sensor PDR path, photo localization fixes, and reference map nodes
+    for the tracking visualizer."""
+    s = _store.get(session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail={"error": "session_not_found"})
+
+    # Collect PDR positions and localization results from session history
+    sensor_points = []
+    photo_fixes = []
+    for i, h in enumerate(s.history):
+        if h.get("kind") != "photo":
+            continue
+        loc = h.get("localization")
+        nid = h.get("node_id")
+        sensor_points.append({"step": i, "node_id": nid})
+        if loc and loc.get("matched_nid") is not None:
+            matched_nid = loc["matched_nid"]
+            conf = loc.get("confidence", 0)
+            photo_fixes.append({
+                "step": i,
+                "node_id": nid,
+                "matched_nid": matched_nid,
+                "confidence": round(conf, 3),
+                "reasoning": loc.get("reasoning", ""),
+            })
+
+    # Collect PDR + map positions from the turn log files
+    pdr_path = []
+    out_dir = OUTPUT_ROOT / session_id
+    turn_log_path = out_dir / "turns.jsonl"
+    if turn_log_path.exists():
+        for line in turn_log_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            req = entry.get("request", {})
+            if entry.get("kind") == "photo" and req:
+                pdr_x = req.get("pdr_x")
+                pdr_y = req.get("pdr_y")
+                map_x = req.get("map_x")
+                map_y = req.get("map_y")
+                heading = req.get("heading")
+                loc_data = entry.get("localization", {}) or {}
+                loc_result = loc_data.get("result", {}) or {}
+                resp_data = entry.get("response", {}) or {}
+                pdr_path.append({
+                    "pdr_x": pdr_x, "pdr_y": pdr_y,
+                    "map_x": map_x, "map_y": map_y,
+                    "heading": heading,
+                    "matched_nid": loc_result.get("matched_nid"),
+                    "confidence": round(loc_result.get("confidence", 0), 3),
+                    "corrected_nid": resp_data.get("corrected_node_id"),
+                    "estimated_xy": loc_result.get("estimated_xy"),
+                })
+
+    # Reference map nodes (positions on the map)
+    ref_nodes = []
+    ref_edges = []
+    ref_map = neo4j.load_reference_map(s.place) if neo4j and s.place else None
+    if ref_map:
+        for nid_key, node in ref_map.photos.items():
+            ref_nodes.append({
+                "nid": nid_key,
+                "x": round(node.pdr_x, 2),
+                "y": round(node.pdr_y, 2),
+            })
+        for edge in ref_map.walkway_edges:
+            ref_edges.append({"from": edge.get("from", edge.get("from_nid")),
+                              "to": edge.get("to", edge.get("to_nid"))})
+
+    # Sensor map (phone's PDR topo nodes) if uploaded
+    sensor_map = None
+    sensor_map_path = out_dir / "sensor_map.json"
+    if sensor_map_path.exists():
+        try:
+            sensor_map = json.loads(sensor_map_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            pass
+
+    return {
+        "session_id": session_id,
+        "goal": s.goal,
+        "place": s.place,
+        "arrived": s.arrived,
+        "photo_count": sum(1 for h in s.history if h.get("kind") == "photo"),
+        "pdr_path": pdr_path,
+        "photo_fixes": photo_fixes,
+        "ref_nodes": ref_nodes,
+        "ref_edges": ref_edges,
+        "sensor_map": sensor_map,
+    }
 
 
 @app.get("/debug")
@@ -3189,66 +3636,273 @@ def serve_reference_photo(nid: int):
     raise HTTPException(status_code=404, detail=f"photo file not found: {photo_file}")
 
 
+def _ws(place: str) -> Path:
+    """The store's map-building workspace, MAP_BUILD_ROOT/<店名>/ (see server/map_build.py)."""
+    from server.map_build import workspace_for
+    try:
+        return workspace_for(place, _config.MAP_BUILD_ROOT)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+def _read_topomap(ws: Path) -> Optional[dict]:
+    p = ws / "topomap.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+
+# ── Start points (server/start_points.py): where a walk begins and which way to face ──
+
+def _start_payload(place: str, s: dict) -> dict:
+    from urllib.parse import quote
+    out = {k: s[k] for k in ("id", "name", "x", "y", "heading_deg")}
+    out["photo_url"] = (f"/starts/photo?place={quote(place)}&id={quote(s['id'])}"
+                        if start_points.photo_path(place, s["id"], EDITOR_MAP_DIR) else None)
+    return out
+
+
+@app.get("/starts")
+def get_starts(place: str = Query(...)):
+    """The store's start points for the app's 「我在起點」 (empty list when none are set)."""
+    return {"place": place,
+            "starts": [_start_payload(place, s) for s in start_points.load_starts(place, EDITOR_MAP_DIR)]}
+
+
+@app.get("/starts/photo")
+def get_start_photo(place: str = Query(...), id: str = Query(...)):
+    p = start_points.photo_path(place, id, EDITOR_MAP_DIR)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"no photo for start {id!r}")
+    return FileResponse(str(p), media_type="image/jpeg")
+
+
+@app.post("/starts")
+def save_starts(payload: dict = Body(...), place: str = Query(...)):
+    """Replace the store's start points (the map builder's 「起點」 panel)."""
+    starts = payload.get("starts")
+    if not isinstance(starts, list):
+        raise HTTPException(status_code=422, detail="body needs a 'starts' list")
+    try:
+        ws = _ws(place)
+    except HTTPException:
+        ws = None
+    try:
+        saved = start_points.save_starts(place, starts, EDITOR_MAP_DIR,
+                                         workspace=ws if ws is not None and ws.is_dir() else None)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"place": place, "starts": [_start_payload(place, s) for s in saved]}
+
+
 @app.get("/test-photo/{set_id}/{filename}")
-def serve_test_photo(set_id: str, filename: str):
-    """Serve test photos from 0916 test data."""
-    base = Path("/Users/shingchou/Downloads/學校家樂福/0916測試")
-    p = base / set_id / filename
-    if not p.exists():
-        raise HTTPException(status_code=404, detail=f"not found: {p}")
+def serve_test_photo(set_id: str, filename: str, place: str = Query(...)):
+    """A walk's photo from the store's workspace (<workspace>/<set_id>/<filename>)."""
+    base = _ws(place).resolve()
+    p = (base / set_id / filename).resolve()
+    if base not in p.parents or not p.is_file():
+        raise HTTPException(status_code=404, detail=f"not found: {set_id}/{filename}")
     return FileResponse(str(p), media_type="image/jpeg")
 
 
 @app.get("/topomap-builder")
 def topomap_builder():
-    """Interactive topological map builder page."""
+    """Interactive topological map builder page (?place=<店名> picks the store)."""
     html_path = Path(__file__).parent / "topomap_builder.html"
-    return FileResponse(str(html_path), media_type="text/html")
+    return FileResponse(str(html_path), media_type="text/html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/topomap-places")
+def topomap_places():
+    """Stores that have a map-building workspace, newest first."""
+    from server.map_build import list_places
+    return {"root": str(_config.MAP_BUILD_ROOT), "places": list_places(_config.MAP_BUILD_ROOT)}
 
 
 @app.get("/existing-topomap")
 def existing_topomap():
-    """Serve existing A7 topo map data for the builder's reference background."""
-    import re as _re
-    artifact_path = Path(
-        "/Users/shingchou/.claude/projects/-Users-shingchou-Desktop-APPNAV-ios/"
-        "a6b51ce6-65fa-4d5b-ad57-358da0cc2412/tool-results/"
-        "artifact-fcf22acb-1789444754-adea.html"
-    )
-    if not artifact_path.exists():
-        raise HTTPException(status_code=404, detail="existing topo map artifact not found")
-    html = artifact_path.read_text(encoding="utf-8")
-    m = _re.search(
-        r'<script id="topodata" type="application/json">(.*?)</script>', html, _re.DOTALL
-    )
-    if not m:
-        raise HTTPException(status_code=500, detail="could not parse artifact topodata")
-    data = json.loads(m.group(1))
-    nodes = []
-    for ph in data["ph"]:
-        ocr_texts = [o["t"] for o in ph.get("o", []) if o.get("t")]
-        nodes.append({"id": ph["id"], "x": ph["x"], "y": ph["y"],
-                       "sn": ph.get("sn", ""), "labels": ocr_texts[:3]})
-    edges = [{"a": w["a"], "b": w["b"]} for w in data.get("w", [])]
+    """Reference map drawn under the builder: the Neo4j place MAP_BUILD_REF_PLACE (if set)."""
+    place = _config.MAP_BUILD_REF_PLACE
+    if not place:
+        raise HTTPException(status_code=404, detail="MAP_BUILD_REF_PLACE not set")
+    neo4j = get_neo4j()
+    if neo4j is None:
+        raise HTTPException(status_code=503, detail="Neo4j not configured or not connected")
+    ref = neo4j.load_reference_map(place)
+    nodes = [{"id": p.nid, "x": p.pdr_x, "y": p.pdr_y, "sn": p.session,
+              "labels": [o.ocr_text for o in p.objects if o.ocr_text][:3]}
+             for p in ref.photos.values()]
+    edges = [{"a": e["from"], "b": e["to"]} for e in ref.walkway_edges]
     return JSONResponse({"nodes": nodes, "edges": edges})
 
 
 @app.get("/topomap-data")
-def topomap_data():
-    """Serve the generated topomap JSON."""
-    p = Path("/private/tmp/claude-501/-Users-shingchou-Desktop-APPNAV-ios/a6b51ce6-65fa-4d5b-ad57-358da0cc2412/scratchpad/topomap.json")
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="topomap not generated yet")
-    return JSONResponse(json.loads(p.read_text()))
+def topomap_data(place: str = Query(...)):
+    """The builder's input: <workspace>/topomap.json (from 「路線」 or build_map_v2_topomap.py)."""
+    topo = _read_topomap(_ws(place))
+    if topo is None:
+        raise HTTPException(status_code=404, detail=f"「{place}」還沒有路線：按「路線…」選要匯入的 Sensor Lab 資料")
+    return JSONResponse(topo)
+
+
+@app.get("/topomap-sources")
+def topomap_sources(place: str = Query("")):
+    """Sensor Lab exports the builder can import, and the walks the store's workspace uses now
+    (no place yet = a new store: nothing in use)."""
+    from server.map_build import list_sources
+    ws = _ws(place) if place.strip() else None
+    topo = (_read_topomap(ws) if ws else None) or {}
+    walks = topo.get("walks") or [{"set": s, "source": "", "nodes": n}
+                                  for s, n in (topo.get("stats", {}).get("sets") or {}).items()]
+    return {"place": topo.get("place", place), "walks": walks,
+            "roots": [str(r) for r in _config.MAP_BUILD_SOURCES],
+            "sources": list_sources(_config.MAP_BUILD_SOURCES, ws)}
+
+
+@app.post("/topomap-sources/upload")
+async def topomap_sources_upload(file: UploadFile = File(...), place: str = Query(...)):
+    """A Sensor Lab .zip uploaded from the builder → <workspace>/imports/<name>.zip."""
+    import io
+    import re as _re
+    import zipfile
+    from server.map_build import CSV_NAME, IMPORTS_DIR
+    data = await file.read()
+    if len(data) > 1024 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="zip 超過 1 GB")
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            if not any(n.endswith(CSV_NAME) for n in zf.namelist()):
+                raise HTTPException(status_code=422, detail=f"zip 裡沒有 {CSV_NAME}（不是 Sensor Lab 匯出）")
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=422, detail="不是 zip 檔")
+    folder = _ws(place) / IMPORTS_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = _re.sub(r'[\\/:*?"<>|]+', "_", Path(file.filename or "walk").stem).strip() or "walk"
+    out, k = folder / f"{stem}.zip", 1
+    while out.exists():
+        k += 1
+        out = folder / f"{stem}_{k}.zip"
+    out.write_bytes(data)
+    return {"path": str(out.resolve()), "name": out.stem}
+
+
+@app.post("/topomap-walks")
+def topomap_walks(payload: dict = Body(...)):
+    """(Re)build the store's topomap.json from the chosen Sensor Lab exports (paths from
+    /topomap-sources). A store name with no workspace yet starts a new one. Walks already in
+    the workspace keep their set id; new ones get the next unused id."""
+    from server.map_build import assign_sets, build_workspace, list_sources
+    place = str(payload.get("place") or "").strip()
+    chosen = [str(p) for p in payload.get("sources") or []]
+    if not place:
+        raise HTTPException(status_code=422, detail="請填店名（Neo4j place）")
+    if not chosen:
+        raise HTTPException(status_code=422, detail="至少選一條路線")
+    ws = _ws(place)
+    # the store's own uploads, plus zips uploaded under the store the dialog was opened from
+    dirs = {ws} | ({_ws(str(payload["from_place"]))} if str(payload.get("from_place") or "").strip() else set())
+    allowed = {e["path"] for d in dirs for e in list_sources(_config.MAP_BUILD_SOURCES, d)}
+    bad = [p for p in chosen if str(Path(p).resolve()) not in allowed]
+    if bad:
+        raise HTTPException(status_code=422, detail=f"不在可選的來源裡：{bad[0]}")
+    walks, next_set = assign_sets(_read_topomap(ws), [Path(p) for p in chosen])
+    try:
+        topo, report = build_workspace(place, walks, ws, next_set)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    log.info("topomap rebuilt for %s: %s", place, " | ".join(report))
+    return {"report": report, "nodes": len(topo["nodes"]), "walks": topo.get("walks", []),
+            "place": place, "folder": ws.name}
+
+
+@app.get("/topomap-suggest")
+def topomap_suggest(place: str = Query(...)):
+    """DINOv2 merge suggestions for the builder (loop closures, same spot on two walks, a
+    waypoint on another walk's edge). Photo embeddings are cached in
+    <workspace>/dino_embeddings.pkl ("<set>/<file>" → vector); the first call embeds every
+    photo (about 1 s each on CPU)."""
+    import pickle
+    from server import dino_embed
+    from server.map_v2 import photo_key, suggest_merges
+
+    ws = _ws(place)
+    topo = _read_topomap(ws)
+    if topo is None:
+        raise HTTPException(status_code=404, detail=f"「{place}」還沒有路線")
+    nodes = topo["nodes"]
+    cache_path = ws / "dino_embeddings.pkl"
+    emb = {}
+    if cache_path.exists():
+        try:
+            emb = pickle.loads(cache_path.read_bytes())
+        except Exception:
+            log.warning("unreadable %s — re-embedding", cache_path)
+    todo = [(photo_key(n, s), ws / n["set"] / n["photos"][s]) for n in nodes for s in n["photos"]]
+    todo = [(k, p) for k, p in todo if k not in emb and p.is_file()]
+    if todo:
+        if not dino_embed.available():
+            raise HTTPException(status_code=503, detail="DINOv2 無法載入（需要 torch + transformers）")
+        t0 = time.time()
+        for k, p in todo:
+            v = dino_embed.embed_image(str(p))
+            if v is not None:
+                emb[k] = v
+        cache_path.write_bytes(pickle.dumps(emb))
+        log.info("topomap-suggest: embedded %d photos in %.0fs", len(todo), time.time() - t0)
+    out = suggest_merges(nodes, emb)
+    out["embedded"] = len(todo)
+    return out
+
+
+_FLOORPLAN_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
+
+
+def _floorplan_file(ws: Path) -> Optional[Path]:
+    return next((p for p in ws.glob("floorplan.*") if p.suffix.lower() in _FLOORPLAN_TYPES.values()), None)
+
+
+@app.post("/topomap-floorplan")
+async def topomap_floorplan_upload(file: UploadFile = File(...), place: str = Query(...)):
+    """Floor-plan image drawn under the builder; kept as <workspace>/floorplan.<ext>."""
+    ext = _FLOORPLAN_TYPES.get((file.content_type or "").lower())
+    if not ext:
+        raise HTTPException(status_code=415, detail="請用 PNG / JPG / WebP / GIF 圖檔")
+    data = await file.read()
+    if len(data) > 30 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="圖檔超過 30 MB")
+    base = _ws(place)
+    base.mkdir(parents=True, exist_ok=True)
+    old = _floorplan_file(base)
+    if old:
+        old.unlink()
+    (base / f"floorplan{ext}").write_bytes(data)
+    return {"ok": True}
+
+
+@app.get("/topomap-floorplan")
+def topomap_floorplan(place: str = Query(...)):
+    p = _floorplan_file(_ws(place))
+    if not p:
+        raise HTTPException(status_code=404, detail="no floor plan")
+    return FileResponse(str(p), headers={"Cache-Control": "no-store"})
+
+
+@app.delete("/topomap-floorplan")
+def topomap_floorplan_delete(place: str = Query(...)):
+    p = _floorplan_file(_ws(place))
+    if p:
+        p.unlink()
+    return {"ok": True}
 
 
 @app.post("/topomap-confirm")
 async def topomap_confirm(payload: dict = Body(...)):
-    """Save the confirmed topomap selection for Neo4j upload."""
-    out = Path("/private/tmp/claude-501/-Users-shingchou-Desktop-APPNAV-ios/a6b51ce6-65fa-4d5b-ad57-358da0cc2412/scratchpad/topomap_confirmed.json")
-    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    """Save the builder's result to <workspace>/topomap_confirmed.json for upload_map_v2.py."""
+    place = str(payload.get("place") or "").strip()
+    out = _ws(place) / "topomap_confirmed.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     n_nodes = len(payload.get("nodes", []))
     n_edges = len(payload.get("edges", []))
-    primary = payload.get("primary_set", "?")
-    log.info("Topomap confirmed: primary=%s nodes=%d edges=%d", primary, n_nodes, n_edges)
-    return {"message": f"已確認！路線 {primary}，{n_nodes} 節點、{n_edges} 條邊。準備上傳到 Neo4j…"}
+    log.info("Topomap confirmed: %s nodes=%d edges=%d → %s", place, n_nodes, n_edges, out)
+    return {"message": f"已儲存到 {out.parent.name}/{out.name}（{n_nodes} 個節點、{n_edges} 條邊）。"
+                       f"下一步：python upload_map_v2.py --place \"{place}\" --dry-run",
+            "path": str(out)}

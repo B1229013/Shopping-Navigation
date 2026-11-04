@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import UIKit
 
 // MARK: - Color helpers
 extension Color {
@@ -32,6 +33,10 @@ extension Color {
 // MARK: - Date helpers
 extension Date {
     var millisecondsSince1970: Double { timeIntervalSince1970 * 1000 }
+
+    var isToday: Bool { Calendar.current.isDateInToday(self) }
+    var isThisWeek: Bool { Calendar.current.isDate(self, equalTo: Date(), toGranularity: .weekOfYear) }
+    var isThisMonth: Bool { Calendar.current.isDate(self, equalTo: Date(), toGranularity: .month) }
 
     static func from(milliseconds: Double) -> Date {
         Date(timeIntervalSince1970: milliseconds / 1000)
@@ -99,5 +104,29 @@ extension View {
         self
             .frame(maxWidth: maxWidth)
             .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Tap-anywhere to dismiss the keyboard (applied app-wide)
+final class _KBDismissTarget: NSObject {
+    @objc func dismiss() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+enum KeyboardDismisser {
+    private static let target = _KBDismissTarget()
+    static func install() {
+        DispatchQueue.main.async {
+            guard let window = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .flatMap({ $0.windows })
+                .first(where: { $0.isKeyWindow }) else { return }
+            if window.gestureRecognizers?.contains(where: { $0.name == "kbDismiss" }) == true { return }
+            let tap = UITapGestureRecognizer(target: target, action: #selector(_KBDismissTarget.dismiss))
+            tap.cancelsTouchesInView = false
+            tap.name = "kbDismiss"
+            window.addGestureRecognizer(tap)
+        }
     }
 }

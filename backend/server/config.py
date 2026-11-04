@@ -9,15 +9,15 @@ from pathlib import Path
 # Project root (where this repo lives)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Load .env from project root (Shopping-Navigation/.env)
-_dotenv = PROJECT_ROOT.parent / ".env"
-if _dotenv.exists():
-    for line in _dotenv.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, _, v = line.partition("=")
-            v = v.split("#")[0].strip()
-            os.environ.setdefault(k.strip(), v)
+# Load .env — check project root first, then parent (Shopping-Navigation/.env)
+for _dotenv in [PROJECT_ROOT / ".env", PROJECT_ROOT.parent / ".env"]:
+    if _dotenv.exists():
+        for line in _dotenv.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                v = v.split("#")[0].strip()
+                os.environ.setdefault(k.strip(), v)
 
 # Model weights — check local project first, then WSL paths
 _LOCAL_MODELS = PROJECT_ROOT / "models"
@@ -75,6 +75,20 @@ SAM_WEIGHTS = _LOCAL_MODELS / "sam_vit_h_4b8939.pth"
 OUTPUT_ROOT = PROJECT_ROOT / "output" / "sessions"
 # Hand-corrected PDR waypoint maps (see server/editor_map.py); one *.json per place
 EDITOR_MAP_DIR = PROJECT_ROOT / "maps"
+# Where /path routes come from: "neo4j" = the Neo4j reference map itself (one set of
+# coordinates with localization) + maps/neo4j_links/<place>.json for missing links and
+# the entrance; "editor" = the hand-corrected maps/*.json walks.
+ROUTE_MAP_SOURCE = os.environ.get("ROUTE_MAP_SOURCE", "neo4j").strip().lower()
+# Building a new store map (server/map_v2.py): one workspace folder per store under this root
+# (MAP_BUILD_ROOT/<店名>/ holds topomap.json, <set>/ photos, topomap_confirmed.json, …; see
+# server/map_build.workspace_for), and an optional Neo4j place drawn under the builder as a
+# reference (e.g. an older map of the same store). MAP_BUILD_DIR is the old name of the root.
+MAP_BUILD_ROOT = Path(os.environ.get("MAP_BUILD_ROOT", "") or os.environ.get("MAP_BUILD_DIR", "")
+                      or PROJECT_ROOT / "output" / "mapbuild")
+MAP_BUILD_REF_PLACE = os.environ.get("MAP_BUILD_REF_PLACE", "").strip()
+# Folders the builder's 「路線」 dialog lists Sensor Lab exports from (os.pathsep-separated)
+MAP_BUILD_SOURCES = [Path(p) for p in os.environ.get("MAP_BUILD_SOURCES", "").split(os.pathsep) if p.strip()] \
+    or [PROJECT_ROOT / "legacy" / "testPDR", PROJECT_ROOT / "testPDR"]
 
 # LLM service — OpenAI GPT-4o
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -109,6 +123,10 @@ GENERIC_INDOOR_OBJECTS = [
     # 額外補充
     "refrigerator", "water dispenser", "shelf", "trash can", "poster",
 ]
+# Occluders — also detected (Mode A) so photo_quality can warn when they block the view;
+# dropped from localization items (server._build_localization_items). Kept out of
+# GENERIC_INDOOR_OBJECTS, which also filters goal words ("find a shopping cart").
+OCCLUDER_PROMPTS = ["person", "shopping cart"]
 
 # TASK 3 — crop-verify a goal detection with the VLM before trusting it.
 # Disabled under test mode so the offline suite never makes a network call.
@@ -127,18 +145,98 @@ OCR_MAX_RESULTS = int(os.environ.get("OCR_MAX_RESULTS", "15"))
 # Grid size for spatial matching (3 = 3×3, 4 = 4×4, 5 = 5×5)
 GRID_N = int(os.environ.get("GRID_N", "4"))
 
+# Localization fusion weights "dino,sensor,grid" (see server/loc_fusion.py).
+# Only applies when the phone sends DINOv2 top-K and/or a calibrated map position;
+# "0,0,1" restores grid-only localization.
+LOC_FUSION_WEIGHTS = os.environ.get("LOC_FUSION_WEIGHTS", "4,1,1")
+
+# Adaptive fusion (eval/fusion_sweep.py policy): when the phone sends the distance
+# walked since its last photo fix, the sensor weight follows the expected PDR error
+#   σ = LOC_SENSOR_SIGMA0 + LOC_DRIFT_RATE · distance,  w_sensor = min(CAP, C / σ)
+# and the dino / grid weights come from LOC_FUSION_WEIGHTS. LOC_DRIFT_RATE should be
+# re-measured with SensorTestView on known routes.
+LOC_FUSION_ADAPTIVE = os.environ.get("LOC_FUSION_ADAPTIVE", "1") != "0"
+LOC_SENSOR_SIGMA0 = float(os.environ.get("LOC_SENSOR_SIGMA0", "1.0"))
+LOC_DRIFT_RATE = float(os.environ.get("LOC_DRIFT_RATE", "0.05"))
+LOC_SENSOR_C = float(os.environ.get("LOC_SENSOR_C", "40"))
+LOC_SENSOR_CAP = float(os.environ.get("LOC_SENSOR_CAP", "40"))
+# Scale the grid weight by min(1, detected_objects / N); 0 = off (the sweep found no gain).
+LOC_GRID_NFULL = float(os.environ.get("LOC_GRID_NFULL", "0"))
+# Scale the DINOv2 weight by min(1, (top1 − top2 cosine) / G); 0 = off.
+LOC_DINO_GAP_FULL = float(os.environ.get("LOC_DINO_GAP_FULL", "0.05"))
+
+# v2 fusion (loc_fusion.fuse_v2): posterior over every node from image evidence, the
+# phone's map position (Gaussian, σ from distance walked) and walkability from the last
+# fix. Replaces the weighted average above whenever the phone sends DINOv2 / position.
+LOC_FUSION_V2 = os.environ.get("LOC_FUSION_V2", "1") != "0"
+# k(σ) "k_min,k_max,k_no_sensor" for the phone's DINOv2 top-K evidence (iOS):
+# image weight at σ ≤ 2 m, at σ ≥ 5 m, and before the first fix (loc_fusion.ImageK).
+LOC_PHONE_IMAGE_K = os.environ.get("LOC_PHONE_IMAGE_K", "0.25,4,2")
+# Ask for a second photo (turn ~90° on the spot) when the best node's probability is
+# below this; the next photo within SECOND_PHOTO_WINDOW_S and < SECOND_PHOTO_MAX_MOVE_M
+# of walking adds its image evidence to this one's.
+SECOND_PHOTO_BELOW = float(os.environ.get("SECOND_PHOTO_BELOW", "0.4"))
+SECOND_PHOTO_WINDOW_S = float(os.environ.get("SECOND_PHOTO_WINDOW_S", "120"))
+SECOND_PHOTO_MAX_MOVE_M = float(os.environ.get("SECOND_PHOTO_MAX_MOVE_M", "3"))
+# Places whose aisle-number signs feed localization (server/aisle_signs.py), "|"-separated.
+# The row table and the "≥ 3 numbers = central walkway" rule were checked only on this
+# store's layout (eval/route1_eval.py); add another store after checking it there.
+AISLE_SIGN_PLACES = {p.strip() for p in os.environ.get("AISLE_SIGN_PLACES", NEO4J_PLACE).split("|")
+                     if p.strip()}
+
+# Server-side DINOv2 image evidence (server/locate_fusion.server_image_evidence), for
+# phones that do not run DINOv2 themselves (Android): when a photo arrives without
+# dino_topk, the server embeds it (facebook/dinov2-base, needs torch + transformers)
+# and fuses DINOv2 : objects : OCR at 5 : 0.5 : 0.5 against DINO_SIDECAR_PATH (one
+# 768-d vector per reference photo, keyed by photo file name). Missing model or
+# sidecar → falls back to grid matching as before.
+LOC_SERVER_DINO = os.environ.get("LOC_SERVER_DINO", "1") != "0"
+DINO_SIDECAR_PATH = os.environ.get("DINO_SIDECAR_PATH",
+                                   str(Path(__file__).resolve().parent.parent / "dino_sidecar.pkl"))
+# k(σ) "k_min,k_max,k_no_sensor" for that evidence in fuse_v2. From 5-fold cross-
+# validation (grouped by node) over 268 held-out 0916 photos with simulated walks:
+# average top-1 68.0 % vs 43.1 % with the phone-evidence k (0.25,4,2) and 65.7 %
+# image-only. k_no_sensor 8 names a node for 98.5 % of first photos (2 → 27.6 %).
+LOC_SERVER_IMAGE_K = os.environ.get("LOC_SERVER_IMAGE_K", "32,64,8")
+# Object-to-object 上下左右 relations (server/object_relations.py) added to the server image
+# evidence: fused_n += W · relation consistency with node n's best directional photo.
+# On (team decision 2026-10-22) at 0.05, the weight picked on held-out walks; 0 = off.
+# On the 376 lab1019 photos no weight beat the server without it (44.7 % Top-1; 42.6–44.9 %
+# when W is picked on the other walks): eval/results/object_relations_lab1019.md.
+LOC_RELATION_WEIGHT = float(os.environ.get("LOC_RELATION_WEIGHT", "0.05"))
+# Load the map's ADJACENT object pairs (map_v2, 3×3 grid cells) for the grid matcher's
+# spatial bonus (visual_localization.SPATIAL_BONUS_COEFF; from APPNAV_ios fe4c851, with its
+# direction reading fixed). Only the grid path uses it: a phone that sends dino_topk (iOS)
+# and maps without DINOv2; server-side DINOv2 does not. On (team decision 2026-10-22);
+# 0 = off. On the 376 lab1019 photos it lowered the grid ranking (Top-1 13.6 → 11.2 % at
+# 0.10) and moved the phone-DINOv2 path by +0.8 pt (37.5 → 38.3 %, 3 photos) —
+# eval/results/relations_compare_lab1019.md.
+LOC_ADJACENT = os.environ.get("LOC_ADJACENT", "1") != "0"
+
+# Fail at startup, not on every photo, if either k(σ) setting is malformed.
+from server.loc_fusion import parse_image_k as _parse_image_k  # noqa: E402
+_parse_image_k(LOC_PHONE_IMAGE_K)
+_parse_image_k(LOC_SERVER_IMAGE_K)
+
+# Grid-matching weight overrides, e.g. "landmark=6,ocr=3,rarity_mode=idf"
+# (keys: see visual_localization.apply_weight_overrides). Empty = code defaults.
+LOC_GRID_WEIGHTS = os.environ.get("LOC_GRID_WEIGHTS", "")
+
 # VLM multi-round perception (3 = run 3 rounds, keep stable detections appearing 2+/3)
 VLM_ROUNDS = int(os.environ.get("VLM_ROUNDS", "1"))
 
 # VLM 3rd pass — extra perception pass focusing on distinctive features
 VLM_PASS3 = os.environ.get("VLM_PASS3", "1") != "0"
 
-# Hybrid embedding similarity (hybrid_max = max(char_sim, embedding_cosine_sim))
+# Hybrid embedding similarity (hybrid_max = max(char_sim, embedding_cosine_sim)) for object
+# labels. The reference map's label vectors are fetched once and kept in EMBEDDING_CACHE_PATH
+# (.npz, or the older .json); a photo's labels are embedded per photo (one small request).
+# Until 2026-10 the cache only existed under REF_PHOTO_ROOT, which deployments do not set, so
+# label matching was character-only (eval/results/weight_sweep_lab1019_*: 44.7% → 48.1%).
 EMBEDDING_ENABLED = os.environ.get("EMBEDDING_ENABLED", "1") != "0"
-EMBEDDING_CACHE_PATH = os.environ.get(
-    "EMBEDDING_CACHE_PATH",
-    str(Path(os.environ.get("REF_PHOTO_ROOT", "")) / "檢索圖片" / "embedding_cache" / "label_embeddings.json")
-) if os.environ.get("REF_PHOTO_ROOT") else ""
+EMBEDDING_CACHE_PATH = os.environ.get("EMBEDDING_CACHE_PATH") or (
+    str(Path(os.environ["REF_PHOTO_ROOT"]) / "檢索圖片" / "embedding_cache" / "label_embeddings.json")
+    if os.environ.get("REF_PHOTO_ROOT") else str(PROJECT_ROOT / "output" / "label_embeddings.npz"))
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 
 # VLM Re-ranking (optional, adds ~10s per photo for improved accuracy)

@@ -12,16 +12,21 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from math import log
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from server.neo4j_client import RefMap
+from server.neo4j_client import DirectionalRef, RefMap
 
 log_ = logging.getLogger(__name__)
 
-W_V, W_N, W_O = 5.0, 0.5, 0.5
+# DINOv2 : objects : OCR. Only the ratios matter (the node scores are rescaled to 0..2).
+# 5 : 0.5 : 0.5 (legacy 5-fold CV on 0916) → 1 : 0.1 : 0.3 after the 2026-10 weight sweep on
+# the lab1019 test walk with 「中文 English」 object names and embedding similarity
+# (eval/results/weight_sweep_lab1019_bilingual_embed.md: 46.5% → 48.1% Top-1).
+W_V, W_N, W_O = 1.0, 0.1, 0.3
 NODE_SIM_THRESHOLD = 0.55
 
 
@@ -65,6 +70,7 @@ def build_fusion_index(
             entries.append({
                 "nid": nid,
                 "slot": dp.slot,
+                "photo": dp,
                 "labels": labels,
                 "ocrset": ocrset,
                 "emb": emb,
@@ -79,7 +85,7 @@ def build_fusion_index(
                     ocrset.add(t)
             emb = _lookup_emb(dino_embs, node.photo_file)
             entries.append({
-                "nid": nid, "slot": "all",
+                "nid": nid, "slot": "all", "photo": None,
                 "labels": labels, "ocrset": ocrset, "emb": emb,
             })
 
@@ -114,15 +120,18 @@ def _node_score(q_labels: List[str], r_labels: List[str]) -> float:
     return tot / len(q_labels) if q_labels else 0.0
 
 
-def fusion_localize(
+def best_photo_per_node(
     index: dict,
     q_emb: Optional[np.ndarray],
     q_labels: List[str],
     q_ocr_tokens: List[str],
-    top_k: int = 5,
-) -> List[Tuple[int, float]]:
-    """Return [(node_id, fused_score)] ranked high→low."""
+) -> Dict[int, Tuple[float, dict]]:
+    """{node_id: (fused_score, entry)} — each node's most similar reference photo.
+    The entry's "photo" is that DirectionalRef (None for a node without directional
+    photos), so the winner also says which way the user is facing."""
     entries = index["entries"]
+    if not entries:
+        return {}
     idf = index["idf"]
     DEF = index["def_idf"]
     q_ocr = {_norm_ocr(t) for t in (q_ocr_tokens or []) if _norm_ocr(t)}
@@ -140,19 +149,172 @@ def fusion_localize(
             if shared:
                 ocr[k] = sum(idf.get(t, DEF) for t in shared) / sum(idf.get(t, DEF) for t in q_ocr)
 
-    if len(entries) == 0:
-        return []
-
     def mm(a):
         lo, hi = a.min(), a.max()
         return (a - lo) / (hi - lo) if hi > lo else a * 0
 
     fused = W_V * mm(vis) + W_N * mm(nod) + W_O * ocr
 
-    best = {}
+    best: Dict[int, Tuple[float, dict]] = {}
     for k, e in enumerate(entries):
-        if e["nid"] not in best or fused[k] > best[e["nid"]]:
-            best[e["nid"]] = fused[k]
+        if e["nid"] not in best or fused[k] > best[e["nid"]][0]:
+            best[e["nid"]] = (float(fused[k]), e)
+    return best
 
-    ranked = sorted(best.items(), key=lambda x: x[1], reverse=True)
+
+def fusion_localize(
+    index: dict,
+    q_emb: Optional[np.ndarray],
+    q_labels: List[str],
+    q_ocr_tokens: List[str],
+    top_k: int = 5,
+) -> List[Tuple[int, float]]:
+    """Return [(node_id, fused_score)] ranked high→low."""
+    best = best_photo_per_node(index, q_emb, q_labels, q_ocr_tokens)
+    ranked = sorted(((nid, s) for nid, (s, _) in best.items()), key=lambda x: x[1], reverse=True)
     return ranked[:top_k] if top_k else ranked
+
+
+# ── Server-side image evidence for loc_fusion.fuse_v2 ─────────────────────
+#
+# For phones that do not run DINOv2 (Android): embed the uploaded photo here and use
+# the fused DINOv2 + object + OCR score as fuse_v2's image evidence, rescaled to 0..2
+# per photo (best node 2, worst 0) — the scale config LOC_SERVER_IMAGE_K was tuned on.
+
+_sidecar: dict = {"path": None, "embs": None}
+_index_cache: dict = {}
+
+
+def _load_sidecar(path: str) -> Optional[Dict[str, np.ndarray]]:
+    if _sidecar["path"] != path:
+        import pickle
+        from pathlib import Path
+        embs = None
+        if path and Path(path).is_file():
+            try:
+                with open(path, "rb") as f:
+                    embs = pickle.load(f)
+                log_.info("DINOv2 sidecar: %d reference embeddings from %s", len(embs), path)
+            except Exception as e:  # corrupt / incompatible pickle → no server DINOv2
+                log_.warning("DINOv2 sidecar %s unreadable: %s", path, e)
+        else:
+            log_.warning("DINOv2 sidecar not found: %s", path)
+        _sidecar.update(path=path, embs=embs)
+    return _sidecar["embs"]
+
+
+_combined_cache: dict = {"key": None, "embs": None}
+
+
+def _reference_embeddings(ref_map: RefMap, sidecar: Optional[Dict[str, np.ndarray]]):
+    """Sidecar vectors plus DirPhoto.dino vectors from Neo4j (Neo4j wins), keyed by
+    photo_file. The same dict object is returned while the inputs stay the same, so the
+    fusion index cache below keeps working."""
+    from_db = {dp.photo_file: dp.dino for node in ref_map.photos.values()
+               for dp in node.directional_photos if getattr(dp, "dino", None)}
+    if not from_db:
+        return sidecar
+    key = (id(ref_map), id(sidecar))
+    if _combined_cache["key"] != key:
+        embs = dict(sidecar or {})
+        embs.update({k: np.asarray(v, dtype=np.float32) for k, v in from_db.items()})
+        _combined_cache.update(key=key, embs=embs)
+        log_.info("DINOv2 reference vectors: %d from Neo4j, %d in total", len(from_db), len(embs))
+    return _combined_cache["embs"]
+
+
+def _index_for(ref_map: RefMap, embs: Dict[str, np.ndarray]) -> dict:
+    # RefMap is cached per place by the Neo4j client, so its id is a stable key.
+    key = (id(ref_map), id(embs))
+    if key not in _index_cache:
+        _index_cache.clear()
+        _index_cache[key] = build_fusion_index(ref_map, embs)
+    return _index_cache[key]
+
+
+def _ensure_label_vectors(index: dict, q_labels: List[str]) -> None:
+    """Object labels are compared with max(character, embedding) similarity
+    (visual_localization._hybrid_max_sim), which only uses embeddings both labels have:
+    the map's labels are fetched once and saved, the photo's on every call."""
+    from server import visual_localization as VL
+    if not VL._load_embedding_cache():
+        return
+    if "label_list" not in index:
+        index["label_list"] = sorted({l for e in index["entries"] for l in e["labels"]})
+    VL.ensure_label_embeddings(index["label_list"], persist=True)   # no-op once cached
+    VL.ensure_label_embeddings(q_labels)
+
+
+@dataclass
+class ServerImageEvidence:
+    scores: Dict[int, float]                  # nid → 0..2 image evidence
+    best_photo: Dict[int, DirectionalRef]     # nid → its most similar directional photo
+
+
+def add_relation_evidence(
+    best: Dict[int, Tuple[float, dict]],
+    q_items: List[dict],
+    rarity: Dict[str, float],
+    weight: float,
+) -> Dict[int, float]:
+    """{nid: fused + weight · 上下左右 consistency} — the photo's objects against the objects
+    of each node's best directional photo (object_relations.relation_score). q_items:
+    [{"label", "box": [x1, y1, x2, y2] 0..1}]."""
+    from server import object_relations as R
+    scores = {nid: s for nid, (s, _) in best.items()}
+    if weight <= 0 or not q_items:
+        return scores
+    query = [(it.get("label", ""), it.get("box")) for it in q_items]
+    for nid, (s, e) in best.items():
+        dp = e.get("photo")
+        if dp is None:
+            continue
+        ref = [(o.label_norm or o.label, o.bbox) for o in dp.objects]
+        scores[nid] = s + weight * R.relation_score(query, ref, _embedding_sim, rarity=rarity,
+                                                    min_sim=NODE_SIM_THRESHOLD)
+    return scores
+
+
+def _rarity_for(index: dict) -> Dict[str, float]:
+    if "label_rarity" not in index:
+        from server import object_relations as R
+        index["label_rarity"] = R.label_rarity(e["labels"] for e in index["entries"])
+    return index["label_rarity"]
+
+
+def server_image_evidence(
+    ref_map: RefMap,
+    image_path: str,
+    q_labels: List[str],
+    q_ocr_tokens: List[str],
+    sidecar_path: str,
+    q_items: Optional[List[dict]] = None,
+    relation_weight: float = 0.0,
+) -> Optional[ServerImageEvidence]:
+    """{nid: 0..2} image evidence for every reference node plus the directional photo
+    that scored it, or None when the DINOv2 model, the sidecar or the photo's embedding
+    is unavailable (caller falls back). relation_weight > 0 adds the objects' 上下左右
+    consistency (q_items carry the boxes) before the rescale."""
+    from pathlib import Path
+    embs = _reference_embeddings(ref_map, _load_sidecar(sidecar_path))
+    if not embs or not ref_map.photos or not Path(image_path).is_file():
+        return None
+    from server import dino_embed
+    q_emb = dino_embed.embed_image(image_path)
+    if q_emb is None:
+        return None
+    index = _index_for(ref_map, embs)
+    if not any(e["emb"] is not None for e in index["entries"]):
+        log_.warning("DINOv2 sidecar has no embedding for any reference photo of this place")
+        return None
+    _ensure_label_vectors(index, q_labels)
+    best = best_photo_per_node(index, q_emb, q_labels, q_ocr_tokens)
+    if not best:
+        return None
+    scores = add_relation_evidence(best, q_items or [], _rarity_for(index), relation_weight)
+    best_photo = {nid: e["photo"] for nid, (_, e) in best.items() if e["photo"] is not None}
+    lo, hi = min(scores.values()), max(scores.values())
+    if hi - lo < 1e-9:
+        return ServerImageEvidence({nid: 0.0 for nid in ref_map.photos}, best_photo)
+    return ServerImageEvidence(
+        {nid: 2.0 * (scores.get(nid, lo) - lo) / (hi - lo) for nid in ref_map.photos}, best_photo)

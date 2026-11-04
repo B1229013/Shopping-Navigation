@@ -19,6 +19,7 @@ Three matching strategies:
 from __future__ import annotations
 
 import base64
+import functools
 import io
 import json
 import logging
@@ -33,6 +34,8 @@ import numpy as np
 import requests
 from PIL import Image, ImageOps
 
+from server.loc_fusion import (AISLE_WEIGHT, FusionWeights, ImageK, estimate_position, fuse_candidates,
+                               fuse_v2, image_evidence)
 from server.neo4j_client import Neo4jClient, RefMap, RefPhotoNode
 
 log = logging.getLogger(__name__)
@@ -40,63 +43,101 @@ log = logging.getLogger(__name__)
 # ── Embedding cache for hybrid_max similarity ───────────────────────────
 _emb_cache: Dict[str, np.ndarray] = {}
 _emb_loaded = False
+_emb_on = False                 # embeddings usable: cache file loaded and/or an API key to fetch
+_emb_persisted: set = set()     # labels stored in the cache file (the reference map's)
+_EMB_BATCH = 256
+_EMB_RETRY_S = 300              # after a failed request, don't try again for this long
+_emb_retry_at = 0.0
 
 
 def _load_embedding_cache() -> bool:
-    """Load pre-computed label embeddings from cache file. Returns True if loaded."""
-    global _emb_cache, _emb_loaded
+    """Load the label-embedding cache file once. Returns whether hybrid similarity is on:
+    EMBEDDING_ENABLED and (vectors on disk or an API key to fetch them)."""
+    global _emb_loaded, _emb_on
     if _emb_loaded:
-        return bool(_emb_cache)
+        return _emb_on
     _emb_loaded = True
 
-    from server.config import EMBEDDING_ENABLED, EMBEDDING_CACHE_PATH
+    from server.config import EMBEDDING_CACHE_PATH, EMBEDDING_ENABLED, EMBEDDING_MODEL, OPENAI_API_KEY
     if not EMBEDDING_ENABLED or not EMBEDDING_CACHE_PATH:
         return False
-
     cache_path = Path(EMBEDDING_CACHE_PATH)
-    if not cache_path.exists():
-        log.warning("Embedding cache not found: %s", cache_path)
-        return False
+    if cache_path.exists():
+        try:
+            if cache_path.suffix == ".npz":
+                z = np.load(cache_path, allow_pickle=False)
+                if str(z["model"]) != EMBEDDING_MODEL:
+                    raise ValueError(f"cache is {z['model']}, config wants {EMBEDDING_MODEL}")
+                vecs = z["vectors"].astype(np.float32)
+                data = dict(zip(z["labels"].tolist(), vecs))
+            else:
+                data = {label: np.array(vec, dtype=np.float32)
+                        for label, vec in json.loads(cache_path.read_text(encoding="utf-8")).items()}
+            _emb_cache.update(data)
+            _emb_persisted.update(data)
+            log.info("Loaded %d label embeddings from %s", len(data), cache_path)
+        except Exception as e:
+            log.warning("Failed to load embedding cache %s: %s", cache_path, e)
+    _emb_on = bool(_emb_cache) or bool(OPENAI_API_KEY)
+    if not _emb_on:
+        log.warning("Label embeddings off: no cache at %s and no OPENAI_API_KEY", cache_path)
+    return _emb_on
 
-    try:
-        data = json.loads(cache_path.read_text(encoding="utf-8"))
-        _emb_cache.update({label: np.array(vec, dtype=np.float32) for label, vec in data.items()})
-        log.info("Loaded %d label embeddings from %s", len(_emb_cache), cache_path)
-        return True
-    except Exception as e:
-        log.warning("Failed to load embedding cache: %s", e)
-        return False
+
+def ensure_label_embeddings(labels: List[str], persist: bool = False) -> int:
+    """Fetch the embeddings of labels not cached yet (OpenAI, batched); persist=True also
+    writes them to EMBEDDING_CACHE_PATH (.npz) — for the reference map's labels, which
+    are the same on every photo. Returns how many were fetched; failures leave the
+    labels without a vector (character similarity only)."""
+    if not _load_embedding_cache():
+        return 0
+    global _emb_retry_at
+    import time as _time
+    missing = list(dict.fromkeys(l for l in labels if l and l not in _emb_cache))
+    from server.config import EMBEDDING_CACHE_PATH, EMBEDDING_MODEL, OPENAI_API_KEY
+    fetched = 0
+    if missing and OPENAI_API_KEY and _time.time() >= _emb_retry_at:
+        for i in range(0, len(missing), _EMB_BATCH):
+            batch = missing[i:i + _EMB_BATCH]
+            try:
+                resp = requests.post(
+                    "https://api.openai.com/v1/embeddings",
+                    json={"input": batch, "model": EMBEDDING_MODEL},
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                    timeout=30,
+                )
+                resp.raise_for_status()
+            except Exception as e:
+                log.warning("Label embedding request failed (%d labels): %s — character similarity "
+                            "only for them; retry in %d s", len(batch), e, _EMB_RETRY_S)
+                _emb_retry_at = _time.time() + _EMB_RETRY_S
+                break
+            for item in resp.json()["data"]:
+                _emb_cache[batch[item["index"]]] = np.array(item["embedding"], dtype=np.float32)
+                fetched += 1
+    if persist:
+        new = [l for l in labels if l in _emb_cache and l not in _emb_persisted]
+        if new and str(EMBEDDING_CACHE_PATH).endswith(".npz"):
+            _emb_persisted.update(new)
+            keep = sorted(_emb_persisted)
+            try:
+                path = Path(EMBEDDING_CACHE_PATH)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".tmp.npz")
+                np.savez_compressed(tmp, model=np.array(EMBEDDING_MODEL), labels=np.array(keep),
+                                    vectors=np.stack([_emb_cache[l] for l in keep]).astype(np.float16))
+                tmp.replace(path)
+                log.info("Saved %d label embeddings to %s", len(keep), path)
+            except Exception as e:
+                log.warning("Could not save label embeddings to %s: %s", EMBEDDING_CACHE_PATH, e)
+    if fetched:
+        log.info("Fetched %d label embeddings", fetched)
+    return fetched
 
 
-def _compute_query_embeddings(labels: List[str]) -> Dict[str, np.ndarray]:
-    """Compute embeddings for query labels not in cache, via OpenAI API."""
-    missing = [l for l in labels if l and l not in _emb_cache]
-    if not missing:
-        return {}
-
-    from server.config import OPENAI_API_KEY, EMBEDDING_MODEL
-    if not OPENAI_API_KEY:
-        return {}
-
-    try:
-        resp = requests.post(
-            "https://api.openai.com/v1/embeddings",
-            json={"input": missing, "model": EMBEDDING_MODEL},
-            headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        result = {}
-        for item in resp.json()["data"]:
-            idx = item["index"]
-            vec = np.array(item["embedding"], dtype=np.float32)
-            result[missing[idx]] = vec
-            _emb_cache[missing[idx]] = vec
-        log.info("Computed %d new query embeddings", len(result))
-        return result
-    except Exception as e:
-        log.warning("Query embedding computation failed: %s", e)
-        return {}
+def _compute_query_embeddings(labels: List[str]) -> int:
+    """Embed a photo's labels that are not cached yet (kept in memory only)."""
+    return ensure_label_embeddings(labels)
 
 
 def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
@@ -132,13 +173,15 @@ class LocalizationResult:
     matched_heading: Optional[float] = None
     matched_slot: Optional[str] = None
     heading_confidence: float = 0.0
+    # the matched node's reference photo that the image matcher found most similar
+    matched_photo: Optional[str] = None
 
     top_candidates: list = None  # [(nid, score, reason), ...] for optional re-ranking
 
-    # Between-node estimation: when top-2 are adjacent and close in score
-    estimated_x: Optional[float] = None
-    estimated_y: Optional[float] = None
-    between_nodes: Optional[tuple] = None  # (nid_a, nid_b) if estimated between
+    # Map position between nodes (score-weighted mean of the top candidates), metres
+    estimated_xy: Optional[tuple] = None
+    # v2 fusion: this photo's own image evidence per node (kept for a second photo)
+    image_evidence: Optional[dict] = None
 
 
 # ── Grid-based weighted matching (primary) ────────────────────────────────
@@ -207,6 +250,40 @@ WEIGHT_GENERIC = 0.3
 RARITY_ALPHA = 1.0
 SPATIAL_BONUS_COEFF = 0.10
 IDF_AGGRESSIVE_THRESHOLD = 0.35
+# "cap"  — legacy: sim·(1+rarity·α) capped at 1.0, so an exact match (sim=1) gets no
+#          rarity credit at all and rarity only nudges partial matches.
+# "idf"  — every query object's weight is scaled by (1+rarity·α) in both numerator
+#          and denominator: rare objects count more whether matched or missed, and
+#          the score stays in [0, 1].
+RARITY_MODE = "cap"
+
+_OVERRIDABLE = {
+    "landmark": "WEIGHT_LANDMARK", "sign": "WEIGHT_SIGN", "equipment": "WEIGHT_EQUIPMENT",
+    "normal": "WEIGHT_NORMAL", "generic": "WEIGHT_GENERIC", "ocr": "WEIGHT_OCR",
+    "rarity_alpha": "RARITY_ALPHA", "spatial": "SPATIAL_BONUS_COEFF", "rarity_mode": "RARITY_MODE",
+}
+
+
+def apply_weight_overrides(spec) -> Dict[str, object]:
+    """Override grid-matching weights, e.g. "landmark=6,ocr=3,rarity_mode=idf" or a dict.
+
+    Returns the values now in effect. Unknown keys raise ValueError.
+    """
+    if isinstance(spec, str):
+        spec = dict(kv.split("=", 1) for kv in spec.split(",") if kv.strip())
+    g = globals()
+    for key, val in (spec or {}).items():
+        key = key.strip()
+        if key not in _OVERRIDABLE:
+            raise ValueError(f"unknown grid weight {key!r}; choose from {sorted(_OVERRIDABLE)}")
+        if key == "rarity_mode":
+            val = str(val).strip()
+            if val not in ("cap", "idf"):
+                raise ValueError("rarity_mode must be 'cap' or 'idf'")
+        else:
+            val = float(val)
+        g[_OVERRIDABLE[key]] = val
+    return {k: g[v] for k, v in _OVERRIDABLE.items()}
 
 
 def _size_importance(bbox_area: float) -> float:
@@ -335,7 +412,9 @@ def compute_query_spatial(items: List[dict]) -> Dict[tuple, dict]:
 
 
 def _spatial_direction_match(q_rel: dict, ref_rel: dict) -> float:
-    """Score how well a query spatial relationship matches a reference ADJACENT relationship."""
+    """How well a photo pair's relation matches the map's ADJACENT one. Both say where
+    object a is relative to b: q_rel from compute_query_spatial, ref_rel from
+    neo4j_client.adjacent_relation ({"v_rel", "h_rel", "overlap"})."""
     if not ref_rel:
         return 0.0
     matches = 0.0
@@ -378,27 +457,41 @@ def _strip_direction(s: str) -> str:
     return s if s else orig
 
 
+_CHAR_IGNORE = frozenset({' ', '/', '／', '（', '）', '「', '」'})
+
+
+@functools.lru_cache(maxsize=1 << 16)
+def _label_features(label: str):
+    """Everything _semantic_similarity derives from one label, computed once per label.
+
+    The reference map's labels are fixed and every photo compares against all of them
+    (~600k pairs per photo), so redoing the regexes per pair cost ~15 s per photo.
+    """
+    low = label.lower()
+    n = _strip_direction(low)
+    return (low, n, frozenset(n.split()),
+            frozenset(cw for cw in _CATEGORY_SIGNS if cw in low),
+            frozenset(_extract_numbers(label)),
+            frozenset(set(n) - _CHAR_IGNORE))
+
+
+@functools.lru_cache(maxsize=1 << 20)
 def _semantic_similarity(ql: str, rl: str) -> float:
-    ql_low, rl_low = ql.lower(), rl.lower()
+    ql_low, ql_n, ql_words, q_cats, q_nums, ql_chars = _label_features(ql)
+    rl_low, rl_n, rl_words, r_cats, r_nums, rl_chars = _label_features(rl)
     if ql_low == rl_low:
         return 1.0
 
-    ql_n = _strip_direction(ql_low)
-    rl_n = _strip_direction(rl_low)
     if ql_n == rl_n:
         return 0.95
 
     scores: list[float] = []
 
-    ql_words = set(ql_n.split())
-    rl_words = set(rl_n.split())
     if ql_words and rl_words:
         common = ql_words & rl_words
         if common:
             scores.append(len(common) / max(len(ql_words), len(rl_words)))
 
-    q_cats = {cw for cw in _CATEGORY_SIGNS if cw in ql_low}
-    r_cats = {cw for cw in _CATEGORY_SIGNS if cw in rl_low}
     if q_cats or r_cats:
         if q_cats and r_cats and q_cats == r_cats:
             scores.append(0.4)
@@ -407,8 +500,6 @@ def _semantic_similarity(ql: str, rl: str) -> float:
         elif q_cats != r_cats and q_cats and r_cats:
             return max(scores) if scores else 0.0
 
-    q_nums = _extract_numbers(ql)
-    r_nums = _extract_numbers(rl)
     if q_nums and r_nums:
         if q_nums & r_nums:
             scores.append(0.9)
@@ -419,8 +510,6 @@ def _semantic_similarity(ql: str, rl: str) -> float:
         ratio = min(len(ql_n), len(rl_n)) / max(len(ql_n), len(rl_n))
         scores.append(ratio if ratio > 0.4 else ratio * 0.5)
 
-    ql_chars = set(ql_n) - {' ', '/', '／', '（', '）', '「', '」'}
-    rl_chars = set(rl_n) - {' ', '/', '／', '（', '）', '「', '」'}
     if ql_chars and rl_chars:
         char_common = ql_chars & rl_chars
         jaccard = len(char_common) / len(ql_chars | rl_chars)
@@ -497,9 +586,14 @@ def weighted_grid_match(
     obj_matches: list[tuple] = []
 
     used: set[int] = set()
+    idf_mode = RARITY_MODE == "idf" and bool(rarity_map)
     for qi in query_items:
         ql, qw = qi["label"], qi["weight"]
         si = _size_importance(qi.get("bbox_area", 0.0))
+        if idf_mode:
+            # rarity of the query object itself, so the weight is the same for every
+            # candidate node; labels never seen in the map count as fully rare
+            qw *= 1.0 + rarity_map.get(ql, 1.0) * RARITY_ALPHA
         total_possible += qw * si
 
         best_s, best_m, best_i = 0.0, None, -1
@@ -513,7 +607,7 @@ def weighted_grid_match(
         if best_m and best_s > 0.25:
             used.add(best_i)
             combined = best_s
-            if rarity_map:
+            if rarity_map and not idf_mode:
                 rarity = rarity_map.get(best_m, 0.0)
                 combined = min(combined * (1.0 + rarity * RARITY_ALPHA), 1.0)
             ew = qw * si
@@ -524,7 +618,6 @@ def weighted_grid_match(
 
     base_score = total_weighted / max(total_possible, 1.0)
 
-    spatial_bonus = 0.0
     if len(obj_matches) >= 2 and query_spatial and ref_adjacent:
         spatial_hits = 0
         spatial_checks = 0
@@ -536,7 +629,7 @@ def weighted_grid_match(
                 q_rel = query_spatial.get((ql_a, ql_b))
                 if not q_rel:
                     continue
-                ref_cp = ref_adjacent.get((rl_a, rl_b)) or ref_adjacent.get((rl_b, rl_a))
+                ref_cp = ref_adjacent.get((rl_a, rl_b))      # the loader also stores b → a
                 if not ref_cp:
                     continue
                 spatial_checks += 1
@@ -547,11 +640,9 @@ def weighted_grid_match(
         if spatial_checks > 0:
             ratio = spatial_hits / spatial_checks
             total_match_weight = sum(m[3] for m in obj_matches)
-            spatial_bonus = ratio * SPATIAL_BONUS_COEFF * (
+            bonus = ratio * SPATIAL_BONUS_COEFF * (
                 spatial_weight / max(total_match_weight, 1.0))
-            base_score += spatial_bonus
-            log.debug("spatial bonus: checks=%d hits=%d ratio=%.3f bonus=%.4f",
-                       spatial_checks, spatial_hits, ratio, spatial_bonus)
+            base_score += bonus
 
     return base_score, landmark_count, {}
 
@@ -786,43 +877,6 @@ def match_by_objects(
     return scores[:top_k]
 
 
-# ── Between-node position estimation ────────────────────────────────────
-
-def _estimate_between_nodes(
-    candidates: list,
-    ref_map: RefMap,
-) -> tuple:
-    """If top-2 candidates are adjacent nodes with similar scores,
-    estimate a position between them weighted by score ratio.
-    Returns (estimated_x, estimated_y, (nid_a, nid_b)) or (None, None, None)."""
-    if len(candidates) < 2:
-        return None, None, None
-
-    nid_a, score_a, _ = candidates[0]
-    nid_b, score_b, _ = candidates[1]
-
-    if score_a <= 0 or score_b <= 0:
-        return None, None, None
-
-    node_a = ref_map.photos.get(nid_a)
-    node_b = ref_map.photos.get(nid_b)
-    if not node_a or not node_b:
-        return None, None, None
-
-    # Check adjacency
-    if nid_b not in node_a.neighbor_nids:
-        return None, None, None
-
-    # Weight toward higher-scoring node
-    total = score_a + score_b
-    w_a = score_a / total
-    w_b = score_b / total
-    est_x = node_a.pdr_x * w_a + node_b.pdr_x * w_b
-    est_y = node_a.pdr_y * w_a + node_b.pdr_y * w_b
-
-    return est_x, est_y, (nid_a, nid_b)
-
-
 # ── Main localization entry point ─────────────────────────────────────────
 
 CONFIDENT_THRESHOLD = 0.15
@@ -863,10 +917,13 @@ def _zone_boost_for_candidate(zone: str, ref_objects: list) -> float:
     return 0.0
 
 
-def estimate_node_heading(matched_ref, detected_labels, ocr_texts, confidence: float):
+def estimate_node_heading(matched_ref, detected_labels, ocr_texts, confidence: float,
+                          best_photo=None):
     """(heading_deg, slot, heading_confidence) of the user's view at ``matched_ref``.
 
-    Matches the live labels/OCR against the node's four directional photos.
+    ``best_photo``: the node's directional photo the image matcher (server DINOv2
+    fusion) found most similar — its heading is the user's. Without it, matches the
+    live labels/OCR against the node's four directional photos.
     Kept separate from :func:`localize` so the caller can re-run it whenever the
     matched node changes afterwards (e.g. VLM re-ranking) — a heading carried
     over from a different node would make every relative turn wrong.
@@ -874,6 +931,13 @@ def estimate_node_heading(matched_ref, detected_labels, ocr_texts, confidence: f
     matched_heading: Optional[float] = None
     matched_slot: Optional[str] = None
     heading_conf = 0.0
+
+    if (matched_ref and best_photo is not None
+            and any(dp.photo_file == best_photo.photo_file for dp in matched_ref.directional_photos)):
+        # Uncalibrated maps store the same heading for all four photos.
+        if len({dp.heading_deg for dp in matched_ref.directional_photos}) > 1:
+            return best_photo.heading_deg, best_photo.slot, min(confidence, 0.8)
+        return None, best_photo.slot, 0.0
 
     if matched_ref and matched_ref.directional_photos:
         from server.heading import estimate_heading, best_matching_slot, DirectionalPhoto
@@ -927,6 +991,18 @@ def localize(
     store_zone: Optional[str] = None,
     ocr_items: Optional[List[dict]] = None,
     grid_n: int = 3,
+    dino_sims: Optional[Dict[int, float]] = None,
+    sensor_pos: Optional[tuple] = None,
+    fusion_weights: Optional[FusionWeights] = None,
+    v2: bool = False,
+    sensor_sigma: Optional[float] = None,
+    reachable: Optional[set] = None,
+    extra_evidence: Optional[Dict[int, float]] = None,
+    aisle_evidence: Optional[Dict[int, float]] = None,
+    server_evidence: Optional[Dict[int, float]] = None,
+    server_best_photo: Optional[Dict[int, object]] = None,
+    server_image_k: Optional[ImageK] = None,
+    phone_image_k: Optional[ImageK] = None,
 ) -> LocalizationResult:
     """Match a user's live photo detections against the Neo4j reference map.
 
@@ -940,6 +1016,12 @@ def localize(
             Each item: {"label": str, "box": [x1,y1,x2,y2] in [0,1]}.
             When provided with boxes, uses grid matching (91.5% accuracy)
             instead of Jaccard fallback.
+        server_evidence: server-side DINOv2 fusion evidence {nid: 0..2}
+            (locate_fusion.server_image_evidence), used as the v2 image evidence when
+            the phone sent no DINOv2 top-K; fused with server_image_k.
+        server_best_photo: {nid: DirectionalRef} — the photo behind each node's
+            server_evidence; the matched node's one gives the heading.
+        phone_image_k: k(σ) for the phone-evidence path (default loc_fusion constants).
     """
     ref_map = neo4j.load_reference_map(place)
     if not ref_map.photos:
@@ -957,6 +1039,63 @@ def localize(
     else:
         candidates = match_by_objects(detected_labels, ocr_texts, ref_map, top_k=10)
         match_method = "object_set"
+
+    node_xy = {nid: (n.pdr_x, n.pdr_y) for nid, n in ref_map.photos.items()}
+    if v2 and (dino_sims or sensor_pos is not None or extra_evidence or server_evidence):
+        dsims = {n: s for n, s in (dino_sims or {}).items() if n in ref_map.photos}
+        image_k = phone_image_k
+        best_photos = {}
+        if server_evidence and not dsims:
+            # Server DINOv2 already fused objects + OCR; add only the aisle signs.
+            ev = {n: v for n, v in server_evidence.items() if n in ref_map.photos}
+            for nid, v in (aisle_evidence or {}).items():
+                ev[nid] = ev.get(nid, 0.0) + AISLE_WEIGHT * v
+            image_k = server_image_k
+            best_photos = server_best_photo or {}
+            match_method = "server_dino"
+        else:
+            ev = image_evidence(candidates, dsims, aisle_evidence)
+        combined = dict(ev)
+        for nid, v in (extra_evidence or {}).items():
+            combined[nid] = combined.get(nid, 0.0) + v
+        post = fuse_v2(combined, node_xy, sensor_pos=sensor_pos,
+                       sigma=sensor_sigma if sensor_pos is not None else None, reachable=reachable,
+                       image_k=image_k)
+        log.info("v2 localization top3: %s%s", [(c[0], round(c[1], 3)) for c in post[:3]],
+                 " (with previous photo)" if extra_evidence else "")
+        best_nid, best_p, best_reason = post[0]
+        common = dict(
+            confidence=best_p, method=match_method + "+v2",
+            runner_up_nid=post[1][0] if len(post) > 1 else None,
+            runner_up_score=post[1][1] if len(post) > 1 else 0.0,
+            top_candidates=post[:5], estimated_xy=estimate_position(post, node_xy), image_evidence=ev,
+        )
+        if best_p < CONFIDENT_THRESHOLD:
+            # Spread over many nodes: report it (and keep the evidence for a second
+            # photo) but don't name a node, so nothing downstream moves the user.
+            return LocalizationResult(
+                matched_nid=None,
+                reasoning=f"Best probability {best_p:.2f} below threshold ({best_reason})", **common)
+        matched_ref = ref_map.photos.get(best_nid)
+        best_photo = best_photos.get(best_nid)
+        matched_heading, matched_slot, heading_conf = estimate_node_heading(
+            matched_ref, detected_labels, ocr_texts, best_p, best_photo=best_photo)
+        return LocalizationResult(
+            matched_nid=best_nid, reasoning=best_reason, ref_node=matched_ref,
+            matched_heading=matched_heading, matched_slot=matched_slot, heading_confidence=heading_conf,
+            matched_photo=best_photo.photo_file if best_photo is not None else None,
+            **common,
+        )
+
+    if fusion_weights is not None and (dino_sims or sensor_pos is not None):
+        fused = fuse_candidates(candidates, {n: s for n, s in (dino_sims or {}).items()
+                                             if n in ref_map.photos},
+                                sensor_pos, node_xy, fusion_weights)
+        if fused is not candidates:
+            candidates = fused
+            match_method += "+fused"
+            log.info("Fused localization top3: %s",
+                     [(c[0], round(c[1], 3), c[2].split("]")[0] + "]") for c in candidates[:3]])
 
     if not candidates:
         return LocalizationResult(
@@ -1002,13 +1141,10 @@ def localize(
     confidence = min(best_score, 1.0)
 
     if best_score < CONFIDENT_THRESHOLD:
-        est_x, est_y, between = _estimate_between_nodes(candidates, ref_map)
         return LocalizationResult(
             matched_nid=None, confidence=confidence, method=match_method,
             reasoning=f"Best score {best_score:.2f} below threshold ({best_reason})",
             runner_up_nid=runner_nid, runner_up_score=runner_score,
-            top_candidates=candidates[:5],
-            estimated_x=est_x, estimated_y=est_y, between_nodes=between,
         )
 
     gap = best_score - runner_score
@@ -1023,9 +1159,6 @@ def localize(
     matched_heading, matched_slot, heading_conf = estimate_node_heading(
         matched_ref, detected_labels, ocr_texts, confidence)
 
-    # ── Between-node position estimation ──────────────────────────
-    est_x, est_y, between = _estimate_between_nodes(candidates, ref_map)
-
     return LocalizationResult(
         matched_nid=best_nid,
         confidence=confidence,
@@ -1038,9 +1171,8 @@ def localize(
         matched_slot=matched_slot,
         heading_confidence=heading_conf,
         top_candidates=candidates[:5],
-        estimated_x=est_x,
-        estimated_y=est_y,
-        between_nodes=between,
+        estimated_xy=estimate_position(
+            candidates, {n: (p.pdr_x, p.pdr_y) for n, p in ref_map.photos.items()}),
     )
 
 
@@ -1138,32 +1270,19 @@ def _encode_photo_b64(path: str, max_size: int = 512) -> Optional[str]:
     return base64.b64encode(buf.getvalue()).decode()
 
 
-_subfolder_cache: Dict[str, Dict[str, str]] = {}
-
 def _resolve_ref_photo(neo4j_path: str, ref_photo_root: str) -> Optional[str]:
     if not neo4j_path or not ref_photo_root:
         return None
-    root = Path(ref_photo_root)
     parts = neo4j_path.split("/", 1)
     if len(parts) == 2:
         folder = parts[0].replace("set", "")
-        resolved = root / folder / parts[1]
+        resolved = Path(ref_photo_root) / folder / parts[1]
         if resolved.exists():
             return str(resolved)
-    full = root / neo4j_path
+    full = Path(ref_photo_root) / neo4j_path
     if full.exists():
         return str(full)
-    # Search subdirectories for the filename
-    fname = Path(neo4j_path).name
-    if ref_photo_root not in _subfolder_cache:
-        index: Dict[str, str] = {}
-        for sub in root.iterdir():
-            if sub.is_dir():
-                for f in sub.iterdir():
-                    if f.is_file():
-                        index[f.name] = str(f)
-        _subfolder_cache[ref_photo_root] = index
-    return _subfolder_cache[ref_photo_root].get(fname)
+    return None
 
 
 def ref_photo_coverage(ref_map: RefMap, ref_photo_root: str) -> tuple[int, int, int]:
@@ -1310,3 +1429,9 @@ def vlm_rerank(
             continue
 
     return candidates
+
+
+# Apply LOC_GRID_WEIGHTS last, after every weight constant above is defined.
+from server.config import LOC_GRID_WEIGHTS as _LOC_GRID_WEIGHTS  # noqa: E402
+if _LOC_GRID_WEIGHTS:
+    log.info("grid weights override: %s", apply_weight_overrides(_LOC_GRID_WEIGHTS))

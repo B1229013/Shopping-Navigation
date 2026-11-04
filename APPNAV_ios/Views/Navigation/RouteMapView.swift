@@ -3,6 +3,11 @@ import SwiftUI
 
 /// Owns the editor-map route for a navigation session and drives `PathFollower`
 /// with the PDR points `NavigationSessionManager` publishes.
+///
+/// Once the session's `MapPositionEstimator` has a photo fix, the follower is fed that
+/// map-frame position directly (anchor = identity), so the dot, remaining distance and
+/// turn prompts follow every step and every photo correction. Before the first fix it
+/// falls back to the raw PDR anchored at the route start.
 @MainActor
 final class RouteFollowerModel: ObservableObject {
     @Published private(set) var route: PathResponse?
@@ -11,6 +16,10 @@ final class RouteFollowerModel: ObservableObject {
 
     private let follower = PathFollower()
     private var lastPDR: PathPoint?
+    private var lastMap: (x: Double, y: Double)?
+    private var lastMapHeading: Double?
+    /// True once fed map-frame positions (follower anchored with identity).
+    private var inMapFrame = false
     private var lastReplanAt: Date = .distantPast
     private var isLoading = false
 
@@ -22,24 +31,34 @@ final class RouteFollowerModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         let pdr = lastPDR
+        // a phone re-plan needs a position to keep; without one, anchor at the route start
+        let keepPhoneAnchor = fromPhone && state != nil
         do {
             let response: PathResponse
             if fromPhone, let s = state {
                 response = try await NavigationAPI.shared.getPath(
                     sessionId: sessionId, x: s.position.x, y: s.position.y, heading: s.headingDegrees)
             } else {
+                // map heading once photo fixes have calibrated the compass
                 response = try await NavigationAPI.shared.getPath(sessionId: sessionId,
-                                                                 heading: pdr?.headingDegrees)
+                                                                 heading: lastMapHeading ?? pdr?.headingDegrees)
             }
             route = response
             let polyline = response.polyline.map { CGPoint(x: $0[0], y: $0[1]) }
             let turns = response.turns.map { (at: CGPoint(x: $0.at[0], y: $0.at[1]), direction: $0.direction) }
             let pdrPoint = pdr.map { CGPoint(x: $0.x, y: $0.y) } ?? .zero
-            follower.setRoute(polyline: polyline, turns: turns, pdr: pdrPoint, keepAnchor: fromPhone)
-            statusMessage = nil
-            if let pdr { ingest(pdr) } else {
-                state = follower.update(pdr: pdrPoint, headingDegrees: 0)
+            if inMapFrame, let m = lastMap {
+                follower.setRoute(polyline: polyline, turns: turns, pdr: pdrPoint, keepAnchor: true)
+                let p = CGPoint(x: m.x, y: m.y)
+                follower.anchor(mapPoint: p, pdr: p)
+                state = follower.update(pdr: p, headingDegrees: lastMapHeading ?? pdr?.headingDegrees ?? 0)
+            } else {
+                follower.setRoute(polyline: polyline, turns: turns, pdr: pdrPoint, keepAnchor: keepPhoneAnchor)
+                if let pdr { ingest(pdr) } else {
+                    state = follower.update(pdr: pdrPoint, headingDegrees: 0)
+                }
             }
+            statusMessage = nil
         } catch {
             // Most likely: no editor map for this place, or the goal isn't on it.
             let text = "\(error)"
@@ -53,11 +72,26 @@ final class RouteFollowerModel: ObservableObject {
         }
     }
 
-    /// A new PDR sample from the sensors.
+    /// A new PDR sample from the sensors (raw frame — used until the first photo fix).
     func ingest(_ point: PathPoint) {
         lastPDR = point
-        guard follower.hasRoute else { return }
+        guard follower.hasRoute, !inMapFrame else { return }
         state = follower.update(pdr: CGPoint(x: point.x, y: point.y), headingDegrees: point.headingDegrees)
+    }
+
+    /// A new map-frame position from `MapPositionEstimator` (after the first photo fix).
+    func ingest(mapPosition m: (x: Double, y: Double), headingDegrees: Double, raw: PathPoint?) {
+        if let raw { lastPDR = raw }
+        lastMap = m
+        lastMapHeading = headingDegrees
+        let wasInMapFrame = inMapFrame
+        inMapFrame = true          // a route loaded later anchors in the map frame too
+        guard follower.hasRoute else { return }
+        let p = CGPoint(x: m.x, y: m.y)
+        if !wasInMapFrame {
+            follower.anchor(mapPoint: p, pdr: p)
+        }
+        state = follower.update(pdr: p, headingDegrees: headingDegrees)
     }
 
     /// True when the follower wants a re-plan and we haven't asked too recently.
@@ -84,9 +118,13 @@ struct RouteMapView: View {
             let sx = (size.width - 2 * pad) / max(bounds.width, 1)
             let sy = (size.height - 2 * pad) / max(bounds.height, 1)
             let scale = min(sx, sy)
+            let contentW = bounds.width * scale
+            let contentH = bounds.height * scale
+            let offsetX = (size.width - 2 * pad - contentW) / 2
+            let offsetY = (size.height - 2 * pad - contentH) / 2
             func toScreen(_ p: CGPoint) -> CGPoint {
-                CGPoint(x: pad + (p.x - bounds.minX) * scale,
-                        y: size.height - pad - (p.y - bounds.minY) * scale)
+                CGPoint(x: pad + offsetX + (p.x - bounds.minX) * scale,
+                        y: size.height - pad - offsetY - (p.y - bounds.minY) * scale)
             }
 
             // walkable edges + waypoints

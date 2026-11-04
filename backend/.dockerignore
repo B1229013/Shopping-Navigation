@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+output/
+models/
+.pytest_cache/
+tests/
+eval/
+*.md
